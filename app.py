@@ -123,9 +123,10 @@ defaults = {
     "gastos_fijos": [],
     "tarjetas": [],
     "gastos_tarjeta": [],
+    "gastos_recurrentes_tarjeta": [],
     "categorias": [
-        "Alimentación", "Transporte", "Alcohol",
-        "Vuelos", "Salud", "Entretenimiento", "Otros"],
+        "Alimentación", "Alimentación Inncesario","Tecnología","Alcohol y Salids","Ropa","Regalos","Mascotas",
+        "Vuelos", "Salud", "Entretenimiento","Combustible","Supermercado","Otros"],
 "cuentas_ahorro": [],
 "transferencias": [],
 }
@@ -142,6 +143,7 @@ claves = [
     "gastos_fijos",
     "tarjetas",
     "gastos_tarjeta",
+    "gastos_recurrentes_tarjeta",
     "cuentas_ahorro",
     "transferencias",
     "categorias",
@@ -441,6 +443,51 @@ if not df_tar.empty:
         st.rerun()
 
 st.header("💳 Gastos con tarjeta")
+
+
+st.header("🔁 Gastos recurrentes con tarjeta")
+
+if st.session_state.tarjetas:
+    mapa_tarjetas = {t["nombre"]: t["id"] for t in st.session_state.tarjetas}
+
+    with st.form("form_gasto_recurrente_tarjeta"):
+        nombre = st.text_input("Nombre del gasto recurrente", "Gimnasio")
+        tarjeta_nombre = st.selectbox("Tarjeta asociada", list(mapa_tarjetas.keys()))
+        categoria = st.selectbox(
+            "Categoría",
+            st.session_state.categorias + ["➕ Nueva"],
+            key="categoria_gasto_rec_tarjeta"
+        )
+
+        if categoria == "➕ Nueva":
+            categoria = st.text_input("Nueva categoría", key="nueva_categoria_gasto_rec_tarjeta")
+
+        monto = st.number_input("Monto mensual", min_value=0.0, step=10.0)
+        dia_cargo = st.number_input("Día de cargo mensual", 1, 31, 15)
+        fecha_inicio = st.date_input("Fecha inicio", fecha_inicio_sim)
+        fecha_fin = st.date_input("Fecha fin opcional", fecha_fin_sim)
+
+        if st.form_submit_button("Agregar gasto recurrente con tarjeta"):
+            if categoria not in st.session_state.categorias:
+                st.session_state.categorias.append(categoria)
+                guardar("categorias")
+
+            st.session_state.gastos_recurrentes_tarjeta.append({
+                "id": str(uuid.uuid4()),
+                "nombre": nombre,
+                "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
+                "tarjeta_nombre": tarjeta_nombre,
+                "categoria": categoria,
+                "monto": monto,
+                "dia_cargo": int(dia_cargo),
+                "fecha_inicio": fecha_inicio.isoformat(),
+                "fecha_fin": fecha_fin.isoformat()
+            })
+
+            guardar("gastos_recurrentes_tarjeta")
+            st.rerun()
+else:
+    st.info("Primero debes registrar una tarjeta de crédito.")
 
 if st.session_state.tarjetas:
     mapa = {t["nombre"]: t["id"] for t in st.session_state.tarjetas}
