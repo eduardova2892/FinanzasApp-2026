@@ -1,0 +1,38 @@
+[
+  {
+    "nombre": "Depa Miraflores",
+    "monto": 3300.0,
+    "fecha_inicio": "2026-04-01",
+    "dia_cobro": 30
+  },
+  {
+    "nombre": "Luz",
+    "monto": 200.0,
+    "fecha_inicio": "2026-04-01",
+    "dia_cobro": 28
+  },
+  {
+    "nombre": "Internet WIM",
+    "monto": 129.0,
+    "fecha_inicio": "2026-04-01",
+    "dia_cobro": 28
+  },
+  {
+    "nombre": "Cel Claro",
+    "monto": 129.0,
+    "fecha_inicio": "2026-04-01",
+    "dia_cobro": 28
+  },
+  {
+    "nombre": "Mantenimiento Depa",
+    "monto": 400.0,
+    "fecha_inicio": "2026-04-01",
+    "dia_cobro": 20
+  },
+  {
+    "nombre": "CasaMama",
+    "monto": 750.0,
+    "fecha_inicio": "2026-04-01",
+    "dia_cobro": 8
+  }
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "fecha": "2026-04-15",
+    "categoria": "Alimentación",
+    "descripcion": "",
+    "monto": 2000.0
+  },
+  {
+    "fecha": "2026-04-15",
+    "categoria": "Alcohol",
+    "descripcion": "",
+    "monto": 1000.0
+  },
+  {
+    "fecha": "2026-04-15",
+    "categoria": "Vuelos",
+    "descripcion": "",
+    "monto": 1000.0
+  },
+  {
+    "fecha": "2026-04-17",
+    "categoria": "Entretenimiento",
+    "descripcion": "",
+    "monto": 4000.0
+  },
+  {
+    "fecha": "2026-04-19",
+    "categoria": "Otros",
+    "descripcion": "",
+    "monto": 5500.0
+  },
+  {
+    "fecha": "2026-04-30",
+    "categoria": "Transporte",
+    "descripcion": "Taxis MOQ TAC",
+    "monto": 50.0
+  },
+  {
+    "fecha": "2026-04-30",
+    "categoria": "Transporte",
+    "descripcion": "",
+    "monto": 54.0
+  },
+  {
+    "fecha": "2026-05-01",
+    "categoria": "Transporte",
+    "descripcion": "Taxis",
+    "monto": 55.0
+  }
+]

@@ -1,0 +1,66 @@
+[
+  {
+    "fecha": "2026-03-30",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Alimentación",
+    "descripcion": "",
+    "monto": 4567.0
+  },
+  {
+    "fecha": "2026-03-30",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Alcohol",
+    "descripcion": "",
+    "monto": 2902.0
+  },
+  {
+    "fecha": "2026-03-30",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Entretenimiento",
+    "descripcion": "",
+    "monto": 4000.0
+  },
+  {
+    "fecha": "2026-03-30",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Vuelos",
+    "descripcion": "",
+    "monto": 3500.0
+  },
+  {
+    "fecha": "2026-04-30",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Alimentación",
+    "descripcion": "Mulato",
+    "monto": 114.0
+  },
+  {
+    "fecha": "2026-05-01",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Alcohol",
+    "descripcion": "",
+    "monto": 300.0
+  },
+  {
+    "fecha": "2026-05-02",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Alimentación",
+    "descripcion": "",
+    "monto": 50.0
+  },
+  {
+    "fecha": "2026-05-01",
+    "tarjeta_id": "7c4edfad-13c7-4968-8269-6b8050b58fc0",
+    "tarjeta_nombre": "Visa Infinite Sapphire",
+    "categoria": "Entretenimiento",
+    "descripcion": "Movia IA Maker",
+    "monto": 100.0
+  }
+]
