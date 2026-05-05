@@ -442,10 +442,10 @@ if not df_tar.empty:
         guardar("tarjetas")
         st.rerun()
 
-st.header("💳 Gastos con tarjeta")
+st.header("💳 Gastos con tarjeta Crédito")
 
 
-st.header("🔁 Gastos recurrentes con tarjeta")
+st.header("🔁 Gastos recurrentes con tarjeta de crédito")
 
 if st.session_state.tarjetas:
     mapa_tarjetas = {t["nombre"]: t["id"] for t in st.session_state.tarjetas}
@@ -486,9 +486,46 @@ if st.session_state.tarjetas:
 
             guardar("gastos_recurrentes_tarjeta")
             st.rerun()
+
+    # ==================================================
+# RESUMEN Y EDICIÓN DE GASTOS RECURRENTES CON TARJETA
+# ==================================================
+df_grt = pd.DataFrame(st.session_state.gastos_recurrentes_tarjeta)
+
+if not df_grt.empty:
+    st.subheader("📄 Gastos recurrentes con tarjeta registrados")
+
+    df_grt["Eliminar"] = False
+
+    ed_grt = st.data_editor(
+        df_grt,
+        use_container_width=True,
+        column_config={
+            "Eliminar": st.column_config.CheckboxColumn(),
+            "monto": st.column_config.NumberColumn("Monto mensual"),
+            "dia_cargo": st.column_config.NumberColumn("Día de cargo"),
+        },
+        key="editor_gastos_recurrentes_tarjeta"
+    )
+
+    if st.button("Guardar cambios gastos recurrentes con tarjeta"):
+        st.session_state.gastos_recurrentes_tarjeta = (
+            ed_grt[ed_grt["Eliminar"] == False]
+            .drop(columns=["Eliminar"])
+            .to_dict("records")
+        )
+
+        guardar("gastos_recurrentes_tarjeta")
+        st.rerun()
+    else:
+     st.info("No hay gastos recurrentes con tarjeta registrados.")
+
 else:
     st.info("Primero debes registrar una tarjeta de crédito.")
 
+
+
+st.header("🔁 Gastos diarios con tarjeta de crédito")
 if st.session_state.tarjetas:
     mapa = {t["nombre"]: t["id"] for t in st.session_state.tarjetas}
 
@@ -540,7 +577,39 @@ def obtener_ciclo_tarjeta(fecha, dia_cierre):
     inicio = cierre - pd.DateOffset(months=1) + timedelta(days=1)
     return inicio.date(), cierre.date()
 
+# =============================
+# EXPANDIR GASTOS RECURRENTES DE TARJETA
+# =============================
 
+gastos_tarjeta_recurrentes_expandido = []
+
+for g in st.session_state.gastos_recurrentes_tarjeta:
+    fecha_ini = pd.to_datetime(g["fecha_inicio"])
+    fecha_fin_g = pd.to_datetime(g["fecha_fin"])
+
+    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
+        try:
+            fecha_cargo = mes.replace(day=int(g["dia_cargo"]))
+
+            if fecha_cargo >= fecha_ini and fecha_cargo <= fecha_fin_g:
+                gastos_tarjeta_recurrentes_expandido.append({
+                    "fecha": fecha_cargo.date(),
+                    "tarjeta_id": g["tarjeta_id"],
+                    "tarjeta_nombre": g["tarjeta_nombre"],
+                    "categoria": g["categoria"],
+                    "descripcion": g["nombre"],
+                    "monto": g["monto"]
+                })
+        except:
+            pass
+
+df_grt_expandido = pd.DataFrame(gastos_tarjeta_recurrentes_expandido)
+
+# 👉 ESTE ES EL DATAFRAME CLAVE
+if not df_grt_expandido.empty:
+    df_gt_calc = pd.concat([df_gt, df_grt_expandido], ignore_index=True)
+else:
+    df_gt_calc = df_gt.copy()
 
 # ==================================================
 # CÁLCULOS FINALES Y GRÁFICO (CON SALDO RESALTADO ✅)
@@ -660,12 +729,20 @@ df_plot["mes"] = df_plot["fecha"].dt.to_period("M")
 mensual = df_plot.groupby("mes")[["ingresos", "egresos"]].sum().reset_index()
 mensual["fecha_mes"] = mensual["mes"].dt.to_timestamp()
 
+# ==================================================
+# GRÁFICO PROFESIONAL DE EVOLUCIÓN DE AHORROS
+# ==================================================
 st.header("📈 Evolución de ahorros")
 
-
+MESES_ES = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+}
 
 # Selector de fecha para mostrar saldo
 hoy = pd.Timestamp.today().normalize()
+
 if hoy < fechas.min() or hoy > fechas.max():
     fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", fechas.max().date())
 else:
@@ -674,119 +751,233 @@ else:
 fecha_saldo_sel = pd.to_datetime(fecha_saldo_sel)
 
 col1, col2 = st.columns(2)
+
 with col1:
-    rango_y1 = st.slider("Saldo (S/)", 0, 300000, (0, 150000), step=10000)
+    rango_y1 = st.slider(
+        "Saldo / Ahorro total (S/)",
+        0, 300000, (0, 150000),
+        step=10000
+    )
+
 with col2:
-    rango_y2 = st.slider("Ingresos / Egresos mensuales (S/)", 0, 300000, (0, 80000), step=10000)
+    rango_y2 = st.slider(
+        "Ingresos / Egresos mensuales (S/)",
+        0, 300000, (0, 80000),
+        step=10000
+    )
 
-fig, ax1 = plt.subplots(figsize=(12, 5))
-ax1.plot(df_plot["fecha"], saldo, color="#2E7D32", linewidth=2.5, label="Saldo")
+# Opciones de visualización
+mostrar_ahorro_total = st.checkbox("Mostrar ahorro total", value=True)
+mostrar_secundarias = st.checkbox("Mostrar cuentas secundarias", value=False)
 
-# ==================================================
-# EXTENSIÓN MULTICUENTA DEL GRÁFICO
-# ==================================================
-cuenta_sel = st.selectbox(
-    "Cuenta secundaria a visualizar",
-    ["Ninguna"] + list(saldos_sec.keys())
-)
+fig, ax1 = plt.subplots(figsize=(14, 7))
 
 # Cuenta principal
 ax1.plot(
     fechas,
     serie_cuenta_principal,
     color="#2E7D32",
-    linewidth=2.5,
-    label="Cuenta principal"
+    linewidth=3.0,
+    label="Cuenta de ahorros principal"
 )
 
-# Cuenta secundaria seleccionada
-if cuenta_sel != "Ninguna":
+# Cuentas secundarias opcionales
+if mostrar_secundarias:
+    for nombre_cuenta, serie_sec in saldos_sec.items():
+        ax1.plot(
+            fechas,
+            serie_sec,
+            linestyle="--",
+            linewidth=2.2,
+            label=f"Cuenta secundaria: {nombre_cuenta}"
+        )
+
+        if fecha_saldo_sel in serie_sec.index:
+            saldo_sec_val = serie_sec.loc[fecha_saldo_sel]
+
+            ax1.scatter(
+                fecha_saldo_sel,
+                saldo_sec_val,
+                s=80,
+                zorder=5
+            )
+
+            ax1.annotate(
+                f"{nombre_cuenta}\nS/ {saldo_sec_val:,.0f}",
+                xy=(fecha_saldo_sel, saldo_sec_val),
+                xytext=(15, 35),
+                textcoords="offset points",
+                fontsize=12,
+                bbox=dict(boxstyle="round,pad=0.35", fc="white"),
+                arrowprops=dict(arrowstyle="->")
+            )
+# Ahorro total
+if mostrar_ahorro_total:
     ax1.plot(
         fechas,
-        saldos_sec[cuenta_sel],
-        color="#1976D2",
-        linestyle="--",
-        linewidth=2.0,
-        label=f"Ahorro {cuenta_sel}"
+        serie_ahorro_total,
+        color="black",
+        linestyle=":",
+        linewidth=3.0,
+        label="Ahorro total"
     )
 
-# Ahorro total
-ax1.plot(
-    fechas,
-    serie_ahorro_total,
-    color="black",
-    linestyle=":",
-    linewidth=2.0,
-    label="Ahorro total"
-)
-
-
 ax1.set_ylim(rango_y1)
-ax1.axhline(0, color="#BDBDBD", linestyle="--")
+ax1.axhline(0, color="#BDBDBD", linestyle="--", linewidth=1)
 
-# Punto y etiqueta del saldo
-if fecha_saldo_sel in saldo.index:
-    saldo_val = saldo.loc[fecha_saldo_sel]
-    ax1.scatter(fecha_saldo_sel, saldo_val, color="#2E7D32", s=70, zorder=5)
+# Etiqueta de cuenta principal
+if fecha_saldo_sel in serie_cuenta_principal.index:
+    saldo_principal_val = serie_cuenta_principal.loc[fecha_saldo_sel]
+
+    ax1.scatter(
+        fecha_saldo_sel,
+        saldo_principal_val,
+        color="#2E7D32",
+        s=90,
+        zorder=5
+    )
+
     ax1.annotate(
-        f"Saldo al {fecha_saldo_sel.strftime('%d-%m-%Y')}\nS/ {saldo_val:,.0f}",
-        xy=(fecha_saldo_sel, saldo_val),
-        xytext=(10, 15),
+        f"Cuenta principal\nS/ {saldo_principal_val:,.0f}",
+        xy=(fecha_saldo_sel, saldo_principal_val),
+        xytext=(15, 20),
         textcoords="offset points",
-        fontsize=10,
-        bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#2E7D32"),
+        fontsize=12,
+        bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="#2E7D32"),
         arrowprops=dict(arrowstyle="->", color="#2E7D32")
     )
 
+# Etiqueta de ahorro total
+if mostrar_ahorro_total and fecha_saldo_sel in serie_ahorro_total.index:
+    ahorro_total_val = serie_ahorro_total.loc[fecha_saldo_sel]
+
+    ax1.scatter(
+        fecha_saldo_sel,
+        ahorro_total_val,
+        color="black",
+        s=90,
+        zorder=5
+    )
+
+    ax1.annotate(
+        f"Ahorro total\nS/ {ahorro_total_val:,.0f}",
+        xy=(fecha_saldo_sel, ahorro_total_val),
+        xytext=(15, -45),
+        textcoords="offset points",
+        fontsize=12,
+        bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="black"),
+        arrowprops=dict(arrowstyle="->", color="black")
+    )
+
+# Barras ingresos / egresos
 ax2 = ax1.twinx()
 offset = pd.Timedelta(days=7)
 
-ax2.bar(mensual["fecha_mes"] - offset, mensual["ingresos"], width=10, color="#81C784", alpha=0.85, label="Ingresos")
-ax2.bar(mensual["fecha_mes"] + offset, mensual["egresos"], width=10, color="#EF9A9A", alpha=0.85, label="Egresos")
+ax2.bar(
+    mensual["fecha_mes"] - offset,
+    mensual["ingresos"],
+    width=10,
+    color="#81C784",
+    alpha=0.80,
+    label="Ingresos"
+)
+
+ax2.bar(
+    mensual["fecha_mes"] + offset,
+    mensual["egresos"],
+    width=10,
+    color="#EF9A9A",
+    alpha=0.80,
+    label="Egresos"
+)
+
 ax2.set_ylim(rango_y2)
 ax2.invert_yaxis()
 
+# Formato eje X: Mayo 2026, Junio 2026...
+ticks_mensuales = pd.date_range(fechas.min(), fechas.max(), freq="MS")
+
+labels_mensuales = [
+    f"{MESES_ES[t.month]} {t.year}" for t in ticks_mensuales
+]
+
+ax1.set_xticks(ticks_mensuales)
+ax1.set_xticklabels(labels_mensuales, rotation=35, ha="right", fontsize=12)
+
+# Tamaño de letras para celular
+ax1.tick_params(axis="y", labelsize=12)
+ax2.tick_params(axis="y", labelsize=12)
+
+ax1.set_ylabel("Saldo / Ahorro total (S/)", fontsize=13)
+ax2.set_ylabel("Ingresos / Egresos mensuales (S/)", fontsize=13)
+
+# Leyenda limpia
 handles, labels = [], []
+
 for a in (ax1, ax2):
     h, l = a.get_legend_handles_labels()
     handles += h
     labels += l
 
-ax1.legend(handles, labels, loc="upper center",
-           bbox_to_anchor=(0.5, -0.15), ncol=3, frameon=False)
+ax1.legend(
+    handles,
+    labels,
+    loc="upper center",
+    bbox_to_anchor=(0.5, -0.22),
+    ncol=2,
+    frameon=False,
+    fontsize=12
+)
+
+ax1.grid(True, linestyle="--", alpha=0.25)
 
 plt.tight_layout()
-st.pyplot(fig)
+st.pyplot(fig, use_container_width=True)
 
 # ==================================================
-# PASO 5A — RESUMEN MENSUAL POR TARJETA
+#  RESUMEN MENSUAL POR TARJETA DE CRÉDITO
 # ==================================================
-st.header("💳 Resumen mensual por tarjeta")
+st.header("💳 Resumen mensual por tarjeta de crédito")
 
-if not df_gt.empty:
+MESES_ES = {
+    1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
+    5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
+    9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+}
+
+if not df_gt_calc.empty:
     resumen = []
+
     for t in st.session_state.tarjetas:
-        df_t = df_gt[df_gt["tarjeta_id"] == t["id"]]
+        df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
+
         for _, g in df_t.iterrows():
-            inicio, cierre = obtener_ciclo_tarjeta(g["fecha"], t["dia_cierre"])
+            fecha_gasto = pd.to_datetime(g["fecha"])
+
+            inicio, cierre = obtener_ciclo_tarjeta(fecha_gasto, t["dia_cierre"])
             fecha_pago = (pd.Timestamp(cierre) + pd.DateOffset(months=1)).replace(day=t["dia_pago"])
+
+            mes_acumulacion = f"{MESES_ES[fecha_gasto.month]} {fecha_gasto.year}"
+
             resumen.append({
                 "Tarjeta": t["nombre"],
-                "Inicio ciclo": inicio,
-                "Fin ciclo": cierre, 
+                "Mes consumo": mes_acumulacion,
                 "Fecha pago": fecha_pago.date() if pd.notnull(fecha_pago) else None,
-                "Mes pago": fecha_pago.strftime("%Y-%m") if pd.notnull(fecha_pago) else None,
+                "Inicio ciclo": inicio,
+                "Fin ciclo": cierre,
                 "Monto": g["monto"]
             })
 
     df_res = pd.DataFrame(resumen)
+
     resumen_mensual = (
-        df_res.groupby(["Tarjeta", "Mes pago", "Fecha pago"])["Monto"]
+        df_res.groupby(["Tarjeta", "Mes consumo", "Fecha pago", "Inicio ciclo", "Fin ciclo"])["Monto"]
         .sum()
         .reset_index()
         .sort_values("Fecha pago")
     )
 
     st.dataframe(resumen_mensual, use_container_width=True)
+
 else:
     st.info("No hay gastos con tarjeta registrados.")
