@@ -66,7 +66,8 @@ supabase.auth.set_session(
 
 user_id = st.session_state["user"].id
 
-st.title("📊 Mis Finanzas Personales")
+st.title("📊 Dashboard de Finanzas Personales")
+st.caption("Control de ingresos, gastos, tarjetas, cuentas de ahorro y proyección mensual.")
 
 
 # ==================================================
@@ -125,8 +126,8 @@ defaults = {
     "gastos_tarjeta": [],
     "gastos_recurrentes_tarjeta": [],
     "categorias": [
-        "Alimentación", "Alimentación Inncesario","Tecnología","Alcohol y Salids","Ropa","Regalos","Mascotas",
-        "Vuelos", "Salud", "Entretenimiento","Combustible","Supermercado","Otros"],
+        "Alimentación","Familia","Supermercado","Tecnología","Salidas y entretenimiento","Movilidad","Ropa","Regalos","Mascotas",
+        "Vuelos", "Salud","Entretenimiento","Combustible","Otros"],
 "cuentas_ahorro": [],
 "transferencias": [],
 }
@@ -154,9 +155,13 @@ for clave in claves:
 # ==================================================
 # CONFIGURACIÓN DE SIMULACIÓN Y CUENTAS DE AHORRO
 # ==================================================
-with st.expander("⚙️ Configuración y cuentas de ahorro", expanded=False):
 
-    st.header("⚙️ Configuración de la simulación")
+# ==================================================
+# 1. CONFIGURACIÓN INICIAL
+# ==================================================
+with st.expander("⚙️ 1. Configuración inicial", expanded=False):
+
+    st.subheader("⚙️ Configuración de la simulación")
 
     conf = st.session_state["configuracion"]
 
@@ -215,7 +220,7 @@ with st.expander("⚙️ Configuración y cuentas de ahorro", expanded=False):
     # ==================================================
     # RESUMEN EDITABLE DE CUENTAS DE AHORRO / DÉBITO
     # ==================================================
-    st.subheader("🏦 Cuentas de ahorro (débito)")
+    st.subheader("📄 Resumen de mis Cuentas de Ahorro (débito)")
 
     saldo_principal = st.session_state["configuracion"].get(
         "ahorro_inicial",
@@ -271,494 +276,8 @@ with st.expander("⚙️ Configuración y cuentas de ahorro", expanded=False):
 
     st.divider()
 
-    # ==================================================
-    # TRANSFERENCIAS ENTRE CUENTAS DE AHORRO
-    # ==================================================
-    st.header("🔁 Transferencias entre cuentas")
-
-    cuentas_map = {nombre_cuenta_principal: "principal"}
-
-    for c in st.session_state["cuentas_ahorro"]:
-        cuentas_map[c["nombre"]] = c["id"]
-
-    with st.form("form_transferencia"):
-        fecha = st.date_input("Fecha", fecha_inicio_sim)
-        origen = st.selectbox("Cuenta origen", list(cuentas_map.keys()))
-        destino = st.selectbox("Cuenta destino", list(cuentas_map.keys()))
-        monto = st.number_input("Monto", min_value=0.0)
-
-        if st.form_submit_button("Registrar transferencia") and origen != destino:
-            st.session_state["transferencias"].append({
-                "fecha": fecha.isoformat(),
-                "origen": cuentas_map[origen],
-                "destino": cuentas_map[destino],
-                "monto": monto
-            })
-            guardar("transferencias")
-            st.rerun()
-
-    # ==================================================
-    # RESUMEN Y EDICIÓN DE TRANSFERENCIAS
-    # ==================================================
-    df_transf = pd.DataFrame(st.session_state["transferencias"])
-
-    if not df_transf.empty:
-        df_transf["fecha"] = pd.to_datetime(df_transf["fecha"], errors="coerce").dt.date
-        df_transf["Eliminar"] = False
-
-        st.subheader("📄 Historial de transferencias")
-
-        ed = st.data_editor(
-            df_transf,
-            use_container_width=True,
-            column_config={
-                "Eliminar": st.column_config.CheckboxColumn()
-            },
-            key="editor_transferencias"
-        )
-
-        if st.button("Guardar cambios transferencias"):
-            df_editado = ed[ed["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-
-            if "fecha" in df_editado.columns:
-                df_editado["fecha"] = pd.to_datetime(
-                    df_editado["fecha"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-
-            st.session_state["transferencias"] = df_editado.to_dict("records")
-
-            guardar("transferencias")
-            st.rerun()
-
-    else:
-        st.info("No hay transferencias registradas.")
-# ==================================================
-# INGRESOS
-# ==================================================
-with st.expander("💰 Ingresos", expanded=False):
-
-    # ==================================================
-    # INGRESOS RECURRENTES
-    # ==================================================
-    st.header("💰 Ingresos recurrentes")
-
-    with st.form("form_ingreso_rec"):
-        nombre = st.text_input("Nombre", "Sueldo")
-        monto = st.number_input(
-            "Monto mensual",
-            min_value=0.0,
-            step=100.0
-        )
-
-        fecha_ini = st.date_input(
-            "Fecha inicio",
-            fecha_inicio_sim
-        )
-
-        dia = st.number_input(
-            "Día de cobro",
-            1,
-            31,
-            25
-        )
-
-        if st.form_submit_button("Agregar ingreso recurrente"):
-
-            st.session_state["ingresos_recurrentes"].append({
-                "nombre": nombre,
-                "monto": monto,
-                "fecha_inicio": fecha_ini.isoformat(),
-                "dia_cobro": dia
-            })
-
-            guardar("ingresos_recurrentes")
-            st.rerun()
-
-    # ==================================================
-    # RESUMEN INGRESOS RECURRENTES
-    # ==================================================
-    df_ing_rec = pd.DataFrame(
-        st.session_state["ingresos_recurrentes"]
-    )
-
-    if not df_ing_rec.empty:
-
-        df_ing_rec["fecha_inicio"] = pd.to_datetime(
-            df_ing_rec["fecha_inicio"],
-            errors="coerce"
-        ).dt.date
-
-        df_ing_rec["Eliminar"] = False
-
-        st.subheader("📄 Ingresos recurrentes registrados")
-
-        ed_ing_rec = st.data_editor(
-            df_ing_rec,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Eliminar": st.column_config.CheckboxColumn()
-            },
-            key="editor_ingresos_recurrentes"
-        )
-
-        if st.button("Guardar cambios ingresos recurrentes"):
-
-            df_editado = (
-                ed_ing_rec[
-                    ed_ing_rec["Eliminar"] == False
-                ]
-                .drop(columns=["Eliminar"])
-                .copy()
-            )
-
-            if "fecha_inicio" in df_editado.columns:
-                df_editado["fecha_inicio"] = pd.to_datetime(
-                    df_editado["fecha_inicio"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-
-            st.session_state["ingresos_recurrentes"] = (
-                df_editado.to_dict("records")
-            )
-
-            guardar("ingresos_recurrentes")
-            st.rerun()
-
-    else:
-        st.info("No hay ingresos recurrentes registrados.")
-
     st.divider()
-
-    # ==================================================
-    # INGRESOS PUNTUALES
-    # ==================================================
-    st.header("💵 Ingresos puntuales")
-
-    with st.form("form_ingreso_puntual"):
-
-        concepto = st.text_input("Concepto")
-
-        fecha = st.date_input(
-            "Fecha",
-            fecha_inicio_sim
-        )
-
-        monto = st.number_input(
-            "Monto",
-            min_value=0.0
-        )
-
-        if st.form_submit_button("Agregar ingreso puntual"):
-
-            st.session_state["ingresos_puntuales"].append({
-                "concepto": concepto,
-                "fecha": fecha.isoformat(),
-                "monto": monto
-            })
-
-            guardar("ingresos_puntuales")
-            st.rerun()
-
-    # ==================================================
-    # RESUMEN INGRESOS PUNTUALES
-    # ==================================================
-    df_ing_punt = pd.DataFrame(
-        st.session_state["ingresos_puntuales"]
-    )
-
-    if not df_ing_punt.empty:
-
-        df_ing_punt["fecha"] = pd.to_datetime(
-            df_ing_punt["fecha"],
-            errors="coerce"
-        ).dt.date
-
-        df_ing_punt["Eliminar"] = False
-
-        st.subheader("📄 Ingresos puntuales registrados")
-
-        ed_ing_punt = st.data_editor(
-            df_ing_punt,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Eliminar": st.column_config.CheckboxColumn()
-            },
-            key="editor_ingresos_puntuales"
-        )
-
-        if st.button("Guardar cambios ingresos puntuales"):
-
-            df_editado = (
-                ed_ing_punt[
-                    ed_ing_punt["Eliminar"] == False
-                ]
-                .drop(columns=["Eliminar"])
-                .copy()
-            )
-
-            if "fecha" in df_editado.columns:
-                df_editado["fecha"] = pd.to_datetime(
-                    df_editado["fecha"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-
-            st.session_state["ingresos_puntuales"] = (
-                df_editado.to_dict("records")
-            )
-
-            guardar("ingresos_puntuales")
-            st.rerun()
-
-    else:
-        st.info("No hay ingresos puntuales registrados.")
-# ==================================================
-# GASTOS DÉBITO / CUENTAS DE AHORRO
-# ==================================================
-with st.expander("🧾 Gastos débito / cuentas de ahorro", expanded=False):
-
-    nombre_cuenta_principal = st.session_state["configuracion"].get(
-        "nombre_cuenta_principal",
-        "Cuenta principal"
-    )
-
-    cuentas_debito_map = {nombre_cuenta_principal: "principal"}
-
-    for c in st.session_state["cuentas_ahorro"]:
-        cuentas_debito_map[c["nombre"]] = c["id"]
-
-    # ==================================================
-    # GASTOS FIJOS
-    # ==================================================
-    st.header("📆 Gastos recurrentes débito")
-
-    with st.form("form_gasto_fijo"):
-
-        nombre = st.text_input("Nombre")
-        monto = st.number_input(
-            "Monto mensual",
-            min_value=0.0,
-            step=10.0
-        )
-
-        fecha_ini = st.date_input(
-            "Fecha inicio",
-            fecha_inicio_sim
-        )
-
-        cuenta_origen_nombre = st.selectbox(
-            "Cuenta de origen",
-            list(cuentas_debito_map.keys()),
-            key="cuenta_origen_gasto_fijo"
-        )
-
-        dia = st.number_input(
-            "Día de cobro",
-            1,
-            31,
-            5
-        )
-
-        if st.form_submit_button("Agregar gasto fijo"):
-
-            st.session_state["gastos_fijos"].append({
-                "id": str(uuid.uuid4()),
-                "nombre": nombre,
-                "monto": float(monto),
-                "fecha_inicio": fecha_ini.isoformat(),
-                "dia_cobro": int(dia),
-                "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
-                "cuenta_origen_nombre": cuenta_origen_nombre
-            })
-
-            guardar("gastos_fijos")
-            st.rerun()
-
-    # ==================================================
-    # RESUMEN Y EDICIÓN DE GASTOS FIJOS
-    # ==================================================
-    df_fijos = pd.DataFrame(st.session_state["gastos_fijos"])
-
-    if not df_fijos.empty:
-
-        st.subheader("📄 Resumen gastos débito recurrentes registrados")
-
-        df_fijos["fecha_inicio"] = pd.to_datetime(
-            df_fijos["fecha_inicio"],
-            errors="coerce"
-        ).dt.date
-
-        df_fijos["monto"] = pd.to_numeric(
-            df_fijos["monto"],
-            errors="coerce"
-        ).fillna(0)
-
-        df_fijos["Eliminar"] = False
-
-        ed_fijos = st.data_editor(
-            df_fijos,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Eliminar": st.column_config.CheckboxColumn(),
-                "monto": st.column_config.NumberColumn("Monto mensual"),
-                "dia_cobro": st.column_config.NumberColumn("Día de cobro")
-            },
-            key="editor_gastos_fijos"
-        )
-
-        if st.button("Guardar cambios gastos fijos"):
-
-            df_editado = (
-                ed_fijos[
-                    ed_fijos["Eliminar"] == False
-                ]
-                .drop(columns=["Eliminar"])
-                .copy()
-            )
-
-            if "fecha_inicio" in df_editado.columns:
-                df_editado["fecha_inicio"] = pd.to_datetime(
-                    df_editado["fecha_inicio"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-
-            st.session_state["gastos_fijos"] = (
-                df_editado.to_dict("records")
-            )
-
-            guardar("gastos_fijos")
-            st.rerun()
-
-    else:
-        st.info("No hay gastos fijos registrados.")
-
-    st.divider()
-
-    # ==================================================
-    # GASTOS DIARIOS DÉBITO / AHORROS
-    # ==================================================
-    st.header("🧾 Gastos diarios débito")
-
-    with st.form("form_gasto_diario", clear_on_submit=True):
-
-        fecha = st.date_input(
-            "Fecha",
-            fecha_inicio_sim
-        )
-
-        cuenta_origen_nombre = st.selectbox(
-            "Cuenta de origen",
-            list(cuentas_debito_map.keys()),
-            key="cuenta_origen_gasto_diario"
-        )
-
-        categoria = st.selectbox(
-            "Categoría",
-            st.session_state["categorias"] + ["➕ Nueva"],
-            key="categoria_gasto_diario_debito"
-        )
-
-        if categoria == "➕ Nueva":
-            categoria = st.text_input(
-                "Nueva categoría",
-                key="nueva_categoria_gasto_diario_debito"
-            )
-
-        descripcion = st.text_input("Descripción")
-
-        monto = st.number_input(
-            "Monto",
-            min_value=0.0,
-            step=1.0,
-            key="monto_gasto_diario_debito"
-        )
-
-        submitted = st.form_submit_button("Agregar gasto")
-
-        if submitted:
-
-            if categoria not in st.session_state["categorias"]:
-                st.session_state["categorias"].append(categoria)
-                guardar("categorias")
-
-            nuevo_gasto = {
-                "id": str(uuid.uuid4()),
-                "fecha": fecha.isoformat(),
-                "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
-                "cuenta_origen_nombre": cuenta_origen_nombre,
-                "categoria": categoria,
-                "descripcion": descripcion,
-                "monto": float(monto)
-            }
-
-            st.session_state["gastos_diarios"].append(nuevo_gasto)
-            guardar("gastos_diarios")
-            st.success("Gasto débito agregado correctamente")
-
-    # ==================================================
-    # RESUMEN Y EDICIÓN DE GASTOS DIARIOS DÉBITO / AHORROS
-    # ==================================================
-    df_g = pd.DataFrame(st.session_state["gastos_diarios"])
-
-    if not df_g.empty:
-
-        st.subheader("📄 Resumen gastos diarios débito ")
-
-        df_g["fecha"] = pd.to_datetime(
-            df_g["fecha"],
-            errors="coerce"
-        ).dt.date
-
-        df_g["monto"] = pd.to_numeric(
-            df_g["monto"],
-            errors="coerce"
-        ).fillna(0)
-
-        df_g["Eliminar"] = False
-
-        ed_g = st.data_editor(
-            df_g,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Eliminar": st.column_config.CheckboxColumn(),
-                "monto": st.column_config.NumberColumn("Monto")
-            },
-            key="editor_gastos_debito"
-        )
-
-        if st.button("Guardar cambios gastos débito / ahorros"):
-
-            df_editado = (
-                ed_g[
-                    ed_g["Eliminar"] == False
-                ]
-                .drop(columns=["Eliminar"])
-                .copy()
-            )
-
-            if "fecha" in df_editado.columns:
-                df_editado["fecha"] = pd.to_datetime(
-                    df_editado["fecha"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-
-            st.session_state["gastos_diarios"] = (
-                df_editado.to_dict("records")
-            )
-
-            guardar("gastos_diarios")
-            st.rerun()
-
-    else:
-        st.info("No hay gastos débito registrados.")
-# ==================================================
-# TARJETAS DE CRÉDITO
-# ==================================================
-with st.expander("💳 Tarjetas de crédito", expanded=False):
+    st.markdown("### 💳 Tarjetas de crédito")
 
     # ==================================================
     # REGISTRO DE TARJETAS
@@ -849,7 +368,213 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
     else:
         st.info("No hay tarjetas registradas.")
 
+# ==================================================
+# 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
+# ==================================================
+with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False):
+
+    st.markdown("### 💰 Ingresos recurrentes")
+    with st.form("form_ingreso_rec"):
+        nombre = st.text_input("Nombre", "Sueldo")
+        monto = st.number_input(
+            "Monto mensual",
+            min_value=0.0,
+            step=100.0
+        )
+
+        fecha_ini = st.date_input(
+            "Fecha inicio",
+            fecha_inicio_sim
+        )
+
+        dia = st.number_input(
+            "Día de cobro",
+            1,
+            31,
+            25
+        )
+
+        if st.form_submit_button("Agregar ingreso recurrente"):
+
+            st.session_state["ingresos_recurrentes"].append({
+                "nombre": nombre,
+                "monto": monto,
+                "fecha_inicio": fecha_ini.isoformat(),
+                "dia_cobro": dia
+            })
+
+            guardar("ingresos_recurrentes")
+            st.rerun()
+
+    # ==================================================
+    # RESUMEN INGRESOS RECURRENTES
+    # ==================================================
+    df_ing_rec = pd.DataFrame(
+        st.session_state["ingresos_recurrentes"]
+    )
+
+    if not df_ing_rec.empty:
+
+        df_ing_rec["fecha_inicio"] = pd.to_datetime(
+            df_ing_rec["fecha_inicio"],
+            errors="coerce"
+        ).dt.date
+
+        df_ing_rec["Eliminar"] = False
+
+        st.subheader("📄 Resumen de Ingresos recurrentes registrados")
+
+        ed_ing_rec = st.data_editor(
+            df_ing_rec,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Eliminar": st.column_config.CheckboxColumn()
+            },
+            key="editor_ingresos_recurrentes"
+        )
+
+        if st.button("Guardar cambios ingresos recurrentes"):
+
+            df_editado = (
+                ed_ing_rec[
+                    ed_ing_rec["Eliminar"] == False
+                ]
+                .drop(columns=["Eliminar"])
+                .copy()
+            )
+
+            if "fecha_inicio" in df_editado.columns:
+                df_editado["fecha_inicio"] = pd.to_datetime(
+                    df_editado["fecha_inicio"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
+            st.session_state["ingresos_recurrentes"] = (
+                df_editado.to_dict("records")
+            )
+
+            guardar("ingresos_recurrentes")
+            st.rerun()
+
+    else:
+        st.info("No hay ingresos recurrentes registrados.")
+
     st.divider()
+    st.markdown("### 💰 Gastos recurrentes con tarjeta de débito")
+
+    nombre_cuenta_principal = st.session_state["configuracion"].get(
+        "nombre_cuenta_principal",
+        "Cuenta principal"
+    )
+
+    cuentas_debito_map = {nombre_cuenta_principal: "principal"}
+
+    for c in st.session_state["cuentas_ahorro"]:
+        cuentas_debito_map[c["nombre"]] = c["id"]
+    with st.form("form_gasto_fijo"):
+
+        nombre = st.text_input("Nombre")
+        monto = st.number_input(
+            "Monto mensual",
+            min_value=0.0,
+            step=10.0
+        )
+
+        fecha_ini = st.date_input(
+            "Fecha inicio",
+            fecha_inicio_sim
+        )
+
+        cuenta_origen_nombre = st.selectbox(
+            "Cuenta de origen",
+            list(cuentas_debito_map.keys()),
+            key="cuenta_origen_gasto_fijo"
+        )
+
+        dia = st.number_input(
+            "Día de cobro",
+            1,
+            31,
+            5
+        )
+
+        if st.form_submit_button("Agregar gasto fijo"):
+
+            st.session_state["gastos_fijos"].append({
+                "id": str(uuid.uuid4()),
+                "nombre": nombre,
+                "monto": float(monto),
+                "fecha_inicio": fecha_ini.isoformat(),
+                "dia_cobro": int(dia),
+                "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
+                "cuenta_origen_nombre": cuenta_origen_nombre
+            })
+
+            guardar("gastos_fijos")
+            st.rerun()
+
+    # ==================================================
+    # RESUMEN Y EDICIÓN DE GASTOS FIJOS
+    # ==================================================
+    df_fijos = pd.DataFrame(st.session_state["gastos_fijos"])
+
+    if not df_fijos.empty:
+
+        st.subheader("📄 Resumen de gastos recurrentes de tarjeta de débito registrados")
+
+        df_fijos["fecha_inicio"] = pd.to_datetime(
+            df_fijos["fecha_inicio"],
+            errors="coerce"
+        ).dt.date
+
+        df_fijos["monto"] = pd.to_numeric(
+            df_fijos["monto"],
+            errors="coerce"
+        ).fillna(0)
+
+        df_fijos["Eliminar"] = False
+
+        ed_fijos = st.data_editor(
+            df_fijos,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Eliminar": st.column_config.CheckboxColumn(),
+                "monto": st.column_config.NumberColumn("Monto mensual"),
+                "dia_cobro": st.column_config.NumberColumn("Día de cobro")
+            },
+            key="editor_gastos_fijos"
+        )
+
+        if st.button("Guardar cambios gastos fijos"):
+
+            df_editado = (
+                ed_fijos[
+                    ed_fijos["Eliminar"] == False
+                ]
+                .drop(columns=["Eliminar"])
+                .copy()
+            )
+
+            if "fecha_inicio" in df_editado.columns:
+                df_editado["fecha_inicio"] = pd.to_datetime(
+                    df_editado["fecha_inicio"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
+            st.session_state["gastos_fijos"] = (
+                df_editado.to_dict("records")
+            )
+
+            guardar("gastos_fijos")
+            st.rerun()
+
+    else:
+        st.info("No hay gastos fijos registrados.")
+
+    st.divider()
+    st.markdown("### 💳 Gastos recurrentes con tarjeta de crédito")
 
     if st.session_state["tarjetas"]:
 
@@ -861,8 +586,7 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
         # ==================================================
         # GASTOS RECURRENTES CON TARJETA
         # ==================================================
-        st.header("🔁 Gastos recurrentes con tarjeta")
-
+        
         with st.form("form_gasto_recurrente_tarjeta"):
 
             nombre = st.text_input(
@@ -945,7 +669,7 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
 
         if not df_grt.empty:
 
-            st.subheader("📄 Gastos recurrentes registrados")
+            st.subheader("📄 Resumen de gastos recurrentes con tarjeta de crédito registrados")
 
             df_grt["fecha_inicio"] = pd.to_datetime(
                 df_grt["fecha_inicio"],
@@ -1025,10 +749,245 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
         else:
             st.info("No hay gastos recurrentes con tarjeta registrados.")
 
-        st.divider()
+# ==================================================
+# 3. MOVIMIENTOS Y GASTOS VARIABLES / PUNTUALES
+# ==================================================
+with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
+
+# INGRESOS PUNTUALES
+    st.markdown("### 💵 Ingresos puntuales")
+
+    with st.form("form_ingreso_puntual"):
+
+        concepto = st.text_input("Concepto")
+
+        fecha = st.date_input(
+            "Fecha",
+            value=date.today(),
+    key="fecha_ingreso_puntual"
+)
+
+        monto = st.number_input(
+            "Monto",
+            min_value=0.0
+        )
+
+        if st.form_submit_button("Agregar ingreso puntual"):
+
+            st.session_state["ingresos_puntuales"].append({
+                "concepto": concepto,
+                "fecha": fecha.isoformat(),
+                "monto": monto
+            })
+
+            guardar("ingresos_puntuales")
+            st.rerun()
+
+    # ==================================================
+    # RESUMEN INGRESOS PUNTUALES
+    # ==================================================
+    df_ing_punt = pd.DataFrame(
+        st.session_state["ingresos_puntuales"]
+    )
+
+    if not df_ing_punt.empty:
+
+        df_ing_punt["fecha"] = pd.to_datetime(
+            df_ing_punt["fecha"],
+            errors="coerce"
+        ).dt.date
+
+        df_ing_punt["Eliminar"] = False
+
+        st.subheader("📄 Ingresos puntuales registrados")
+
+        ed_ing_punt = st.data_editor(
+            df_ing_punt,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Eliminar": st.column_config.CheckboxColumn()
+            },
+            key="editor_ingresos_puntuales"
+        )
+
+        if st.button("Guardar cambios ingresos puntuales"):
+
+            df_editado = (
+                ed_ing_punt[
+                    ed_ing_punt["Eliminar"] == False
+                ]
+                .drop(columns=["Eliminar"])
+                .copy()
+            )
+
+            if "fecha" in df_editado.columns:
+                df_editado["fecha"] = pd.to_datetime(
+                    df_editado["fecha"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
+            st.session_state["ingresos_puntuales"] = (
+                df_editado.to_dict("records")
+            )
+
+            guardar("ingresos_puntuales")
+            st.rerun()
+
+    else:
+        st.info("No hay ingresos puntuales registrados.")
+
+    st.divider()
+
+    # GASTOS DIARIOS DÉBITO
+    st.markdown("### 🧾 Gastos diarios débito")
+
+    nombre_cuenta_principal = st.session_state["configuracion"].get(
+        "nombre_cuenta_principal",
+        "Cuenta principal"
+    )
+
+    cuentas_debito_map = {nombre_cuenta_principal: "principal"}
+
+    for c in st.session_state["cuentas_ahorro"]:
+        cuentas_debito_map[c["nombre"]] = c["id"]
+    with st.form("form_gasto_diario", clear_on_submit=True):
+
+        fecha = st.date_input(
+            "Fecha",
+            value=date.today(),
+    key="fecha_gasto_diario_debito"
+        )
+
+        cuenta_origen_nombre = st.selectbox(
+            "Cuenta de origen",
+            list(cuentas_debito_map.keys()),
+            key="cuenta_origen_gasto_diario"
+        )
+
+        categoria_sel = st.selectbox(
+            "Categoría",
+            sorted(st.session_state["categorias"]) + ["➕ Nueva categoría"],
+            key="categoria_gasto_diario_debito"
+)
+
+        if categoria_sel == "➕ Nueva categoría":
+            nueva_categoria = st.text_input(
+                "Nueva categoría",
+                key="nueva_categoria_gasto_diario_debito"
+    )
+            categoria = nueva_categoria.strip()
+        else:
+            categoria = categoria_sel
+
+        descripcion = st.text_input("Descripción")
+
+        monto = st.number_input(
+            "Monto",
+            min_value=0.0,
+            step=1.0,
+            key="monto_gasto_diario_debito"
+        )
+
+        submitted = st.form_submit_button("Agregar gasto")
+
+        if submitted:
+
+            if not categoria:
+                st.error("Debes ingresar una categoría válida.")
+                st.stop()
+
+            if categoria not in st.session_state["categorias"]:
+                st.session_state["categorias"].append(categoria)
+
+                st.session_state["categorias"] = sorted(
+                    list(set(st.session_state["categorias"]))
+    )
+
+                guardar("categorias")
+
+            nuevo_gasto = {
+                "fecha": fecha.isoformat(),
+                "descripcion": descripcion,
+                "cuenta_origen_nombre": cuenta_origen_nombre,
+                "categoria": categoria,
+                "monto": float(monto)
+            }
+
+            st.session_state["gastos_diarios"].append(nuevo_gasto)
+            guardar("gastos_diarios")
+            st.success("Gasto débito agregado correctamente")
+
+    # ==================================================
+    # RESUMEN Y EDICIÓN DE GASTOS DIARIOS DÉBITO / AHORROS
+    # ==================================================
+    df_g = pd.DataFrame(st.session_state["gastos_diarios"])
+
+    if not df_g.empty:
+
+        st.subheader("📄 Resumen gastos diarios débito ")
+
+        df_g["fecha"] = pd.to_datetime(
+            df_g["fecha"],
+            errors="coerce"
+        ).dt.date
+
+        df_g["monto"] = pd.to_numeric(
+            df_g["monto"],
+            errors="coerce"
+        ).fillna(0)
+
+        df_g["Eliminar"] = False
+
+        ed_g = st.data_editor(
+            df_g,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Eliminar": st.column_config.CheckboxColumn(),
+                "monto": st.column_config.NumberColumn("Monto")
+            },
+            key="editor_gastos_debito"
+        )
+
+        if st.button("Guardar cambios gastos débito / ahorros"):
+
+            df_editado = (
+                ed_g[
+                    ed_g["Eliminar"] == False
+                ]
+                .drop(columns=["Eliminar"])
+                .copy()
+            )
+
+            if "fecha" in df_editado.columns:
+                df_editado["fecha"] = pd.to_datetime(
+                    df_editado["fecha"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
+            st.session_state["gastos_diarios"] = (
+                df_editado.to_dict("records")
+            )
+
+            guardar("gastos_diarios")
+            st.rerun()
+
+    else:
+        st.info("No hay gastos débito registrados.")
+
+    st.divider()
+    st.markdown("### 💳 Gastos diarios con tarjeta de crédito")
+
+    if st.session_state["tarjetas"]:
+
+        mapa_tarjetas = {
+            t["nombre"]: t["id"]
+            for t in st.session_state["tarjetas"]
+        }
 
         # ==================================================
-        # GASTOS DIARIOS CON TARJETA
+        # GASTOS DIARIOS CON TARJETA DE CRÉDITO
         # ==================================================
         st.header("🧾 Gastos diarios con tarjeta de crédito")
 
@@ -1036,9 +995,9 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
 
             fecha = st.date_input(
                 "Fecha gasto",
-                fecha_inicio_sim,
-                key="fecha_gasto_tarjeta"
-            )
+                value=date.today(),
+    key="fecha_gasto_tarjeta"
+)
 
             tarjeta_nombre = st.selectbox(
                 "Tarjeta",
@@ -1046,17 +1005,20 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
                 key="tarjeta_gasto_diario"
             )
 
-            categoria = st.selectbox(
+            categoria_sel = st.selectbox(
                 "Categoría",
-                st.session_state["categorias"] + ["➕ Nueva"],
+                sorted(st.session_state["categorias"]) + ["➕ Nueva categoría"],
                 key="categoria_gasto_tarjeta"
-            )
+)
 
-            if categoria == "➕ Nueva":
-                categoria = st.text_input(
+            if categoria_sel == "➕ Nueva categoría":
+                nueva_categoria = st.text_input(
                     "Nueva categoría",
                     key="nueva_categoria_gasto_tarjeta"
-                )
+    )
+                categoria = nueva_categoria.strip()
+            else:
+                categoria = categoria_sel
 
             descripcion = st.text_input(
                 "Descripción",
@@ -1072,28 +1034,32 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
 
             if st.form_submit_button("Agregar gasto tarjeta"):
 
-                if categoria not in st.session_state["categorias"]:
-                    st.session_state["categorias"].append(categoria)
-                    guardar("categorias")
+                if not categoria:
+                    st.error("Debes ingresar una categoría válida.")
+                    st.stop()
 
-                st.session_state["gastos_tarjeta"].append({
-                    "id": str(uuid.uuid4()),
-                    "fecha": fecha.isoformat(),
-                    "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
-                    "tarjeta_nombre": tarjeta_nombre,
-                    "categoria": categoria,
-                    "descripcion": descripcion,
-                    "monto": float(monto)
-                })
+            if categoria not in st.session_state["categorias"]:
+                st.session_state["categorias"].append(categoria)
 
-                guardar("gastos_tarjeta")
-                st.success("Gasto con tarjeta agregado correctamente")
+                st.session_state["categorias"] = sorted(
+                    list(set(st.session_state["categorias"]))
+        )
+
+            guardar("categorias")
+
+            st.session_state["gastos_tarjeta"].append({
+                "descripcion": descripcion,
+                "fecha": fecha.isoformat(),
+                "tarjeta_nombre": tarjeta_nombre,
+                "categoria": categoria,                
+                "monto": float(monto)
+    })
+
+            guardar("gastos_tarjeta")
+            st.success("Gasto con tarjeta agregado correctamente")
 
         # ==================================================
-        # RESUMEN GASTOS DIARIOS CON TARJETA
-        # ==================================================
-        # ==================================================
-        # RESUMEN GASTOS DIARIOS CON TARJETA
+        # RESUMEN GASTOS DIARIOS CON TARJETA DE CRÉDITO
         # ==================================================
         df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
 
@@ -1151,6 +1117,78 @@ with st.expander("💳 Tarjetas de crédito", expanded=False):
     else:
         st.warning("Primero debes registrar una tarjeta de crédito.")
 
+    st.markdown("### 🔁 Transferencias entre cuentas")
+    # ==================================================
+    # TRANSFERENCIAS ENTRE CUENTAS DE AHORRO
+    # ==================================================
+
+    cuentas_map = {nombre_cuenta_principal: "principal"}
+
+    for c in st.session_state["cuentas_ahorro"]:
+        cuentas_map[c["nombre"]] = c["id"]
+
+    with st.form("form_transferencia"):
+        fecha = st.date_input(
+    "Fecha",
+    value=date.today(),
+    key="fecha_transferencia"
+)
+        origen = st.selectbox("Cuenta origen", list(cuentas_map.keys()))
+        destino = st.selectbox("Cuenta destino", list(cuentas_map.keys()))
+        monto = st.number_input("Monto", min_value=0.0)
+
+        if st.form_submit_button("Registrar transferencia") and origen != destino:
+            st.session_state["transferencias"].append({
+                "fecha": fecha.isoformat(),
+                "origen": cuentas_map[origen],
+                "destino": cuentas_map[destino],
+                "monto": monto
+            })
+            guardar("transferencias")
+            st.rerun()
+
+    # ==================================================
+    # RESUMEN Y EDICIÓN DE TRANSFERENCIAS
+    # ==================================================
+    df_transf = pd.DataFrame(st.session_state["transferencias"])
+
+    if not df_transf.empty:
+        df_transf["fecha"] = pd.to_datetime(df_transf["fecha"], errors="coerce").dt.date
+        df_transf["Eliminar"] = False
+
+        st.subheader("📄 Historial de transferencias")
+
+        ed = st.data_editor(
+            df_transf,
+            use_container_width=True,
+            column_config={
+                "Eliminar": st.column_config.CheckboxColumn()
+            },
+            key="editor_transferencias"
+        )
+
+        if st.button("Guardar cambios transferencias"):
+            df_editado = ed[ed["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+
+            if "fecha" in df_editado.columns:
+                df_editado["fecha"] = pd.to_datetime(
+                    df_editado["fecha"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
+            st.session_state["transferencias"] = df_editado.to_dict("records")
+
+            guardar("transferencias")
+            st.rerun()
+
+    else:
+        st.info("No hay transferencias registradas.")
+
+    st.divider()
+
+# ==================================================
+# 4. CÁLCULOS BASE
+# ==================================================
 def obtener_ciclo_tarjeta(fecha, dia_cierre):
     fecha = pd.to_datetime(fecha)
 
@@ -1394,719 +1432,725 @@ mensual = df_plot.groupby("mes")[["ingresos", "egresos"]].sum().reset_index()
 mensual["fecha_mes"] = mensual["mes"].dt.to_timestamp()
 
 # ==================================================
-# GRÁFICO PROFESIONAL DE EVOLUCIÓN DE AHORROS
-# ==================================================
-st.header("📈 Evolución de ahorros")
-
-MESES_ES = {
-    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
-    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
-}
-
-# Selector de fecha para mostrar saldo
-hoy = pd.Timestamp.today().normalize()
-
-if hoy < fechas.min() or hoy > fechas.max():
-    fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", fechas.max().date())
-else:
-    fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", hoy.date())
-
-fecha_saldo_sel = pd.to_datetime(fecha_saldo_sel)
-
-col1, col2 = st.columns(2)
-
-with col1:
-    rango_y1 = st.slider(
-        "Saldo / Ahorro total (S/)",
-        0, 300000, (0, 150000),
-        step=10000
-    )
-
-with col2:
-    rango_y2 = st.slider(
-        "Ingresos / Egresos mensuales (S/)",
-        0, 300000, (0, 80000),
-        step=10000
-    )
-
-horizonte_meses = st.selectbox(
-    "Horizonte del gráfico",
-    [3, 6, 9, 12],
-    index=0,
-    format_func=lambda x: f"{x} meses"
-)
-
-fecha_x_inicio = fechas.min()
-fecha_x_fin = min(
-    fecha_x_inicio + pd.DateOffset(months=horizonte_meses),
-    fechas.max()
-)
-
-# Opciones de visualización
-mostrar_ahorro_total = st.checkbox("Mostrar ahorro total", value=True)
-mostrar_secundarias = st.checkbox("Mostrar cuentas secundarias", value=False)
-
-fig, ax1 = plt.subplots(figsize=(14, 7))
-
-# Cuenta principal
-ax1.plot(
-    fechas,
-    serie_cuenta_principal,
-    color="#2E7D32",
-    linewidth=3.0,
-    label=nombre_cuenta_principal
-)
-
-# Cuentas secundarias opcionales
-if mostrar_secundarias:
-    for nombre_cuenta, serie_sec in saldos_sec.items():
-        ax1.plot(
-            fechas,
-            serie_sec,
-            linestyle="--",
-            linewidth=2.2,
-            label=f"Cuenta secundaria: {nombre_cuenta}"
-        )
-
-        if fecha_saldo_sel in serie_sec.index:
-            saldo_sec_val = serie_sec.loc[fecha_saldo_sel]
-
-            ax1.scatter(
-                fecha_saldo_sel,
-                saldo_sec_val,
-                s=80,
-                zorder=5
-            )
-
-            ax1.annotate(
-                f"{nombre_cuenta}\nS/ {saldo_sec_val:,.0f}",
-                xy=(fecha_saldo_sel, saldo_sec_val),
-                xytext=(15, 35),
-                textcoords="offset points",
-                fontsize=12,
-                bbox=dict(boxstyle="round,pad=0.35", fc="white"),
-                arrowprops=dict(arrowstyle="->")
-            )
-# Ahorro total
-if mostrar_ahorro_total:
-    ax1.plot(
-        fechas,
-        serie_ahorro_total,
-        color="black",
-        linestyle=":",
-        linewidth=3.0,
-        label="Ahorro total"
-    )
-
-ax1.set_ylim(rango_y1)
-ax1.axhline(0, color="#BDBDBD", linestyle="--", linewidth=1)
-
-# Etiqueta de cuenta principal
-if fecha_saldo_sel in serie_cuenta_principal.index:
-    saldo_principal_val = serie_cuenta_principal.loc[fecha_saldo_sel]
-
-    ax1.scatter(
-        fecha_saldo_sel,
-        saldo_principal_val,
-        color="#2E7D32",
-        s=90,
-        zorder=5
-    )
-
-    ax1.annotate(
-        f"{nombre_cuenta_principal}\nS/ {saldo_principal_val:,.0f}",
-        xy=(fecha_saldo_sel, saldo_principal_val),
-        xytext=(15, 20),
-        textcoords="offset points",
-        fontsize=12,
-        bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="#2E7D32"),
-        arrowprops=dict(arrowstyle="->", color="#2E7D32")
-    )
-
-# Etiqueta de ahorro total
-if mostrar_ahorro_total and fecha_saldo_sel in serie_ahorro_total.index:
-    ahorro_total_val = serie_ahorro_total.loc[fecha_saldo_sel]
-
-    ax1.scatter(
-        fecha_saldo_sel,
-        ahorro_total_val,
-        color="black",
-        s=90,
-        zorder=5
-    )
-
-    ax1.annotate(
-        f"Ahorro total\nS/ {ahorro_total_val:,.0f}",
-        xy=(fecha_saldo_sel, ahorro_total_val),
-        xytext=(15, -45),
-        textcoords="offset points",
-        fontsize=12,
-        bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="black"),
-        arrowprops=dict(arrowstyle="->", color="black")
-    )
-
-# Barras ingresos / egresos
-ax2 = ax1.twinx()
-offset = pd.Timedelta(days=7)
-
-ax2.bar(
-    mensual["fecha_mes"] - offset,
-    mensual["ingresos"],
-    width=10,
-    color="#81C784",
-    alpha=0.80,
-    label="Ingresos"
-)
-
-ax2.bar(
-    mensual["fecha_mes"] + offset,
-    mensual["egresos"],
-    width=10,
-    color="#EF9A9A",
-    alpha=0.80,
-    label="Egresos"
-)
-
-ax2.set_ylim(rango_y2)
-ax2.invert_yaxis()
-
-
-ax1.set_xlim(fecha_x_inicio, fecha_x_fin)
-ax2.set_xlim(fecha_x_inicio, fecha_x_fin)
-
-
-
-# Formato eje X: Mayo 2026, Junio 2026...
-ticks_mensuales = pd.date_range(fecha_x_inicio, fecha_x_fin, freq="MS")
-
-labels_mensuales = [
-    f"{MESES_ES[t.month]} {t.year}" for t in ticks_mensuales
-]
-
-ax1.set_xticks(ticks_mensuales)
-ax1.set_xticklabels(labels_mensuales, rotation=35, ha="right", fontsize=12)
-
-# Tamaño de letras para celular
-ax1.tick_params(axis="y", labelsize=12)
-ax2.tick_params(axis="y", labelsize=12)
-
-ax1.set_ylabel("Saldo / Ahorro total (S/)", fontsize=13)
-ax2.set_ylabel("Ingresos / Egresos mensuales (S/)", fontsize=13)
-
-# Leyenda limpia
-handles, labels = [], []
-
-for a in (ax1, ax2):
-    h, l = a.get_legend_handles_labels()
-    handles += h
-    labels += l
-
-ax1.legend(
-    handles,
-    labels,
-    loc="upper center",
-    bbox_to_anchor=(0.5, -0.22),
-    ncol=2,
-    frameon=False,
-    fontsize=12
-)
-
-ax1.grid(True, linestyle="--", alpha=0.25)
-
-plt.tight_layout()
-st.pyplot(fig, use_container_width=True)
 
 # ==================================================
-# GASTOS MENSUALES POR TIPO - BASE PARA MÉTRICAS Y GRÁFICOS
+# 5. GRÁFICOS Y RESULTADOS
 # ==================================================
+with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
-MESES_ES = {
-    1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
-    5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
-    9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
-}
+    # GRÁFICO PROFESIONAL DE EVOLUCIÓN DE AHORROS
+    # ==================================================
+    st.header("📈 Evolución de ahorros")
 
-meses_base = pd.DataFrame({
-    "mes": pd.period_range(fecha_inicio_sim, fecha_fin_sim, freq="M")
-})
+    MESES_ES = {
+        1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+        5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+        9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+    }
 
-# Débito diario
-df_debito_diario = pd.DataFrame(st.session_state["gastos_diarios"])
+    # Selector de fecha para mostrar saldo
+    hoy = pd.Timestamp.today().normalize()
 
-if not df_debito_diario.empty:
-    df_debito_diario["fecha"] = pd.to_datetime(df_debito_diario["fecha"], errors="coerce")
-    df_debito_diario["monto"] = pd.to_numeric(df_debito_diario["monto"], errors="coerce").fillna(0)
-    df_debito_diario["mes"] = df_debito_diario["fecha"].dt.to_period("M")
+    if hoy < fechas.min() or hoy > fechas.max():
+        fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", fechas.max().date())
+    else:
+        fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", hoy.date())
 
-    df_debito_diario_mes = (
-        df_debito_diario.groupby("mes")["monto"]
-        .sum()
-        .reset_index()
-        .rename(columns={"monto": "Débito diario"})
-    )
-else:
-    df_debito_diario_mes = pd.DataFrame(columns=["mes", "Débito diario"])
+    fecha_saldo_sel = pd.to_datetime(fecha_saldo_sel)
 
-
-# Gastos fijos débito
-gastos_fijos_expandido = []
-
-for g in st.session_state["gastos_fijos"]:
-    fecha_ini = pd.to_datetime(g["fecha_inicio"], errors="coerce")
-
-    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
-        try:
-            fecha_cobro = mes.replace(day=min(int(g["dia_cobro"]), 28))
-
-            if fecha_cobro >= fecha_ini:
-                gastos_fijos_expandido.append({
-                    "fecha": fecha_cobro,
-                    "monto": float(g["monto"])
-                })
-        except:
-            pass
-
-df_fijos_expandido = pd.DataFrame(gastos_fijos_expandido)
-
-if not df_fijos_expandido.empty:
-    df_fijos_expandido["fecha"] = pd.to_datetime(df_fijos_expandido["fecha"], errors="coerce")
-    df_fijos_expandido["mes"] = df_fijos_expandido["fecha"].dt.to_period("M")
-
-    df_fijos_mes = (
-        df_fijos_expandido.groupby("mes")["monto"]
-        .sum()
-        .reset_index()
-        .rename(columns={"monto": "Gastos fijos débito"})
-    )
-else:
-    df_fijos_mes = pd.DataFrame(columns=["mes", "Gastos fijos débito"])
-
-
-# Crédito diario
-df_credito_diario = pd.DataFrame(st.session_state["gastos_tarjeta"])
-
-if not df_credito_diario.empty:
-    df_credito_diario["fecha"] = pd.to_datetime(df_credito_diario["fecha"], errors="coerce")
-    df_credito_diario["monto"] = pd.to_numeric(df_credito_diario["monto"], errors="coerce").fillna(0)
-    df_credito_diario["mes"] = df_credito_diario["fecha"].dt.to_period("M")
-
-    df_credito_diario_mes = (
-        df_credito_diario.groupby("mes")["monto"]
-        .sum()
-        .reset_index()
-        .rename(columns={"monto": "Crédito diario"})
-    )
-else:
-    df_credito_diario_mes = pd.DataFrame(columns=["mes", "Crédito diario"])
-
-
-# Crédito recurrente
-df_credito_recurrente = pd.DataFrame(gastos_tarjeta_recurrentes_expandido)
-
-if not df_credito_recurrente.empty:
-    df_credito_recurrente["fecha"] = pd.to_datetime(df_credito_recurrente["fecha"], errors="coerce")
-    df_credito_recurrente["monto"] = pd.to_numeric(df_credito_recurrente["monto"], errors="coerce").fillna(0)
-    df_credito_recurrente["mes"] = df_credito_recurrente["fecha"].dt.to_period("M")
-
-    df_credito_recurrente_mes = (
-        df_credito_recurrente.groupby("mes")["monto"]
-        .sum()
-        .reset_index()
-        .rename(columns={"monto": "Crédito recurrente"})
-    )
-else:
-    df_credito_recurrente_mes = pd.DataFrame(columns=["mes", "Crédito recurrente"])
-
-
-# Merge mensual final
-df_mes_tipo = (
-    meses_base
-    .merge(df_debito_diario_mes, on="mes", how="left")
-    .merge(df_fijos_mes, on="mes", how="left")
-    .merge(df_credito_diario_mes, on="mes", how="left")
-    .merge(df_credito_recurrente_mes, on="mes", how="left")
-    .fillna(0)
-)
-
-for col in [
-    "Débito diario",
-    "Gastos fijos débito",
-    "Crédito diario",
-    "Crédito recurrente"
-]:
-    df_mes_tipo[col] = pd.to_numeric(df_mes_tipo[col], errors="coerce").fillna(0)
-
-df_mes_tipo["Mes"] = df_mes_tipo["mes"].apply(
-    lambda m: f"{MESES_ES[m.month].capitalize()} {m.year}"
-)
-
-df_mes_tipo["Gastos débito total mensual"] = (
-    df_mes_tipo["Débito diario"] +
-    df_mes_tipo["Gastos fijos débito"]
-)
-
-df_mes_tipo["Gastos crédito total mensual"] = (
-    df_mes_tipo["Crédito diario"] +
-    df_mes_tipo["Crédito recurrente"]
-)
-
-df_mes_tipo["Gastos fijos mensuales"] = (
-    df_mes_tipo["Gastos fijos débito"] +
-    df_mes_tipo["Crédito recurrente"]
-)
-
-df_mes_tipo["Gastos no fijos mensuales"] = (
-    df_mes_tipo["Débito diario"] +
-    df_mes_tipo["Crédito diario"]
-)
-
-df_mes_tipo["Total general"] = (
-    df_mes_tipo["Gastos fijos mensuales"] +
-    df_mes_tipo["Gastos no fijos mensuales"]
-)
-
-
-# ==================================================
-# META MENSUAL DE AHORRO
-# ==================================================
-st.subheader("🎯 Meta mensual de ahorro")
-
-mes_actual = pd.Timestamp.today().to_period("M")
-
-meta_ahorro = st.number_input(
-    "¿Cuánto quieres ahorrar este mes?",
-    min_value=0.0,
-    step=100.0,
-    value=2000.0
-)
-
-ingresos_mes_actual = (
-    (ing_rec + ing_punt)
-    .loc[(ing_rec + ing_punt).index.to_period("M") == mes_actual]
-    .sum()
-)
-
-fila_mes_actual = df_mes_tipo[df_mes_tipo["mes"] == mes_actual]
-
-if not fila_mes_actual.empty:
-    gastos_fijos_mes_actual = float(fila_mes_actual["Gastos fijos mensuales"].iloc[0])
-    gastos_no_fijos_mes_actual = float(fila_mes_actual["Gastos no fijos mensuales"].iloc[0])
-else:
-    gastos_fijos_mes_actual = 0.0
-    gastos_no_fijos_mes_actual = 0.0
-
-gastos_comprometidos = gastos_fijos_mes_actual + gastos_no_fijos_mes_actual
-
-monto_disponible_para_gastar = (
-    ingresos_mes_actual -
-    gastos_comprometidos -
-    meta_ahorro
-)
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("Ingresos del mes", f"S/ {ingresos_mes_actual:,.0f}")
-
-with col2:
-    st.metric("Gastos ya comprometidos", f"S/ {gastos_comprometidos:,.0f}")
-
-with col3:
-    st.metric("Puedes gastar todavía", f"S/ {max(0, monto_disponible_para_gastar):,.0f}")
-
-if monto_disponible_para_gastar >= 0:
-    st.success(
-        f"Vas bien. Puedes gastar hasta S/ {monto_disponible_para_gastar:,.0f} más este mes y aún cumplir tu meta de ahorro."
-    )
-else:
-    st.error(
-        f"Ya superaste tu meta de ahorro mensual por S/ {abs(monto_disponible_para_gastar):,.0f}."
-    )
-
-# ==================================================
-# PIE CHART - GASTOS NO FIJOS MENSUALES POR CATEGORÍA
-# ==================================================
-st.header("🥧 Gastos no fijos mensuales por categoría")
-
-meses_disponibles = pd.period_range(
-    start=fecha_inicio_sim,
-    end=fecha_fin_sim,
-    freq="M"
-)
-
-opciones_meses = {
-    f"{MESES_ES[m.month].capitalize()} {m.year}": m
-    for m in meses_disponibles
-}
-
-mes_categoria_txt = st.selectbox(
-    "Selecciona el mes para analizar gastos no fijos",
-    list(opciones_meses.keys()),
-    key="mes_gastos_categoria"
-)
-
-mes_categoria = opciones_meses[mes_categoria_txt]
-
-frames_cat = []
-
-# Débito diario = gasto no fijo
-df_debito_cat = pd.DataFrame(st.session_state["gastos_diarios"])
-
-if not df_debito_cat.empty:
-    df_debito_cat["fecha"] = pd.to_datetime(df_debito_cat["fecha"], errors="coerce")
-    df_debito_cat["monto"] = pd.to_numeric(df_debito_cat["monto"], errors="coerce").fillna(0)
-    df_debito_cat["mes"] = df_debito_cat["fecha"].dt.to_period("M")
-
-    frames_cat.append(
-        df_debito_cat[["fecha", "mes", "categoria", "monto"]]
-    )
-
-# Crédito diario = gasto no fijo
-df_credito_cat = pd.DataFrame(st.session_state["gastos_tarjeta"])
-
-if not df_credito_cat.empty:
-    df_credito_cat["fecha"] = pd.to_datetime(df_credito_cat["fecha"], errors="coerce")
-    df_credito_cat["monto"] = pd.to_numeric(df_credito_cat["monto"], errors="coerce").fillna(0)
-    df_credito_cat["mes"] = df_credito_cat["fecha"].dt.to_period("M")
-
-    frames_cat.append(
-        df_credito_cat[["fecha", "mes", "categoria", "monto"]]
-    )
-
-if len(frames_cat) > 0:
-    df_gastos_cat = pd.concat(frames_cat, ignore_index=True)
-else:
-    df_gastos_cat = pd.DataFrame(columns=["fecha", "mes", "categoria", "monto"])
-
-df_mes_cat = df_gastos_cat[df_gastos_cat["mes"] == mes_categoria]
-
-if not df_mes_cat.empty:
-    resumen_cat = (
-        df_mes_cat.groupby("categoria")["monto"]
-        .sum()
-        .reset_index()
-        .sort_values("monto", ascending=False)
-    )
-
-    total_mes = resumen_cat["monto"].sum()
-
-    col1, col2 = st.columns([1.3, 1])
+    col1, col2 = st.columns(2)
 
     with col1:
-        fig_cat, ax_cat = plt.subplots(figsize=(8, 8))
-
-        ax_cat.pie(
-            resumen_cat["monto"],
-            labels=resumen_cat["categoria"],
-            autopct=lambda p: f"{p:.1f}%\nS/ {p * total_mes / 100:,.0f}",
-            startangle=90,
-            textprops={"fontsize": 12}
+        rango_y1 = st.slider(
+            "Saldo / Ahorro total (S/)",
+            0, 300000, (0, 150000),
+            step=10000
         )
-
-        ax_cat.set_title(
-            f"Gastos no fijos por categoría - {mes_categoria_txt}",
-            fontsize=16,
-            pad=20
-        )
-
-        ax_cat.axis("equal")
-
-        st.pyplot(fig_cat, use_container_width=True)
 
     with col2:
-        st.subheader(f"Resumen {mes_categoria_txt}")
-        st.metric("Gasto no fijo total", f"S/ {total_mes:,.0f}")
-
-        st.dataframe(
-            resumen_cat.rename(columns={
-                "categoria": "Categoría",
-                "monto": "Monto"
-            }),
-            use_container_width=True,
-            hide_index=True
+        rango_y2 = st.slider(
+            "Ingresos / Egresos mensuales (S/)",
+            0, 300000, (0, 80000),
+            step=10000
         )
 
-else:
-    st.info(f"No hay gastos no fijos registrados en {mes_categoria_txt}.")
+    horizonte_meses = st.selectbox(
+        "Horizonte del gráfico",
+        [3, 6, 9, 12],
+        index=0,
+        format_func=lambda x: f"{x} meses"
+    )
 
-# ==================================================
-# RESUMEN POR CICLO DE TARJETA DE CRÉDITO
-# ==================================================
-st.header("💳 Resumen por ciclo de tarjeta de crédito")
+    fecha_x_inicio = fechas.min()
+    fecha_x_fin = min(
+        fecha_x_inicio + pd.DateOffset(months=horizonte_meses),
+        fechas.max()
+    )
 
-if not df_gt_calc.empty:
-    resumen = []
+    # Opciones de visualización
+    mostrar_ahorro_total = st.checkbox("Mostrar ahorro total", value=True)
+    mostrar_secundarias = st.checkbox("Mostrar cuentas secundarias", value=False)
 
-    for t in st.session_state["tarjetas"]:
-        df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
+    fig, ax1 = plt.subplots(figsize=(14, 7))
 
-        for _, g in df_t.iterrows():
-            fecha_gasto = pd.to_datetime(g["fecha"], errors="coerce")
+    # Cuenta principal
+    ax1.plot(
+        fechas,
+        serie_cuenta_principal,
+        color="#2E7D32",
+        linewidth=3.0,
+        label=nombre_cuenta_principal
+    )
 
-            if pd.isna(fecha_gasto):
-                continue
-
-            inicio, cierre = obtener_ciclo_tarjeta(
-                fecha_gasto,
-                int(t["dia_cierre"])
+    # Cuentas secundarias opcionales
+    if mostrar_secundarias:
+        for nombre_cuenta, serie_sec in saldos_sec.items():
+            ax1.plot(
+                fechas,
+                serie_sec,
+                linestyle="--",
+                linewidth=2.2,
+                label=f"Cuenta secundaria: {nombre_cuenta}"
             )
 
-            fecha_pago = (
-                pd.Timestamp(cierre) + pd.DateOffset(months=1)
-            ).replace(day=int(t["dia_pago"]))
+            if fecha_saldo_sel in serie_sec.index:
+                saldo_sec_val = serie_sec.loc[fecha_saldo_sel]
 
-            resumen.append({
-                "Tarjeta": t["nombre"],
-                "Inicio ciclo": inicio,
-                "Cierre ciclo": cierre,
-                "Fecha pago": fecha_pago.date(),
-                "Monto": float(g["monto"])
-            })
+                ax1.scatter(
+                    fecha_saldo_sel,
+                    saldo_sec_val,
+                    s=80,
+                    zorder=5
+                )
 
-    df_res = pd.DataFrame(resumen)
+                ax1.annotate(
+                    f"{nombre_cuenta}\nS/ {saldo_sec_val:,.0f}",
+                    xy=(fecha_saldo_sel, saldo_sec_val),
+                    xytext=(15, 35),
+                    textcoords="offset points",
+                    fontsize=12,
+                    bbox=dict(boxstyle="round,pad=0.35", fc="white"),
+                    arrowprops=dict(arrowstyle="->")
+                )
+    # Ahorro total
+    if mostrar_ahorro_total:
+        ax1.plot(
+            fechas,
+            serie_ahorro_total,
+            color="black",
+            linestyle=":",
+            linewidth=3.0,
+            label="Ahorro total"
+        )
 
-    if not df_res.empty:
-        resumen_ciclo = (
-            df_res
-            .groupby(
-                ["Tarjeta", "Inicio ciclo", "Cierre ciclo", "Fecha pago"],
-                as_index=False
-            )["Monto"]
+    ax1.set_ylim(rango_y1)
+    ax1.axhline(0, color="#BDBDBD", linestyle="--", linewidth=1)
+
+    # Etiqueta de cuenta principal
+    if fecha_saldo_sel in serie_cuenta_principal.index:
+        saldo_principal_val = serie_cuenta_principal.loc[fecha_saldo_sel]
+
+        ax1.scatter(
+            fecha_saldo_sel,
+            saldo_principal_val,
+            color="#2E7D32",
+            s=90,
+            zorder=5
+        )
+
+        ax1.annotate(
+            f"{nombre_cuenta_principal}\nS/ {saldo_principal_val:,.0f}",
+            xy=(fecha_saldo_sel, saldo_principal_val),
+            xytext=(15, 20),
+            textcoords="offset points",
+            fontsize=12,
+            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="#2E7D32"),
+            arrowprops=dict(arrowstyle="->", color="#2E7D32")
+        )
+
+    # Etiqueta de ahorro total
+    if mostrar_ahorro_total and fecha_saldo_sel in serie_ahorro_total.index:
+        ahorro_total_val = serie_ahorro_total.loc[fecha_saldo_sel]
+
+        ax1.scatter(
+            fecha_saldo_sel,
+            ahorro_total_val,
+            color="black",
+            s=90,
+            zorder=5
+        )
+
+        ax1.annotate(
+            f"Ahorro total\nS/ {ahorro_total_val:,.0f}",
+            xy=(fecha_saldo_sel, ahorro_total_val),
+            xytext=(15, -45),
+            textcoords="offset points",
+            fontsize=12,
+            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="black"),
+            arrowprops=dict(arrowstyle="->", color="black")
+        )
+
+    # Barras ingresos / egresos
+    ax2 = ax1.twinx()
+    offset = pd.Timedelta(days=7)
+
+    ax2.bar(
+        mensual["fecha_mes"] - offset,
+        mensual["ingresos"],
+        width=10,
+        color="#81C784",
+        alpha=0.80,
+        label="Ingresos"
+    )
+
+    ax2.bar(
+        mensual["fecha_mes"] + offset,
+        mensual["egresos"],
+        width=10,
+        color="#EF9A9A",
+        alpha=0.80,
+        label="Egresos"
+    )
+
+    ax2.set_ylim(rango_y2)
+    ax2.invert_yaxis()
+
+
+    ax1.set_xlim(fecha_x_inicio, fecha_x_fin)
+    ax2.set_xlim(fecha_x_inicio, fecha_x_fin)
+
+
+
+    # Formato eje X: Mayo 2026, Junio 2026...
+    ticks_mensuales = pd.date_range(fecha_x_inicio, fecha_x_fin, freq="MS")
+
+    labels_mensuales = [
+        f"{MESES_ES[t.month]} {t.year}" for t in ticks_mensuales
+    ]
+
+    ax1.set_xticks(ticks_mensuales)
+    ax1.set_xticklabels(labels_mensuales, rotation=35, ha="right", fontsize=12)
+
+    # Tamaño de letras para celular
+    ax1.tick_params(axis="y", labelsize=12)
+    ax2.tick_params(axis="y", labelsize=12)
+
+    ax1.set_ylabel("Saldo / Ahorro total (S/)", fontsize=13)
+    ax2.set_ylabel("Ingresos / Egresos mensuales (S/)", fontsize=13)
+
+    # Leyenda limpia
+    handles, labels = [], []
+
+    for a in (ax1, ax2):
+        h, l = a.get_legend_handles_labels()
+        handles += h
+        labels += l
+
+    ax1.legend(
+        handles,
+        labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.22),
+        ncol=2,
+        frameon=False,
+        fontsize=12
+    )
+
+    ax1.grid(True, linestyle="--", alpha=0.25)
+
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
+
+    # ==================================================
+    # GASTOS MENSUALES POR TIPO - BASE PARA MÉTRICAS Y GRÁFICOS
+    # ==================================================
+
+    MESES_ES = {
+        1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
+        5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
+        9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+    }
+
+    meses_base = pd.DataFrame({
+        "mes": pd.period_range(fecha_inicio_sim, fecha_fin_sim, freq="M")
+    })
+
+    # Débito diario
+    df_debito_diario = pd.DataFrame(st.session_state["gastos_diarios"])
+
+    if not df_debito_diario.empty:
+        df_debito_diario["fecha"] = pd.to_datetime(df_debito_diario["fecha"], errors="coerce")
+        df_debito_diario["monto"] = pd.to_numeric(df_debito_diario["monto"], errors="coerce").fillna(0)
+        df_debito_diario["mes"] = df_debito_diario["fecha"].dt.to_period("M")
+
+        df_debito_diario_mes = (
+            df_debito_diario.groupby("mes")["monto"]
             .sum()
-            .sort_values("Fecha pago")
+            .reset_index()
+            .rename(columns={"monto": "Débito diario"})
+        )
+    else:
+        df_debito_diario_mes = pd.DataFrame(columns=["mes", "Débito diario"])
+
+
+    # Gastos fijos débito
+    gastos_fijos_expandido = []
+
+    for g in st.session_state["gastos_fijos"]:
+        fecha_ini = pd.to_datetime(g["fecha_inicio"], errors="coerce")
+
+        for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
+            try:
+                fecha_cobro = mes.replace(day=min(int(g["dia_cobro"]), 28))
+
+                if fecha_cobro >= fecha_ini:
+                    gastos_fijos_expandido.append({
+                        "fecha": fecha_cobro,
+                        "monto": float(g["monto"])
+                    })
+            except:
+                pass
+
+    df_fijos_expandido = pd.DataFrame(gastos_fijos_expandido)
+
+    if not df_fijos_expandido.empty:
+        df_fijos_expandido["fecha"] = pd.to_datetime(df_fijos_expandido["fecha"], errors="coerce")
+        df_fijos_expandido["mes"] = df_fijos_expandido["fecha"].dt.to_period("M")
+
+        df_fijos_mes = (
+            df_fijos_expandido.groupby("mes")["monto"]
+            .sum()
+            .reset_index()
+            .rename(columns={"monto": "Gastos fijos débito"})
+        )
+    else:
+        df_fijos_mes = pd.DataFrame(columns=["mes", "Gastos fijos débito"])
+
+
+    # Crédito diario
+    df_credito_diario = pd.DataFrame(st.session_state["gastos_tarjeta"])
+
+    if not df_credito_diario.empty:
+        df_credito_diario["fecha"] = pd.to_datetime(df_credito_diario["fecha"], errors="coerce")
+        df_credito_diario["monto"] = pd.to_numeric(df_credito_diario["monto"], errors="coerce").fillna(0)
+        df_credito_diario["mes"] = df_credito_diario["fecha"].dt.to_period("M")
+
+        df_credito_diario_mes = (
+            df_credito_diario.groupby("mes")["monto"]
+            .sum()
+            .reset_index()
+            .rename(columns={"monto": "Crédito diario"})
+        )
+    else:
+        df_credito_diario_mes = pd.DataFrame(columns=["mes", "Crédito diario"])
+
+
+    # Crédito recurrente
+    df_credito_recurrente = pd.DataFrame(gastos_tarjeta_recurrentes_expandido)
+
+    if not df_credito_recurrente.empty:
+        df_credito_recurrente["fecha"] = pd.to_datetime(df_credito_recurrente["fecha"], errors="coerce")
+        df_credito_recurrente["monto"] = pd.to_numeric(df_credito_recurrente["monto"], errors="coerce").fillna(0)
+        df_credito_recurrente["mes"] = df_credito_recurrente["fecha"].dt.to_period("M")
+
+        df_credito_recurrente_mes = (
+            df_credito_recurrente.groupby("mes")["monto"]
+            .sum()
+            .reset_index()
+            .rename(columns={"monto": "Crédito recurrente"})
+        )
+    else:
+        df_credito_recurrente_mes = pd.DataFrame(columns=["mes", "Crédito recurrente"])
+
+
+    # Merge mensual final
+    df_mes_tipo = (
+        meses_base
+        .merge(df_debito_diario_mes, on="mes", how="left")
+        .merge(df_fijos_mes, on="mes", how="left")
+        .merge(df_credito_diario_mes, on="mes", how="left")
+        .merge(df_credito_recurrente_mes, on="mes", how="left")
+        .fillna(0)
+    )
+
+    for col in [
+        "Débito diario",
+        "Gastos fijos débito",
+        "Crédito diario",
+        "Crédito recurrente"
+    ]:
+        df_mes_tipo[col] = pd.to_numeric(df_mes_tipo[col], errors="coerce").fillna(0)
+
+    df_mes_tipo["Mes"] = df_mes_tipo["mes"].apply(
+        lambda m: f"{MESES_ES[m.month].capitalize()} {m.year}"
+    )
+
+    df_mes_tipo["Gastos débito total mensual"] = (
+        df_mes_tipo["Débito diario"] +
+        df_mes_tipo["Gastos fijos débito"]
+    )
+
+    df_mes_tipo["Gastos crédito total mensual"] = (
+        df_mes_tipo["Crédito diario"] +
+        df_mes_tipo["Crédito recurrente"]
+    )
+
+    df_mes_tipo["Gastos fijos mensuales"] = (
+        df_mes_tipo["Gastos fijos débito"] +
+        df_mes_tipo["Crédito recurrente"]
+    )
+
+    df_mes_tipo["Gastos no fijos mensuales"] = (
+        df_mes_tipo["Débito diario"] +
+        df_mes_tipo["Crédito diario"]
+    )
+
+    df_mes_tipo["Total general"] = (
+        df_mes_tipo["Gastos fijos mensuales"] +
+        df_mes_tipo["Gastos no fijos mensuales"]
+    )
+
+
+    # ==================================================
+    # META MENSUAL DE AHORRO
+    # ==================================================
+    st.subheader("🎯 Meta mensual de ahorro")
+
+    mes_actual = pd.Timestamp.today().to_period("M")
+
+    meta_ahorro = st.number_input(
+        "¿Cuánto quieres ahorrar este mes?",
+        min_value=0.0,
+        step=100.0,
+        value=2000.0
+    )
+
+    ingresos_mes_actual = (
+        (ing_rec + ing_punt)
+        .loc[(ing_rec + ing_punt).index.to_period("M") == mes_actual]
+        .sum()
+    )
+
+    fila_mes_actual = df_mes_tipo[df_mes_tipo["mes"] == mes_actual]
+
+    if not fila_mes_actual.empty:
+        gastos_fijos_mes_actual = float(fila_mes_actual["Gastos fijos mensuales"].iloc[0])
+        gastos_no_fijos_mes_actual = float(fila_mes_actual["Gastos no fijos mensuales"].iloc[0])
+    else:
+        gastos_fijos_mes_actual = 0.0
+        gastos_no_fijos_mes_actual = 0.0
+
+    gastos_comprometidos = gastos_fijos_mes_actual + gastos_no_fijos_mes_actual
+
+    monto_disponible_para_gastar = (
+        ingresos_mes_actual -
+        gastos_comprometidos -
+        meta_ahorro
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Ingresos del mes", f"S/ {ingresos_mes_actual:,.0f}")
+
+    with col2:
+        st.metric("Gastos ya comprometidos", f"S/ {gastos_comprometidos:,.0f}")
+
+    with col3:
+        st.metric("Puedes gastar todavía", f"S/ {max(0, monto_disponible_para_gastar):,.0f}")
+
+    if monto_disponible_para_gastar >= 0:
+        st.success(
+            f"Vas bien. Puedes gastar hasta S/ {monto_disponible_para_gastar:,.0f} más este mes y aún cumplir tu meta de ahorro."
+        )
+    else:
+        st.error(
+            f"Ya superaste tu meta de ahorro mensual por S/ {abs(monto_disponible_para_gastar):,.0f}."
         )
 
-        resumen_ciclo["Ciclo facturación"] = resumen_ciclo.apply(
-            lambda r: (
-                f"{pd.to_datetime(r['Inicio ciclo']).strftime('%d/%m/%Y')} - "
-                f"{pd.to_datetime(r['Cierre ciclo']).strftime('%d/%m/%Y')}"
-            ),
-            axis=1
+    # ==================================================
+    # PIE CHART - GASTOS NO FIJOS MENSUALES POR CATEGORÍA
+    # ==================================================
+    st.header("🥧 Gastos no fijos mensuales por categoría")
+
+    meses_disponibles = pd.period_range(
+        start=fecha_inicio_sim,
+        end=fecha_fin_sim,
+        freq="M"
+    )
+
+    opciones_meses = {
+        f"{MESES_ES[m.month].capitalize()} {m.year}": m
+        for m in meses_disponibles
+    }
+
+    mes_categoria_txt = st.selectbox(
+        "Selecciona el mes para analizar gastos no fijos",
+        list(opciones_meses.keys()),
+        key="mes_gastos_categoria"
+    )
+
+    mes_categoria = opciones_meses[mes_categoria_txt]
+
+    frames_cat = []
+
+    # Débito diario = gasto no fijo
+    df_debito_cat = pd.DataFrame(st.session_state["gastos_diarios"])
+
+    if not df_debito_cat.empty:
+        df_debito_cat["fecha"] = pd.to_datetime(df_debito_cat["fecha"], errors="coerce")
+        df_debito_cat["monto"] = pd.to_numeric(df_debito_cat["monto"], errors="coerce").fillna(0)
+        df_debito_cat["mes"] = df_debito_cat["fecha"].dt.to_period("M")
+
+        frames_cat.append(
+            df_debito_cat[["fecha", "mes", "categoria", "monto"]]
         )
 
-        resumen_ciclo = resumen_ciclo[
-            [
-                "Tarjeta",
-                "Ciclo facturación",
-                "Cierre ciclo",
-                "Fecha pago",
-                "Monto"
+    # Crédito diario = gasto no fijo
+    df_credito_cat = pd.DataFrame(st.session_state["gastos_tarjeta"])
+
+    if not df_credito_cat.empty:
+        df_credito_cat["fecha"] = pd.to_datetime(df_credito_cat["fecha"], errors="coerce")
+        df_credito_cat["monto"] = pd.to_numeric(df_credito_cat["monto"], errors="coerce").fillna(0)
+        df_credito_cat["mes"] = df_credito_cat["fecha"].dt.to_period("M")
+
+        frames_cat.append(
+            df_credito_cat[["fecha", "mes", "categoria", "monto"]]
+        )
+
+    if len(frames_cat) > 0:
+        df_gastos_cat = pd.concat(frames_cat, ignore_index=True)
+    else:
+        df_gastos_cat = pd.DataFrame(columns=["fecha", "mes", "categoria", "monto"])
+
+    df_mes_cat = df_gastos_cat[df_gastos_cat["mes"] == mes_categoria]
+
+    if not df_mes_cat.empty:
+        resumen_cat = (
+            df_mes_cat.groupby("categoria")["monto"]
+            .sum()
+            .reset_index()
+            .sort_values("monto", ascending=False)
+        )
+
+        total_mes = resumen_cat["monto"].sum()
+
+        col1, col2 = st.columns([1.3, 1])
+
+        with col1:
+            fig_cat, ax_cat = plt.subplots(figsize=(8, 8))
+
+            ax_cat.pie(
+                resumen_cat["monto"],
+                labels=resumen_cat["categoria"],
+                autopct=lambda p: f"{p:.1f}%\nS/ {p * total_mes / 100:,.0f}",
+                startangle=90,
+                textprops={"fontsize": 12}
+            )
+
+            ax_cat.set_title(
+                f"Gastos no fijos por categoría - {mes_categoria_txt}",
+                fontsize=16,
+                pad=20
+            )
+
+            ax_cat.axis("equal")
+
+            st.pyplot(fig_cat, use_container_width=True)
+
+        with col2:
+            st.subheader(f"Resumen {mes_categoria_txt}")
+            st.metric("Gasto no fijo total", f"S/ {total_mes:,.0f}")
+
+            st.dataframe(
+                resumen_cat.rename(columns={
+                    "categoria": "Categoría",
+                    "monto": "Monto"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+    else:
+        st.info(f"No hay gastos no fijos registrados en {mes_categoria_txt}.")
+
+    # ==================================================
+    # RESUMEN POR CICLO DE TARJETA DE CRÉDITO
+    # ==================================================
+    st.header("💳 Resumen por ciclo de tarjeta de crédito")
+
+    if not df_gt_calc.empty:
+        resumen = []
+
+        for t in st.session_state["tarjetas"]:
+            df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
+
+            for _, g in df_t.iterrows():
+                fecha_gasto = pd.to_datetime(g["fecha"], errors="coerce")
+
+                if pd.isna(fecha_gasto):
+                    continue
+
+                inicio, cierre = obtener_ciclo_tarjeta(
+                    fecha_gasto,
+                    int(t["dia_cierre"])
+                )
+
+                fecha_pago = (
+                    pd.Timestamp(cierre) + pd.DateOffset(months=1)
+                ).replace(day=int(t["dia_pago"]))
+
+                resumen.append({
+                    "Tarjeta": t["nombre"],
+                    "Inicio ciclo": inicio,
+                    "Cierre ciclo": cierre,
+                    "Fecha pago": fecha_pago.date(),
+                    "Monto": float(g["monto"])
+                })
+
+        df_res = pd.DataFrame(resumen)
+
+        if not df_res.empty:
+            resumen_ciclo = (
+                df_res
+                .groupby(
+                    ["Tarjeta", "Inicio ciclo", "Cierre ciclo", "Fecha pago"],
+                    as_index=False
+                )["Monto"]
+                .sum()
+                .sort_values("Fecha pago")
+            )
+
+            resumen_ciclo["Ciclo facturación"] = resumen_ciclo.apply(
+                lambda r: (
+                    f"{pd.to_datetime(r['Inicio ciclo']).strftime('%d/%m/%Y')} - "
+                    f"{pd.to_datetime(r['Cierre ciclo']).strftime('%d/%m/%Y')}"
+                ),
+                axis=1
+            )
+
+            resumen_ciclo = resumen_ciclo[
+                [
+                    "Tarjeta",
+                    "Ciclo facturación",
+                    "Cierre ciclo",
+                    "Fecha pago",
+                    "Monto"
+                ]
             ]
-        ]
+
+            st.dataframe(
+                resumen_ciclo,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            hoy = pd.Timestamp.today().normalize().date()
+
+            pagos_futuros = resumen_ciclo[
+                pd.to_datetime(resumen_ciclo["Fecha pago"]).dt.date >= hoy
+            ].copy()
+
+            if not pagos_futuros.empty:
+                proximo_pago = pagos_futuros.sort_values("Fecha pago").iloc[0]
+
+                st.info(
+                    f"💳 Próximo pago total: **S/ {proximo_pago['Monto']:,.0f}** "
+                    f"de la tarjeta **{proximo_pago['Tarjeta']}**, "
+                    f"correspondiente a la facturación con cierre al "
+                    f"**{pd.to_datetime(proximo_pago['Cierre ciclo']).strftime('%d/%m/%Y')}**, "
+                    f"con fecha de pago **{pd.to_datetime(proximo_pago['Fecha pago']).strftime('%d/%m/%Y')}**."
+                )
+            else:
+                st.success("No tienes pagos futuros de tarjeta registrados en la simulación.")
+        else:
+            st.info("No hay gastos válidos con tarjeta para calcular ciclos.")
+    else:
+        st.info("No hay gastos con tarjeta registrados.")
+
+
+    # ==================================================
+    # GRÁFICOS MENSUALES
+    # ==================================================
+    if df_mes_tipo["Total general"].sum() > 0:
+
+        x = range(len(df_mes_tipo))
+        ancho = 0.35
+
+        st.subheader("💳 Gastos débito vs crédito")
+
+        fig_dc, ax_dc = plt.subplots(figsize=(16, 6))
+
+        ax_dc.bar(
+            [i - ancho / 2 for i in x],
+            df_mes_tipo["Gastos débito total mensual"],
+            width=ancho,
+            label="Gastos débito total mensual"
+        )
+
+        ax_dc.bar(
+            [i + ancho / 2 for i in x],
+            df_mes_tipo["Gastos crédito total mensual"],
+            width=ancho,
+            label="Gastos crédito total mensual"
+        )
+
+        ax_dc.set_xticks(list(x))
+        ax_dc.set_xticklabels(df_mes_tipo["Mes"], rotation=35, ha="right", fontsize=12)
+        ax_dc.set_ylabel("Monto mensual (S/)", fontsize=13)
+        ax_dc.set_title("Gastos mensuales: débito vs crédito", fontsize=16, pad=18)
+        ax_dc.grid(axis="y", linestyle="--", alpha=0.25)
+        ax_dc.legend(fontsize=11)
+
+        plt.tight_layout()
+        st.pyplot(fig_dc, use_container_width=True)
+
+        st.subheader("📌 Gastos fijos vs no fijos")
+
+        fig_fnf, ax_fnf = plt.subplots(figsize=(16, 6))
+
+        ax_fnf.bar(
+            [i - ancho / 2 for i in x],
+            df_mes_tipo["Gastos fijos mensuales"],
+            width=ancho,
+            label="Gastos fijos mensuales"
+        )
+
+        ax_fnf.bar(
+            [i + ancho / 2 for i in x],
+            df_mes_tipo["Gastos no fijos mensuales"],
+            width=ancho,
+            label="Gastos no fijos mensuales"
+        )
+
+        ax_fnf.set_xticks(list(x))
+        ax_fnf.set_xticklabels(df_mes_tipo["Mes"], rotation=35, ha="right", fontsize=12)
+        ax_fnf.set_ylabel("Monto mensual (S/)", fontsize=13)
+        ax_fnf.set_title("Gastos mensuales: fijos vs no fijos", fontsize=16, pad=18)
+        ax_fnf.grid(axis="y", linestyle="--", alpha=0.25)
+        ax_fnf.legend(fontsize=11)
+
+        plt.tight_layout()
+        st.pyplot(fig_fnf, use_container_width=True)
 
         st.dataframe(
-            resumen_ciclo,
+            df_mes_tipo[
+                [
+                    "Mes",
+                    "Débito diario",
+                    "Gastos fijos débito",
+                    "Crédito diario",
+                    "Crédito recurrente",
+                    "Gastos débito total mensual",
+                    "Gastos crédito total mensual",
+                    "Gastos fijos mensuales",
+                    "Gastos no fijos mensuales",
+                    "Total general"
+                ]
+            ],
             use_container_width=True,
             hide_index=True
         )
 
-        hoy = pd.Timestamp.today().normalize().date()
-
-        pagos_futuros = resumen_ciclo[
-            pd.to_datetime(resumen_ciclo["Fecha pago"]).dt.date >= hoy
-        ].copy()
-
-        if not pagos_futuros.empty:
-            proximo_pago = pagos_futuros.sort_values("Fecha pago").iloc[0]
-
-            st.info(
-                f"💳 Próximo pago total: **S/ {proximo_pago['Monto']:,.0f}** "
-                f"de la tarjeta **{proximo_pago['Tarjeta']}**, "
-                f"correspondiente a la facturación con cierre al "
-                f"**{pd.to_datetime(proximo_pago['Cierre ciclo']).strftime('%d/%m/%Y')}**, "
-                f"con fecha de pago **{pd.to_datetime(proximo_pago['Fecha pago']).strftime('%d/%m/%Y')}**."
-            )
-        else:
-            st.success("No tienes pagos futuros de tarjeta registrados en la simulación.")
     else:
-        st.info("No hay gastos válidos con tarjeta para calcular ciclos.")
-else:
-    st.info("No hay gastos con tarjeta registrados.")
-
-
-# ==================================================
-# GRÁFICOS MENSUALES
-# ==================================================
-if df_mes_tipo["Total general"].sum() > 0:
-
-    x = range(len(df_mes_tipo))
-    ancho = 0.35
-
-    st.subheader("💳 Gastos débito vs crédito")
-
-    fig_dc, ax_dc = plt.subplots(figsize=(16, 6))
-
-    ax_dc.bar(
-        [i - ancho / 2 for i in x],
-        df_mes_tipo["Gastos débito total mensual"],
-        width=ancho,
-        label="Gastos débito total mensual"
-    )
-
-    ax_dc.bar(
-        [i + ancho / 2 for i in x],
-        df_mes_tipo["Gastos crédito total mensual"],
-        width=ancho,
-        label="Gastos crédito total mensual"
-    )
-
-    ax_dc.set_xticks(list(x))
-    ax_dc.set_xticklabels(df_mes_tipo["Mes"], rotation=35, ha="right", fontsize=12)
-    ax_dc.set_ylabel("Monto mensual (S/)", fontsize=13)
-    ax_dc.set_title("Gastos mensuales: débito vs crédito", fontsize=16, pad=18)
-    ax_dc.grid(axis="y", linestyle="--", alpha=0.25)
-    ax_dc.legend(fontsize=11)
-
-    plt.tight_layout()
-    st.pyplot(fig_dc, use_container_width=True)
-
-    st.subheader("📌 Gastos fijos vs no fijos")
-
-    fig_fnf, ax_fnf = plt.subplots(figsize=(16, 6))
-
-    ax_fnf.bar(
-        [i - ancho / 2 for i in x],
-        df_mes_tipo["Gastos fijos mensuales"],
-        width=ancho,
-        label="Gastos fijos mensuales"
-    )
-
-    ax_fnf.bar(
-        [i + ancho / 2 for i in x],
-        df_mes_tipo["Gastos no fijos mensuales"],
-        width=ancho,
-        label="Gastos no fijos mensuales"
-    )
-
-    ax_fnf.set_xticks(list(x))
-    ax_fnf.set_xticklabels(df_mes_tipo["Mes"], rotation=35, ha="right", fontsize=12)
-    ax_fnf.set_ylabel("Monto mensual (S/)", fontsize=13)
-    ax_fnf.set_title("Gastos mensuales: fijos vs no fijos", fontsize=16, pad=18)
-    ax_fnf.grid(axis="y", linestyle="--", alpha=0.25)
-    ax_fnf.legend(fontsize=11)
-
-    plt.tight_layout()
-    st.pyplot(fig_fnf, use_container_width=True)
-
-    st.dataframe(
-        df_mes_tipo[
-            [
-                "Mes",
-                "Débito diario",
-                "Gastos fijos débito",
-                "Crédito diario",
-                "Crédito recurrente",
-                "Gastos débito total mensual",
-                "Gastos crédito total mensual",
-                "Gastos fijos mensuales",
-                "Gastos no fijos mensuales",
-                "Total general"
-            ]
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-else:
-    st.info("No hay gastos registrados para mostrar.")
+        st.info("No hay gastos registrados para mostrar.")
