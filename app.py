@@ -151,6 +151,92 @@ claves = [
 ]
 for clave in claves:
     cargar(clave)
+# ==================================================
+# MIGRACIÓN DE DATOS ANTIGUOS
+# ==================================================
+def migrar_datos_antiguos():
+    cambios = False
+
+    nombre_cuenta_principal = st.session_state["configuracion"].get(
+        "nombre_cuenta_principal",
+        "Cuenta principal"
+    )
+
+    cuentas_debito_map = {nombre_cuenta_principal: "principal"}
+
+    for c in st.session_state["cuentas_ahorro"]:
+        cuentas_debito_map[c["nombre"]] = c["id"]
+
+    tarjetas_map = {
+        t["nombre"]: t["id"]
+        for t in st.session_state["tarjetas"]
+    }
+
+    # Migrar gastos diarios débito
+    for g in st.session_state["gastos_diarios"]:
+        if "cuenta_origen" not in g:
+            cuenta_nombre = g.get("cuenta_origen_nombre", nombre_cuenta_principal)
+            g["cuenta_origen"] = cuentas_debito_map.get(cuenta_nombre, "principal")
+            g["cuenta_origen_nombre"] = cuenta_nombre
+            cambios = True
+
+    # Migrar gastos diarios con tarjeta
+    for g in st.session_state["gastos_tarjeta"]:
+        if "tarjeta_id" not in g:
+            tarjeta_nombre = g.get("tarjeta_nombre")
+
+            if tarjeta_nombre in tarjetas_map:
+                g["tarjeta_id"] = tarjetas_map[tarjeta_nombre]
+                cambios = True
+
+    if cambios:
+        guardar("gastos_diarios")
+        guardar("gastos_tarjeta")
+
+
+migrar_datos_antiguos()
+
+
+# ==================================================
+# LIMPIEZA DE GASTOS INVÁLIDOS
+# ==================================================
+def limpiar_gastos_invalidos():
+
+    original = len(st.session_state["gastos_tarjeta"])
+
+    st.session_state["gastos_tarjeta"] = [
+        g for g in st.session_state["gastos_tarjeta"]
+        if float(g.get("monto", 0)) > 0
+    ]
+
+    nuevos = len(st.session_state["gastos_tarjeta"])
+
+    if nuevos != original:
+        guardar("gastos_tarjeta")
+
+
+limpiar_gastos_invalidos()
+
+
+# ==================================================
+# LIMPIEZA DE GASTOS INVÁLIDOS
+# ==================================================
+def limpiar_gastos_invalidos():
+
+    original = len(st.session_state["gastos_tarjeta"])
+
+    st.session_state["gastos_tarjeta"] = [
+        g for g in st.session_state["gastos_tarjeta"]
+        if float(g.get("monto", 0)) > 0
+    ]
+
+    nuevos = len(st.session_state["gastos_tarjeta"])
+
+    if nuevos != original:
+        guardar("gastos_tarjeta")
+
+
+limpiar_gastos_invalidos()
 
 # ==================================================
 # CONFIGURACIÓN DE SIMULACIÓN Y CUENTAS DE AHORRO
@@ -906,13 +992,17 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
                 guardar("categorias")
 
-            nuevo_gasto = {
-                "fecha": fecha.isoformat(),
-                "descripcion": descripcion,
-                "cuenta_origen_nombre": cuenta_origen_nombre,
-                "categoria": categoria,
-                "monto": float(monto)
-            }
+                nuevo_gasto = {
+                    "fecha": fecha.isoformat(),
+                    "descripcion": descripcion,
+
+                    # 👇 IMPORTANTE
+                    "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
+
+                    "cuenta_origen_nombre": cuenta_origen_nombre,
+                    "categoria": categoria,
+                    "monto": float(monto)
+                }
 
             st.session_state["gastos_diarios"].append(nuevo_gasto)
             guardar("gastos_diarios")
@@ -1050,10 +1140,14 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             st.session_state["gastos_tarjeta"].append({
                 "descripcion": descripcion,
                 "fecha": fecha.isoformat(),
+
+                # 👇 IMPORTANTE
+                "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
+
                 "tarjeta_nombre": tarjeta_nombre,
-                "categoria": categoria,                
+                "categoria": categoria,
                 "monto": float(monto)
-    })
+            })
 
             guardar("gastos_tarjeta")
             st.success("Gasto con tarjeta agregado correctamente")
@@ -1079,8 +1173,18 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             df_gt["Eliminar"] = False
 
+            # Ocultar columnas internas
+            columnas_ocultas = [
+                "tarjeta_id",
+                "id"
+            ]
+
+            df_gt_show = df_gt.drop(
+                columns=[c for c in columnas_ocultas if c in df_gt.columns]
+            )
+
             ed_gt = st.data_editor(
-                df_gt,
+                df_gt_show,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -1092,8 +1196,19 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             if st.button("Guardar cambios gastos tarjeta"):
 
+                df_temp = df_gt.reset_index(drop=True).copy()
+                ed_temp = ed_gt.reset_index(drop=True).copy()
+
+                # Reinsertar columnas ocultas solo para las filas visibles/editadas
+                for col in ["tarjeta_id", "id"]:
+                    if col in df_temp.columns:
+                        ed_temp[col] = df_temp[col].reindex(ed_temp.index).values
+
                 df_editado = (
-                    ed_gt[ed_gt["Eliminar"] == False]
+                    ed_temp[
+                        (ed_temp["Eliminar"] == False) &
+                        (pd.to_numeric(ed_temp["monto"], errors="coerce").fillna(0) > 0)
+                    ]
                     .drop(columns=["Eliminar"])
                     .copy()
                 )
@@ -1104,9 +1219,17 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                         errors="coerce"
                     ).dt.strftime("%Y-%m-%d")
 
-                st.session_state["gastos_tarjeta"] = (
-                    df_editado.to_dict("records")
-                )
+                if "monto" in df_editado.columns:
+                    df_editado["monto"] = pd.to_numeric(
+                        df_editado["monto"],
+                        errors="coerce"
+                    ).fillna(0).astype(float)
+
+                # Limpiar NaN / NaT antes de guardar en Supabase
+                df_editado = df_editado.replace({pd.NA: None})
+                df_editado = df_editado.where(pd.notnull(df_editado), None)
+
+                st.session_state["gastos_tarjeta"] = df_editado.to_dict("records")
 
                 guardar("gastos_tarjeta")
                 st.rerun()
