@@ -1014,6 +1014,10 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             df_g["fecha"],
             errors="coerce"
         ).dt.date
+        df_g = df_g.sort_values(
+    by="fecha",
+    ascending=False
+)
 
         df_g["monto"] = pd.to_numeric(
             df_g["monto"],
@@ -1395,7 +1399,10 @@ fechas = pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="D")
 # Ingresos y gastos diarios
 if not df_g.empty:
     df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
-
+    df_gt = df_gt.sort_values(
+    by="fecha",
+    ascending=False
+)
     g_diarios_principal = (
         df_g[df_g.get("cuenta_origen", "principal") == "principal"]
         .groupby("fecha")["monto"]
