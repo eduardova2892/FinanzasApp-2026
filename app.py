@@ -944,7 +944,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
         fecha = st.date_input(
             "Fecha",
-            value=date.today(),
+            value=hoy_peru,
     key="fecha_gasto_diario_debito"
         )
 
@@ -1259,7 +1259,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
     with st.form("form_transferencia"):
         fecha = st.date_input(
     "Fecha",
-    value=date.today(),
+    value=date.hoy_peru(),
     key="fecha_transferencia"
 )
         origen = st.selectbox("Cuenta origen", list(cuentas_map.keys()))
@@ -1581,7 +1581,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     }
 
     # Selector de fecha para mostrar saldo
-    hoy = pd.Timestamp.today().normalize()
+    hoy = pd.Timestamp.hoy_peru().normalize()
 
     if hoy < fechas.min() or hoy > fechas.max():
         fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", fechas.max().date())
@@ -1948,7 +1948,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     # ==================================================
     st.subheader("🎯 Meta mensual de ahorro")
 
-    mes_actual = pd.Timestamp.today().to_period("M")
+    mes_actual = pd.Timestamp.hoy_peru().to_period("M")
 
     meta_ahorro = st.number_input(
         "¿Cuánto quieres ahorrar este mes?",
@@ -2177,7 +2177,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                 hide_index=True
             )
 
-            hoy = pd.Timestamp.today().normalize().date()
+            hoy = pd.Timestamp.hoy_peru().normalize().date()
 
             pagos_futuros = resumen_ciclo[
                 pd.to_datetime(resumen_ciclo["Fecha pago"]).dt.date >= hoy
