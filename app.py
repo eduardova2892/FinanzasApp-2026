@@ -1583,7 +1583,9 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     }
 
     # Selector de fecha para mostrar saldo
-    hoy = pd.Timestamp.hoy_peru.normalize()
+    hoy = pd.Timestamp.now(
+    tz=ZoneInfo("America/Lima")
+).date()
 
     if hoy < fechas.min() or hoy > fechas.max():
         fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", fechas.max().date())
@@ -2179,7 +2181,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                 hide_index=True
             )
 
-            hoy = pd.Timestamp.hoy_peru().normalize().date()
+            hoy = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))().normalize().date()
 
             pagos_futuros = resumen_ciclo[
                 pd.to_datetime(resumen_ciclo["Fecha pago"]).dt.date >= hoy
