@@ -974,7 +974,6 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             step=1.0,
             key="monto_gasto_diario_debito"
         )
-
         submitted = st.form_submit_button("Agregar gasto")
 
         if submitted:
@@ -985,24 +984,18 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             if categoria not in st.session_state["categorias"]:
                 st.session_state["categorias"].append(categoria)
-
-                st.session_state["categorias"] = sorted(
-                    list(set(st.session_state["categorias"]))
-    )
-
+                st.session_state["categorias"] = sorted(list(set(st.session_state["categorias"])))
                 guardar("categorias")
 
-                nuevo_gasto = {
-                    "fecha": fecha.isoformat(),
-                    "descripcion": descripcion,
-
-                    # 👇 IMPORTANTE
-                    "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
-
-                    "cuenta_origen_nombre": cuenta_origen_nombre,
-                    "categoria": categoria,
-                    "monto": float(monto)
-                }
+            nuevo_gasto = {
+                "id": str(uuid.uuid4()),
+                "fecha": fecha.isoformat(),
+                "cuenta_origen": cuentas_debito_map.get(cuenta_origen_nombre, "principal"),
+                "cuenta_origen_nombre": cuenta_origen_nombre,
+                "categoria": categoria,
+                "descripcion": descripcion,
+                "monto": float(monto)
+            }
 
             st.session_state["gastos_diarios"].append(nuevo_gasto)
             guardar("gastos_diarios")
@@ -1029,8 +1022,14 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
         df_g["Eliminar"] = False
 
+        columnas_ocultas = ["id", "cuenta_origen"]
+
+        df_g_show = df_g.drop(
+            columns=[c for c in columnas_ocultas if c in df_g.columns]
+        )
+
         ed_g = st.data_editor(
-            df_g,
+            df_g_show,
             use_container_width=True,
             hide_index=True,
             column_config={
