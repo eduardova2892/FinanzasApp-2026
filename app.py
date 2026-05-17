@@ -1183,33 +1183,44 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             st.subheader("📄 Resumen gastos diarios tarjeta crédito")
 
-            df_gt["fecha"] = pd.to_datetime(
-                df_gt["fecha"],
-                errors="coerce"
-            ).dt.date
+            # Asegurar ID en registros antiguos
+            if "id" not in df_gt.columns:
+                df_gt["id"] = None
 
-            df_gt["monto"] = pd.to_numeric(
-                df_gt["monto"],
-                errors="coerce"
-            ).fillna(0)
-
-            df_gt["Eliminar"] = False
-
-            # Ocultar columnas internas
-            columnas_ocultas = [
-                "tarjeta_id",
-                "id"
-            ]
-
-            df_gt_show = df_gt.drop(
-                columns=[c for c in columnas_ocultas if c in df_gt.columns]
+            df_gt["id"] = df_gt["id"].apply(
+                lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
             )
 
+            # Eliminar duplicados exactos antiguos
+            df_gt = df_gt.drop_duplicates(
+                subset=["fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "monto"],
+                keep="first"
+            )
+
+            df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
+            df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
+
+            # Ordenar por fecha reciente
+            df_gt = df_gt.sort_values("fecha", ascending=False).reset_index(drop=True)
+
+            df_gt["fecha"] = df_gt["fecha"].dt.date
+            df_gt["Eliminar"] = False
+
+            # Guardar limpieza automática
+            st.session_state["gastos_tarjeta"] = (
+                df_gt.drop(columns=["Eliminar"])
+                .assign(fecha=lambda d: pd.to_datetime(d["fecha"]).dt.strftime("%Y-%m-%d"))
+                .to_dict("records")
+            )
+            guardar("gastos_tarjeta")
+
             ed_gt = st.data_editor(
-                df_gt_show,
+                df_gt,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
+                    "id": None,
+                    "tarjeta_id": None,
                     "Eliminar": st.column_config.CheckboxColumn(),
                     "monto": st.column_config.NumberColumn("Monto")
                 },
@@ -1218,38 +1229,18 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             if st.button("Guardar cambios gastos tarjeta"):
 
-                df_temp = df_gt.reset_index(drop=True).copy()
-                ed_temp = ed_gt.reset_index(drop=True).copy()
+                df_editado = ed_gt[ed_gt["Eliminar"] == False].copy()
+                df_editado = df_editado.drop(columns=["Eliminar"])
 
-                # Reinsertar columnas ocultas solo para las filas visibles/editadas
-                for col in ["tarjeta_id", "id"]:
-                    if col in df_temp.columns:
-                        ed_temp[col] = df_temp[col].reindex(ed_temp.index).values
+                df_editado["fecha"] = pd.to_datetime(
+                    df_editado["fecha"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
 
-                df_editado = (
-                    ed_temp[
-                        (ed_temp["Eliminar"] == False) &
-                        (pd.to_numeric(ed_temp["monto"], errors="coerce").fillna(0) > 0)
-                    ]
-                    .drop(columns=["Eliminar"])
-                    .copy()
+                df_editado = df_editado.sort_values(
+                    "fecha",
+                    ascending=False
                 )
-
-                if "fecha" in df_editado.columns:
-                    df_editado["fecha"] = pd.to_datetime(
-                        df_editado["fecha"],
-                        errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-
-                if "monto" in df_editado.columns:
-                    df_editado["monto"] = pd.to_numeric(
-                        df_editado["monto"],
-                        errors="coerce"
-                    ).fillna(0).astype(float)
-
-                # Limpiar NaN / NaT antes de guardar en Supabase
-                df_editado = df_editado.replace({pd.NA: None})
-                df_editado = df_editado.where(pd.notnull(df_editado), None)
 
                 st.session_state["gastos_tarjeta"] = df_editado.to_dict("records")
 
