@@ -1136,12 +1136,26 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     st.error("Debes ingresar una categoría válida.")
                     st.stop()
 
-            if categoria not in st.session_state["categorias"]:
-                st.session_state["categorias"].append(categoria)
+                if categoria not in st.session_state["categorias"]:
+                    st.session_state["categorias"].append(categoria)
+                    st.session_state["categorias"] = sorted(list(set(st.session_state["categorias"])))
+                    guardar("categorias")
 
-                st.session_state["categorias"] = sorted(
-                    list(set(st.session_state["categorias"]))
-        )
+                nuevo_gasto_tarjeta = {
+                    "id": str(uuid.uuid4()),
+                    "fecha": fecha.isoformat(),
+                    "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
+                    "tarjeta_nombre": tarjeta_nombre,
+                    "categoria": categoria,
+                    "descripcion": descripcion,
+                    "monto": float(monto)
+                }
+
+                st.session_state["gastos_tarjeta"].append(nuevo_gasto_tarjeta)
+                guardar("gastos_tarjeta")
+
+                st.success("Gasto con tarjeta agregado correctamente")
+                st.rerun()
 
             guardar("categorias")
 
