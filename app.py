@@ -1261,7 +1261,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
     with st.form("form_transferencia"):
         fecha = st.date_input(
     "Fecha",
-    value=hoy_peru(),
+    value=hoy_peru,
     key="fecha_transferencia"
 )
         origen = st.selectbox("Cuenta origen", list(cuentas_map.keys()))
