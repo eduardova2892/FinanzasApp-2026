@@ -2187,7 +2187,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                 hide_index=True
             )
 
-            hoy = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))().normalize().date()
+            hoy = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).normalize().date()
 
             pagos_futuros = resumen_ciclo[
                 pd.to_datetime(resumen_ciclo["Fecha pago"]).dt.date >= hoy
