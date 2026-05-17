@@ -1584,13 +1584,19 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
     # Selector de fecha para mostrar saldo
     hoy = pd.Timestamp.now(
-    tz=ZoneInfo("America/Lima")
-).date()
+        tz=ZoneInfo("America/Lima")
+    ).tz_localize(None).normalize()
 
     if hoy < fechas.min() or hoy > fechas.max():
-        fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", fechas.max().date())
+        fecha_saldo_sel = st.date_input(
+            "📅 Fecha para mostrar saldo",
+            fechas.max().date()
+        )
     else:
-        fecha_saldo_sel = st.date_input("📅 Fecha para mostrar saldo", hoy.date())
+        fecha_saldo_sel = st.date_input(
+            "📅 Fecha para mostrar saldo",
+            hoy.date()
+        )
 
     fecha_saldo_sel = pd.to_datetime(fecha_saldo_sel)
 
