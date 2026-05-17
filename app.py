@@ -1958,7 +1958,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     # ==================================================
     st.subheader("🎯 Meta mensual de ahorro")
 
-    mes_actual = pd.Timestamp.hoy_peru().to_period("M")
+    mes_actual = pd.Timestamp(hoy_peru).to_period("M")
 
     meta_ahorro = st.number_input(
         "¿Cuánto quieres ahorrar este mes?",
