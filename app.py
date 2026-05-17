@@ -1,12 +1,15 @@
 import streamlit as st
+from zoneinfo import ZoneInfo
 from supabase import create_client
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import date, timedelta
 import uuid
+
 # ==================================================
 # CONFIGURACIÓN GENERAL
 # ==================================================
+hoy_peru = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).date()
 st.set_page_config(page_title="Finanzas Personales", layout="wide")
 
 # ==================================================
@@ -849,7 +852,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
         fecha = st.date_input(
             "Fecha",
-            value=date.today(),
+            value=hoy_peru,
     key="fecha_ingreso_puntual"
 )
 
@@ -1088,7 +1091,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             fecha = st.date_input(
                 "Fecha gasto",
-                value=date.today(),
+                value=hoy_peru,
     key="fecha_gasto_tarjeta"
 )
 
