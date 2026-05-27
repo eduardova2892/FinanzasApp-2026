@@ -299,11 +299,26 @@ with st.expander("⚙️ 1. Configuración inicial", expanded=False):
         nombre = st.text_input("Nombre de la cuenta", "Ahorro Viajes")
         saldo_ini = st.number_input("Saldo inicial", min_value=0.0)
 
+        tea = st.number_input(
+            "TEA anual (%)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=0.1
+        )
+
+        aplica_interes_diario = st.checkbox(
+            "Aplicar interés diario",
+            value=False
+        )
+
         if st.form_submit_button("Agregar cuenta"):
             st.session_state["cuentas_ahorro"].append({
                 "id": str(uuid.uuid4()),
                 "nombre": nombre,
-                "saldo_inicial": saldo_ini
+                "saldo_inicial": float(saldo_ini),
+                "tea": float(tea),
+                "aplica_interes_diario": bool(aplica_interes_diario)
             })
             guardar("cuentas_ahorro")
             st.rerun()
@@ -322,6 +337,8 @@ with st.expander("⚙️ 1. Configuración inicial", expanded=False):
         "id": "principal",
         "Cuenta": nombre_cuenta_principal,
         "Saldo inicial": saldo_principal,
+        "TEA (%)": 0.0,
+        "Interés diario": False,
         "Tipo": "Principal",
         "Eliminar": False
     }]
@@ -330,7 +347,9 @@ with st.expander("⚙️ 1. Configuración inicial", expanded=False):
         cuentas_resumen.append({
             "id": c["id"],
             "Cuenta": c["nombre"],
-            "Saldo inicial": c["saldo_inicial"],
+            "Saldo inicial": c.get("saldo_inicial", 0.0),
+            "TEA (%)": c.get("tea", 0.0),
+            "Interés diario": c.get("aplica_interes_diario", False),
             "Tipo": "Secundaria",
             "Eliminar": False
         })
@@ -342,28 +361,43 @@ with st.expander("⚙️ 1. Configuración inicial", expanded=False):
         use_container_width=True,
         hide_index=True,
         disabled=["Cuenta", "Saldo inicial", "Tipo"],
-        column_config={
-            "Eliminar": st.column_config.CheckboxColumn()
-        },
+column_config={
+    "TEA (%)": st.column_config.NumberColumn(
+        "TEA (%)",
+        min_value=0.0,
+        max_value=100.0,
+        step=0.1
+    ),
+    "Interés diario": st.column_config.CheckboxColumn(
+        "Interés diario"
+    ),
+    "Eliminar": st.column_config.CheckboxColumn()
+},
         key="editor_cuentas_ahorro_resumen"
     )
 
-    if st.button("Guardar cambios cuentas de ahorro"):
-        df_original = df_cuentas_resumen.copy()
-        df_original["Eliminar"] = ed_cuentas["Eliminar"].values
+if st.button("Guardar cambios cuentas de ahorro"):
+    df_original = df_cuentas_resumen.copy()
+    df_original["TEA (%)"] = ed_cuentas["TEA (%)"].values
+    df_original["Interés diario"] = ed_cuentas["Interés diario"].values
+    df_original["Eliminar"] = ed_cuentas["Eliminar"].values
 
-        cuentas_a_eliminar = df_original[
-            (df_original["Eliminar"] == True) &
-            (df_original["Tipo"] == "Secundaria")
-        ]["id"].tolist()
+    cuentas_actualizadas = []
 
-        st.session_state["cuentas_ahorro"] = [
-            c for c in st.session_state["cuentas_ahorro"]
-            if c["id"] not in cuentas_a_eliminar
-        ]
+    for _, row in df_original.iterrows():
+        if row["Tipo"] == "Secundaria" and not row["Eliminar"]:
+            cuentas_actualizadas.append({
+                "id": row["id"],
+                "nombre": row["Cuenta"],
+                "saldo_inicial": float(row["Saldo inicial"]),
+                "tea": float(row["TEA (%)"]),
+                "aplica_interes_diario": bool(row["Interés diario"])
+            })
 
-        guardar("cuentas_ahorro")
-        st.rerun()
+    st.session_state["cuentas_ahorro"] = cuentas_actualizadas
+
+    guardar("cuentas_ahorro")
+    st.rerun()
 
     st.divider()
 
@@ -1645,6 +1679,27 @@ for cuenta in st.session_state.cuentas_ahorro:
 
             if t["destino"] == cuenta["id"]:
                 serie_sec.loc[f:] += float(t["monto"])
+
+                tea = float(cuenta.get("tea", 0.0))
+aplica_interes_diario = bool(cuenta.get("aplica_interes_diario", False))
+
+if aplica_interes_diario and tea > 0:
+    tasa_diaria = (1 + tea / 100) ** (1 / 365) - 1
+
+    serie_con_interes = pd.Series(index=fechas, dtype=float)
+    saldo_actual = float(serie_sec.iloc[0])
+
+    serie_movimientos = serie_sec.diff().fillna(0)
+
+    for i, f in enumerate(fechas):
+        if i == 0:
+            serie_con_interes.loc[f] = saldo_actual
+        else:
+            saldo_actual = saldo_actual + serie_movimientos.loc[f]
+            saldo_actual = saldo_actual * (1 + tasa_diaria)
+            serie_con_interes.loc[f] = saldo_actual
+
+    serie_sec = serie_con_interes
 
     saldos_sec[nombre_cuenta] = serie_sec
 
