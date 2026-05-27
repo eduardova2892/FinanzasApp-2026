@@ -1634,15 +1634,16 @@ for t in st.session_state.transferencias:
 # ==================================================
 # SALDOS DE CUENTAS DE AHORRO SECUNDARIAS
 # ==================================================
+
 saldos_sec = {}
 
-for cuenta in st.session_state.cuentas_ahorro:
+for cuenta in st.session_state["cuentas_ahorro"]:
     nombre_cuenta = cuenta["nombre"]
-    saldo_ini = float(cuenta["saldo_inicial"])
+    saldo_ini = float(cuenta.get("saldo_inicial", 0.0))
 
     serie_sec = pd.Series(saldo_ini, index=fechas)
 
-    # Gastos débito asociados a esta cuenta secundaria
+    # Gastos diarios débito asociados a esta cuenta secundaria
     if not df_g.empty and "cuenta_origen" in df_g.columns:
         gastos_sec = (
             df_g[df_g["cuenta_origen"] == cuenta["id"]]
@@ -1670,7 +1671,7 @@ for cuenta in st.session_state.cuentas_ahorro:
         serie_sec = serie_sec - gastos_fijos_sec.cumsum()
 
     # Transferencias
-    for t in st.session_state.transferencias:
+    for t in st.session_state["transferencias"]:
         f = pd.to_datetime(t["fecha"])
 
         if f in serie_sec.index:
@@ -1680,27 +1681,28 @@ for cuenta in st.session_state.cuentas_ahorro:
             if t["destino"] == cuenta["id"]:
                 serie_sec.loc[f:] += float(t["monto"])
 
-                tea = float(cuenta.get("tea", 0.0))
-aplica_interes_diario = bool(cuenta.get("aplica_interes_diario", False))
+    # Interés diario por TEA
+    tea = float(cuenta.get("tea", 0.0))
+    aplica_interes_diario = bool(cuenta.get("aplica_interes_diario", False))
 
-if aplica_interes_diario and tea > 0:
-    tasa_diaria = (1 + tea / 100) ** (1 / 365) - 1
+    if aplica_interes_diario and tea > 0:
+        tasa_diaria = (1 + tea / 100) ** (1 / 365) - 1
 
-    serie_con_interes = pd.Series(index=fechas, dtype=float)
-    saldo_actual = float(serie_sec.iloc[0])
+        serie_con_interes = pd.Series(index=fechas, dtype=float)
+        saldo_actual = float(serie_sec.iloc[0])
+        serie_movimientos = serie_sec.diff().fillna(0)
 
-    serie_movimientos = serie_sec.diff().fillna(0)
+        for i, f in enumerate(fechas):
+            if i == 0:
+                serie_con_interes.loc[f] = saldo_actual
+            else:
+                saldo_actual = saldo_actual + serie_movimientos.loc[f]
+                saldo_actual = saldo_actual * (1 + tasa_diaria)
+                serie_con_interes.loc[f] = saldo_actual
 
-    for i, f in enumerate(fechas):
-        if i == 0:
-            serie_con_interes.loc[f] = saldo_actual
-        else:
-            saldo_actual = saldo_actual + serie_movimientos.loc[f]
-            saldo_actual = saldo_actual * (1 + tasa_diaria)
-            serie_con_interes.loc[f] = saldo_actual
+        serie_sec = serie_con_interes
 
-    serie_sec = serie_con_interes
-
+    # IMPORTANTE: esto debe ir fuera del if de interés
     saldos_sec[nombre_cuenta] = serie_sec
 
 # ==================================================
