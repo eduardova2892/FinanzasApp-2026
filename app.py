@@ -688,6 +688,46 @@ with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False
                     errors="coerce"
                 ).dt.strftime("%Y-%m-%d")
 
+            # Sanear campos que en registros viejos pueden ser NaN/None
+            # (causan ValueError al serializar a JSON con allow_nan=False)
+            if "id" not in df_editado.columns:
+                df_editado["id"] = [str(uuid.uuid4()) for _ in range(len(df_editado))]
+            else:
+                df_editado["id"] = df_editado["id"].apply(
+                    lambda x: str(uuid.uuid4())
+                    if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"])
+                    else str(x)
+                )
+
+            if "cuenta_origen" not in df_editado.columns:
+                df_editado["cuenta_origen"] = "principal"
+            else:
+                df_editado["cuenta_origen"] = df_editado["cuenta_origen"].apply(
+                    lambda x: "principal"
+                    if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"])
+                    else str(x)
+                )
+
+            if "cuenta_origen_nombre" not in df_editado.columns:
+                df_editado["cuenta_origen_nombre"] = nombre_cuenta_principal
+            else:
+                df_editado["cuenta_origen_nombre"] = df_editado["cuenta_origen_nombre"].apply(
+                    lambda x: nombre_cuenta_principal
+                    if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"])
+                    else str(x)
+                )
+
+            if "dia_cobro" in df_editado.columns:
+                df_editado["dia_cobro"] = (
+                    pd.to_numeric(df_editado["dia_cobro"], errors="coerce")
+                    .fillna(1).astype(int)
+                )
+
+            if "monto" in df_editado.columns:
+                df_editado["monto"] = (
+                    pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
+                )
+
             st.session_state["gastos_fijos"] = (
                 df_editado.to_dict("records")
             )
