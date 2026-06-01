@@ -406,57 +406,36 @@ if st.button("Guardar cambios cuentas de ahorro"):
             })
 
     st.session_state["cuentas_ahorro"] = cuentas_actualizadas
-
     guardar("cuentas_ahorro")
     st.rerun()
 
-    st.divider()
-
-    st.divider()
-    st.markdown("### 💳 Tarjetas de crédito")
-
-    # ==================================================
-    # REGISTRO DE TARJETAS
-    # ==================================================
-    st.header("💳 Tarjetas de crédito registradas")
+# ==================================================
+# TARJETAS DE CRÉDITO
+# ==================================================
+with st.expander("💳 Tarjetas de crédito", expanded=False):
 
     with st.form("form_tarjeta"):
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t1:
+            nombre = st.text_input("Nombre tarjeta", "Visa")
+        with col_t2:
+            dia_cierre = st.number_input("Día de cierre", 1, 31, 20)
+        with col_t3:
+            dia_pago = st.number_input("Día de pago", 1, 31, 10)
 
-        nombre = st.text_input("Nombre tarjeta", "Visa")
-        dia_cierre = st.number_input(
-            "Día de cierre",
-            1,
-            31,
-            20
-        )
-        dia_pago = st.number_input(
-            "Día de pago",
-            1,
-            31,
-            10
-        )
-
-        if st.form_submit_button("Agregar tarjeta"):
-
+        if st.form_submit_button("➕ Agregar tarjeta"):
             st.session_state["tarjetas"].append({
                 "id": str(uuid.uuid4()),
                 "nombre": nombre,
                 "dia_cierre": int(dia_cierre),
                 "dia_pago": int(dia_pago)
             })
-
             guardar("tarjetas")
             st.rerun()
 
-    # ==================================================
-    # RESUMEN Y EDICIÓN DE TARJETAS
-    # ==================================================
     df_tar = pd.DataFrame(st.session_state["tarjetas"])
 
     if not df_tar.empty:
-
-        st.subheader("📄 Tarjetas de crédito registradas")
-
         df_tar["Eliminar"] = False
 
         ed_tar = st.data_editor(
@@ -464,50 +443,30 @@ if st.button("Guardar cambios cuentas de ahorro"):
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Eliminar": st.column_config.CheckboxColumn(),
-                "dia_cierre": st.column_config.NumberColumn("Día de cierre"),
-                "dia_pago": st.column_config.NumberColumn("Día de pago")
+                "nombre": st.column_config.TextColumn("Tarjeta"),
+                "dia_cierre": st.column_config.NumberColumn("Día cierre", min_value=1, max_value=31),
+                "dia_pago": st.column_config.NumberColumn("Día pago", min_value=1, max_value=31),
+                "Eliminar": st.column_config.CheckboxColumn("🗑")
             },
             key="editor_tarjetas_credito"
         )
 
         if st.button("Guardar cambios tarjetas"):
             df_editado = ed_tar.copy()
-
-     # Recuperar el ID original, porque no lo mostramos en la tabla
             df_editado["id"] = df_tar["id"].values
-
-    # Quitar las filas marcadas para eliminar
             df_editado = df_editado[df_editado["Eliminar"] == False].copy()
-
-    # Normalizar tipos
-            df_editado["dia_cierre"] = pd.to_numeric(
-            df_editado["dia_cierre"],
-            errors="coerce"
-            ).fillna(20).astype(int)
-
-            df_editado["dia_pago"] = pd.to_numeric(
-            df_editado["dia_pago"],
-            errors="coerce"
-            ).fillna(10).astype(int)
-
-    # Reconstruir tarjetas actualizadas
-            st.session_state["tarjetas"] = (
-            df_editado
-            .drop(columns=["Eliminar"])
-            .to_dict("records")
-            )
-
+            df_editado["dia_cierre"] = pd.to_numeric(df_editado["dia_cierre"], errors="coerce").fillna(20).astype(int)
+            df_editado["dia_pago"] = pd.to_numeric(df_editado["dia_pago"], errors="coerce").fillna(10).astype(int)
+            st.session_state["tarjetas"] = df_editado.drop(columns=["Eliminar"]).to_dict("records")
             guardar("tarjetas")
             st.rerun()
-
     else:
         st.info("No hay tarjetas registradas.")
 
 # ==================================================
 # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
 # ==================================================
-with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False):
+with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False):
 
     st.markdown("### 💰 Ingresos recurrentes")
     with st.form("form_ingreso_rec"):
@@ -672,22 +631,32 @@ with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False
         df_fijos["Eliminar"] = False
 
         ed_fijos = st.data_editor(
-            df_fijos,
+            df_fijos.drop(columns=[c for c in ["id", "cuenta_origen"] if c in df_fijos.columns]),
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Eliminar": st.column_config.CheckboxColumn(),
-                "monto": st.column_config.NumberColumn("Monto mensual"),
-                "dia_cobro": st.column_config.NumberColumn("Día de cobro")
+                "nombre": st.column_config.TextColumn("Nombre"),
+                "monto": st.column_config.NumberColumn("Monto mensual (S/)", min_value=0.0, step=10.0),
+                "dia_cobro": st.column_config.NumberColumn("Día cobro", min_value=1, max_value=31),
+                "fecha_inicio": st.column_config.DateColumn("Desde"),
+                "cuenta_origen_nombre": st.column_config.TextColumn("Cuenta débito"),
+                "Eliminar": st.column_config.CheckboxColumn("🗑")
             },
             key="editor_gastos_fijos"
         )
 
         if st.button("Guardar cambios gastos fijos"):
 
+            # Restaurar columnas ocultas desde df original
+            _df_fijos_orig = df_fijos.copy()
+            ed_fijos_full = ed_fijos.copy()
+            for _col in ["id", "cuenta_origen"]:
+                if _col in _df_fijos_orig.columns and _col not in ed_fijos_full.columns:
+                    ed_fijos_full[_col] = _df_fijos_orig[_col].values
+
             df_editado = (
-                ed_fijos[
-                    ed_fijos["Eliminar"] == False
+                ed_fijos_full[
+                    ed_fijos_full["Eliminar"] == False
                 ]
                 .drop(columns=["Eliminar"])
                 .copy()
@@ -882,13 +851,19 @@ with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False
 )
 
             ed_grt = st.data_editor(
-                df_grt_show,    
+                df_grt_show,
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Eliminar": st.column_config.CheckboxColumn(),
-                    "monto": st.column_config.NumberColumn("Monto mensual"),
-                    "dia_cargo": st.column_config.NumberColumn("Día de cargo")
+                    "nombre": st.column_config.TextColumn("Nombre"),
+                    "tarjeta_nombre": st.column_config.TextColumn("Tarjeta"),
+                    "categoria": st.column_config.TextColumn("Categoría"),
+                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["PEN", "USD"]),
+                    "monto": st.column_config.NumberColumn("Monto mensual", min_value=0.0, step=10.0),
+                    "dia_cargo": st.column_config.NumberColumn("Día cargo", min_value=1, max_value=31),
+                    "fecha_inicio": st.column_config.DateColumn("Desde"),
+                    "fecha_fin": st.column_config.DateColumn("Hasta"),
+                    "Eliminar": st.column_config.CheckboxColumn("🗑")
                 },
                 key="editor_gastos_recurrentes_tarjeta"
             )
@@ -936,6 +911,119 @@ with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False
 # ==================================================
 # 3. MOVIMIENTOS Y GASTOS VARIABLES / PUNTUALES
 # ==================================================
+
+# ==================================================
+# SECCIÓN: TIPO DE CAMBIO Y CUENTA DE PAGO DE TARJETA
+# ==================================================
+with st.expander("💱 2b. Tipo de cambio y pago de tarjetas de crédito", expanded=False):
+
+    st.markdown("""
+    Registra aquí el **tipo de cambio USD/PEN** y la **cuenta débito** que usarás para pagar
+    cada ciclo de tus tarjetas. Se aplica al momento del pago (no al momento del gasto).
+    Si no registras un ciclo, se usa el tipo de cambio por defecto de la configuración.
+    """)
+
+    if st.session_state["tarjetas"]:
+
+        nombre_cuenta_principal_tc = st.session_state["configuracion"].get(
+            "nombre_cuenta_principal", "Cuenta principal"
+        )
+        cuentas_pago_map = {nombre_cuenta_principal_tc: "principal"}
+        for c in st.session_state["cuentas_ahorro"]:
+            cuentas_pago_map[c["nombre"]] = c["id"]
+
+        mapa_tarjetas_tc = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+
+        with st.form("form_pago_tarjeta"):
+            col_pt1, col_pt2 = st.columns(2)
+            with col_pt1:
+                tarjeta_pago_nombre = st.selectbox(
+                    "Tarjeta",
+                    list(mapa_tarjetas_tc.keys()),
+                    key="tarjeta_pago_tc"
+                )
+                ciclo_cierre_fecha = st.date_input(
+                    "Fecha de cierre del ciclo",
+                    value=hoy_peru,
+                    key="ciclo_cierre_pago"
+                )
+            with col_pt2:
+                tipo_cambio_ciclo = st.number_input(
+                    "Tipo de cambio USD → PEN ese día",
+                    min_value=1.0,
+                    step=0.01,
+                    value=float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85)),
+                    key="tc_ciclo_pago"
+                )
+                cuenta_pago_nombre = st.selectbox(
+                    "Cuenta débito para pagar esta tarjeta",
+                    list(cuentas_pago_map.keys()),
+                    key="cuenta_pago_tarjeta"
+                )
+
+            if st.form_submit_button("Registrar tipo de cambio / cuenta de pago"):
+                st.session_state["pagos_tarjeta"].append({
+                    "id": str(uuid.uuid4()),
+                    "tarjeta_id": mapa_tarjetas_tc[tarjeta_pago_nombre],
+                    "tarjeta_nombre": tarjeta_pago_nombre,
+                    "ciclo_cierre": ciclo_cierre_fecha.isoformat(),
+                    "tipo_de_cambio": float(tipo_cambio_ciclo),
+                    "cuenta_pago_id": cuentas_pago_map[cuenta_pago_nombre],
+                    "cuenta_pago_nombre": cuenta_pago_nombre
+                })
+                guardar("pagos_tarjeta")
+                st.rerun()
+
+        df_pt = pd.DataFrame(st.session_state["pagos_tarjeta"])
+
+        if not df_pt.empty:
+            st.subheader("📄 Tipos de cambio y cuentas de pago registrados")
+            df_pt["ciclo_cierre"] = pd.to_datetime(df_pt["ciclo_cierre"], errors="coerce").dt.date
+            df_pt["Eliminar"] = False
+
+            ed_pt = st.data_editor(
+                df_pt.drop(columns=[c for c in ["id", "tarjeta_id", "cuenta_pago_id"] if c in df_pt.columns]),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Eliminar": st.column_config.CheckboxColumn(),
+                    "tipo_de_cambio": st.column_config.NumberColumn("TC USD/PEN", step=0.01),
+                    "ciclo_cierre": st.column_config.DateColumn("Fecha cierre ciclo"),
+                },
+                key="editor_pagos_tarjeta"
+            )
+
+            if st.button("Guardar cambios tipos de cambio"):
+                df_temp = df_pt.copy()
+                for col in ["id", "tarjeta_id", "cuenta_pago_id"]:
+                    if col in df_temp.columns:
+                        ed_pt[col] = df_temp[col].values
+
+                df_edit_pt = ed_pt[ed_pt["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+                df_edit_pt["ciclo_cierre"] = pd.to_datetime(
+                    df_edit_pt["ciclo_cierre"], errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+                df_edit_pt["tipo_de_cambio"] = pd.to_numeric(
+                    df_edit_pt["tipo_de_cambio"], errors="coerce"
+                ).fillna(3.85)
+
+                # Sanear NaN
+                for col in ["id", "tarjeta_id", "cuenta_pago_id"]:
+                    if col in df_edit_pt.columns:
+                        df_edit_pt[col] = df_edit_pt[col].apply(
+                            lambda x: str(uuid.uuid4()) if col == "id" and (x is None or (isinstance(x, float) and pd.isna(x)))
+                            else ("principal" if col == "cuenta_pago_id" and (x is None or (isinstance(x, float) and pd.isna(x)))
+                            else str(x) if not (isinstance(x, float) and pd.isna(x)) else "")
+                        )
+
+                st.session_state["pagos_tarjeta"] = df_edit_pt.to_dict("records")
+                guardar("pagos_tarjeta")
+                st.rerun()
+        else:
+            st.info("No hay tipos de cambio registrados. Se usará el valor por defecto de la configuración.")
+    else:
+        st.warning("Primero debes registrar una tarjeta de crédito.")
+
 
 with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
@@ -1083,8 +1171,12 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "Eliminar": st.column_config.CheckboxColumn(),
-                    "monto": st.column_config.NumberColumn("Monto")
+                    "fecha": st.column_config.DateColumn("Fecha"),
+                    "cuenta_origen_nombre": st.column_config.TextColumn("Cuenta"),
+                    "categoria": st.column_config.TextColumn("Categoría"),
+                    "descripcion": st.column_config.TextColumn("Descripción"),
+                    "monto": st.column_config.NumberColumn("Monto (S/)", min_value=0.0, step=1.0),
+                    "Eliminar": st.column_config.CheckboxColumn("🗑")
                 },
                 key="editor_gastos_debito"
             )
@@ -1278,8 +1370,13 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     column_config={
                         "id": None,
                         "tarjeta_id": None,
-                        "Eliminar": st.column_config.CheckboxColumn(),
-                        "monto": st.column_config.NumberColumn("Monto")
+                        "fecha": st.column_config.DateColumn("Fecha"),
+                        "tarjeta_nombre": st.column_config.TextColumn("Tarjeta"),
+                        "categoria": st.column_config.TextColumn("Categoría"),
+                        "descripcion": st.column_config.TextColumn("Descripción"),
+                        "moneda": st.column_config.SelectboxColumn("Moneda", options=["PEN", "USD"]),
+                        "monto": st.column_config.NumberColumn("Monto", min_value=0.0, step=1.0),
+                        "Eliminar": st.column_config.CheckboxColumn("🗑")
                     },
                     key="editor_gastos_tarjeta"
                 )
@@ -1520,118 +1617,6 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
         else:
             st.info("No hay transferencias registradas.")
-
-# ==================================================
-# SECCIÓN: TIPO DE CAMBIO Y CUENTA DE PAGO DE TARJETA
-# ==================================================
-with st.expander("💱 2b. Tipo de cambio y pago de tarjetas de crédito", expanded=False):
-
-    st.markdown("""
-    Registra aquí el **tipo de cambio USD/PEN** y la **cuenta débito** que usarás para pagar
-    cada ciclo de tus tarjetas. Se aplica al momento del pago (no al momento del gasto).
-    Si no registras un ciclo, se usa el tipo de cambio por defecto de la configuración.
-    """)
-
-    if st.session_state["tarjetas"]:
-
-        nombre_cuenta_principal_tc = st.session_state["configuracion"].get(
-            "nombre_cuenta_principal", "Cuenta principal"
-        )
-        cuentas_pago_map = {nombre_cuenta_principal_tc: "principal"}
-        for c in st.session_state["cuentas_ahorro"]:
-            cuentas_pago_map[c["nombre"]] = c["id"]
-
-        mapa_tarjetas_tc = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
-
-        with st.form("form_pago_tarjeta"):
-            col_pt1, col_pt2 = st.columns(2)
-            with col_pt1:
-                tarjeta_pago_nombre = st.selectbox(
-                    "Tarjeta",
-                    list(mapa_tarjetas_tc.keys()),
-                    key="tarjeta_pago_tc"
-                )
-                ciclo_cierre_fecha = st.date_input(
-                    "Fecha de cierre del ciclo",
-                    value=hoy_peru,
-                    key="ciclo_cierre_pago"
-                )
-            with col_pt2:
-                tipo_cambio_ciclo = st.number_input(
-                    "Tipo de cambio USD → PEN ese día",
-                    min_value=1.0,
-                    step=0.01,
-                    value=float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85)),
-                    key="tc_ciclo_pago"
-                )
-                cuenta_pago_nombre = st.selectbox(
-                    "Cuenta débito para pagar esta tarjeta",
-                    list(cuentas_pago_map.keys()),
-                    key="cuenta_pago_tarjeta"
-                )
-
-            if st.form_submit_button("Registrar tipo de cambio / cuenta de pago"):
-                st.session_state["pagos_tarjeta"].append({
-                    "id": str(uuid.uuid4()),
-                    "tarjeta_id": mapa_tarjetas_tc[tarjeta_pago_nombre],
-                    "tarjeta_nombre": tarjeta_pago_nombre,
-                    "ciclo_cierre": ciclo_cierre_fecha.isoformat(),
-                    "tipo_de_cambio": float(tipo_cambio_ciclo),
-                    "cuenta_pago_id": cuentas_pago_map[cuenta_pago_nombre],
-                    "cuenta_pago_nombre": cuenta_pago_nombre
-                })
-                guardar("pagos_tarjeta")
-                st.rerun()
-
-        df_pt = pd.DataFrame(st.session_state["pagos_tarjeta"])
-
-        if not df_pt.empty:
-            st.subheader("📄 Tipos de cambio y cuentas de pago registrados")
-            df_pt["ciclo_cierre"] = pd.to_datetime(df_pt["ciclo_cierre"], errors="coerce").dt.date
-            df_pt["Eliminar"] = False
-
-            ed_pt = st.data_editor(
-                df_pt.drop(columns=[c for c in ["id", "tarjeta_id", "cuenta_pago_id"] if c in df_pt.columns]),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Eliminar": st.column_config.CheckboxColumn(),
-                    "tipo_de_cambio": st.column_config.NumberColumn("TC USD/PEN", step=0.01),
-                    "ciclo_cierre": st.column_config.DateColumn("Fecha cierre ciclo"),
-                },
-                key="editor_pagos_tarjeta"
-            )
-
-            if st.button("Guardar cambios tipos de cambio"):
-                df_temp = df_pt.copy()
-                for col in ["id", "tarjeta_id", "cuenta_pago_id"]:
-                    if col in df_temp.columns:
-                        ed_pt[col] = df_temp[col].values
-
-                df_edit_pt = ed_pt[ed_pt["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-                df_edit_pt["ciclo_cierre"] = pd.to_datetime(
-                    df_edit_pt["ciclo_cierre"], errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-                df_edit_pt["tipo_de_cambio"] = pd.to_numeric(
-                    df_edit_pt["tipo_de_cambio"], errors="coerce"
-                ).fillna(3.85)
-
-                # Sanear NaN
-                for col in ["id", "tarjeta_id", "cuenta_pago_id"]:
-                    if col in df_edit_pt.columns:
-                        df_edit_pt[col] = df_edit_pt[col].apply(
-                            lambda x: str(uuid.uuid4()) if col == "id" and (x is None or (isinstance(x, float) and pd.isna(x)))
-                            else ("principal" if col == "cuenta_pago_id" and (x is None or (isinstance(x, float) and pd.isna(x)))
-                            else str(x) if not (isinstance(x, float) and pd.isna(x)) else "")
-                        )
-
-                st.session_state["pagos_tarjeta"] = df_edit_pt.to_dict("records")
-                guardar("pagos_tarjeta")
-                st.rerun()
-        else:
-            st.info("No hay tipos de cambio registrados. Se usará el valor por defecto de la configuración.")
-    else:
-        st.warning("Primero debes registrar una tarjeta de crédito.")
 
 # ==================================================
 # 4. CÁLCULOS BASE
@@ -2001,173 +1986,115 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     mostrar_ahorro_total = st.checkbox("Mostrar ahorro total", value=True)
     mostrar_secundarias = st.checkbox("Mostrar cuentas secundarias", value=False)
 
-    fig, ax1 = plt.subplots(figsize=(14, 7))
+    # ── Estilo del gráfico ──────────────────────────
+    PALETTE = {
+        "principal": "#26A65B",
+        "total":     "#2C3E50",
+        "ingresos":  "#58D68D",
+        "egresos":   "#EC7063",
+        "hoy":       "#F39C12",
+    }
+    COLORES_SEC = ["#3498DB", "#9B59B6", "#1ABC9C", "#E67E22"]
 
-    # Cuenta principal
-    ax1.plot(
-        fechas,
-        serie_cuenta_principal,
-        color="#2E7D32",
-        linewidth=3.0,
-        label=nombre_cuenta_principal
-    )
+    fig, ax1 = plt.subplots(figsize=(14, 6))
+    fig.patch.set_facecolor("#0E1117")
+    ax1.set_facecolor("#0E1117")
 
-    # Cuentas secundarias opcionales
+    # Línea cuenta principal
+    ax1.plot(fechas, serie_cuenta_principal,
+             color=PALETTE["principal"], linewidth=2.5,
+             label=nombre_cuenta_principal, zorder=3)
+
+    # Cuentas secundarias
     if mostrar_secundarias:
-        for nombre_cuenta, serie_sec in saldos_sec.items():
-            ax1.plot(
-                fechas,
-                serie_sec,
-                linestyle="--",
-                linewidth=2.2,
-                label=f"Cuenta secundaria: {nombre_cuenta}"
-            )
+        for i, (nc, ss) in enumerate(saldos_sec.items()):
+            col_sec = COLORES_SEC[i % len(COLORES_SEC)]
+            ax1.plot(fechas, ss, linestyle="--", linewidth=1.8,
+                     color=col_sec, label=f"↳ {nc}", zorder=3)
+            if fecha_saldo_sel in ss.index:
+                v = ss.loc[fecha_saldo_sel]
+                ax1.scatter(fecha_saldo_sel, v, color=col_sec, s=60, zorder=6)
+                ax1.annotate(f"{nc}\nS/ {v:,.0f}",
+                             xy=(fecha_saldo_sel, v), xytext=(12, 25),
+                             textcoords="offset points", fontsize=10,
+                             color="white",
+                             bbox=dict(boxstyle="round,pad=0.3", fc=col_sec, alpha=0.85),
+                             arrowprops=dict(arrowstyle="->", color=col_sec))
 
-            if fecha_saldo_sel in serie_sec.index:
-                saldo_sec_val = serie_sec.loc[fecha_saldo_sel]
-
-                ax1.scatter(
-                    fecha_saldo_sel,
-                    saldo_sec_val,
-                    s=80,
-                    zorder=5
-                )
-
-                ax1.annotate(
-                    f"{nombre_cuenta}\nS/ {saldo_sec_val:,.0f}",
-                    xy=(fecha_saldo_sel, saldo_sec_val),
-                    xytext=(15, 35),
-                    textcoords="offset points",
-                    fontsize=12,
-                    bbox=dict(boxstyle="round,pad=0.35", fc="white"),
-                    arrowprops=dict(arrowstyle="->")
-                )
     # Ahorro total
     if mostrar_ahorro_total:
-        ax1.plot(
-            fechas,
-            serie_ahorro_total,
-            color="black",
-            linestyle=":",
-            linewidth=3.0,
-            label="Ahorro total"
-        )
+        ax1.plot(fechas, serie_ahorro_total,
+                 color=PALETTE["total"], linestyle=":", linewidth=2.2,
+                 label="Ahorro total", zorder=3)
 
     ax1.set_ylim(rango_y1)
-    ax1.axhline(0, color="#BDBDBD", linestyle="--", linewidth=1)
+    ax1.axhline(0, color="#555", linestyle="--", linewidth=0.8)
 
-    # Etiqueta de cuenta principal
+    # Etiqueta cuenta principal
     if fecha_saldo_sel in serie_cuenta_principal.index:
-        saldo_principal_val = serie_cuenta_principal.loc[fecha_saldo_sel]
+        spv = serie_cuenta_principal.loc[fecha_saldo_sel]
+        ax1.scatter(fecha_saldo_sel, spv, color=PALETTE["principal"], s=80, zorder=7)
+        ax1.annotate(f"{nombre_cuenta_principal}\nS/ {spv:,.0f}",
+                     xy=(fecha_saldo_sel, spv), xytext=(12, 18),
+                     textcoords="offset points", fontsize=11, color="white",
+                     bbox=dict(boxstyle="round,pad=0.35", fc=PALETTE["principal"], alpha=0.9),
+                     arrowprops=dict(arrowstyle="->", color=PALETTE["principal"]))
 
-        ax1.scatter(
-            fecha_saldo_sel,
-            saldo_principal_val,
-            color="#2E7D32",
-            s=90,
-            zorder=5
-        )
-
-        ax1.annotate(
-            f"{nombre_cuenta_principal}\nS/ {saldo_principal_val:,.0f}",
-            xy=(fecha_saldo_sel, saldo_principal_val),
-            xytext=(15, 20),
-            textcoords="offset points",
-            fontsize=12,
-            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="#2E7D32"),
-            arrowprops=dict(arrowstyle="->", color="#2E7D32")
-        )
-
-    # Etiqueta de ahorro total
+    # Etiqueta ahorro total
     if mostrar_ahorro_total and fecha_saldo_sel in serie_ahorro_total.index:
-        ahorro_total_val = serie_ahorro_total.loc[fecha_saldo_sel]
+        atv = serie_ahorro_total.loc[fecha_saldo_sel]
+        ax1.scatter(fecha_saldo_sel, atv, color=PALETTE["total"], s=80, zorder=7)
+        ax1.annotate(f"Total\nS/ {atv:,.0f}",
+                     xy=(fecha_saldo_sel, atv), xytext=(12, -40),
+                     textcoords="offset points", fontsize=11, color="white",
+                     bbox=dict(boxstyle="round,pad=0.35", fc=PALETTE["total"], alpha=0.9),
+                     arrowprops=dict(arrowstyle="->", color=PALETTE["total"]))
 
-        ax1.scatter(
-            fecha_saldo_sel,
-            ahorro_total_val,
-            color="black",
-            s=90,
-            zorder=5
-        )
-
-        ax1.annotate(
-            f"Ahorro total\nS/ {ahorro_total_val:,.0f}",
-            xy=(fecha_saldo_sel, ahorro_total_val),
-            xytext=(15, -45),
-            textcoords="offset points",
-            fontsize=12,
-            bbox=dict(boxstyle="round,pad=0.35", fc="white", ec="black"),
-            arrowprops=dict(arrowstyle="->", color="black")
-        )
+    # Línea "hoy"
+    _hoy_ts = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).tz_localize(None).normalize()
+    if fechas.min() <= _hoy_ts <= fechas.max():
+        ax1.axvline(_hoy_ts, color=PALETTE["hoy"], linestyle="--",
+                    linewidth=1.2, alpha=0.8, zorder=2)
+        ax1.text(_hoy_ts, rango_y1[1] * 0.97, " Hoy",
+                 color=PALETTE["hoy"], fontsize=9, va="top")
 
     # Barras ingresos / egresos
     ax2 = ax1.twinx()
-    offset = pd.Timedelta(days=7)
-
-    ax2.bar(
-        mensual["fecha_mes"] - offset,
-        mensual["ingresos"],
-        width=10,
-        color="#81C784",
-        alpha=0.80,
-        label="Ingresos"
-    )
-
-    ax2.bar(
-        mensual["fecha_mes"] + offset,
-        mensual["egresos"],
-        width=10,
-        color="#EF9A9A",
-        alpha=0.80,
-        label="Egresos"
-    )
-
+    ax2.set_facecolor("#0E1117")
+    offset = pd.Timedelta(days=6)
+    ax2.bar(mensual["fecha_mes"] - offset, mensual["ingresos"],
+            width=9, color=PALETTE["ingresos"], alpha=0.7, label="Ingresos mes")
+    ax2.bar(mensual["fecha_mes"] + offset, mensual["egresos"],
+            width=9, color=PALETTE["egresos"], alpha=0.7, label="Egresos mes")
     ax2.set_ylim(rango_y2)
     ax2.invert_yaxis()
 
-
+    # Ejes X / Y
     ax1.set_xlim(fecha_x_inicio, fecha_x_fin)
     ax2.set_xlim(fecha_x_inicio, fecha_x_fin)
-
-
-
-    # Formato eje X: Mayo 2026, Junio 2026...
     ticks_mensuales = pd.date_range(fecha_x_inicio, fecha_x_fin, freq="MS")
-
-    labels_mensuales = [
-        f"{MESES_ES[t.month]} {t.year}" for t in ticks_mensuales
-    ]
-
+    labels_mensuales = [f"{MESES_ES[t.month]} {t.year}" for t in ticks_mensuales]
     ax1.set_xticks(ticks_mensuales)
-    ax1.set_xticklabels(labels_mensuales, rotation=35, ha="right", fontsize=12)
+    ax1.set_xticklabels(labels_mensuales, rotation=30, ha="right",
+                        fontsize=11, color="white")
+    ax1.tick_params(axis="y", labelsize=11, colors="white")
+    ax2.tick_params(axis="y", labelsize=11, colors="white")
+    ax1.spines[["top", "right", "left", "bottom"]].set_color("#333")
+    ax2.spines[["top", "right", "left", "bottom"]].set_color("#333")
+    ax1.yaxis.label.set_color("white")
+    ax2.yaxis.label.set_color("white")
+    ax1.set_ylabel("Saldo (S/)", fontsize=12, color="white")
+    ax2.set_ylabel("Flujo mensual (S/)", fontsize=12, color="white")
 
-    # Tamaño de letras para celular
-    ax1.tick_params(axis="y", labelsize=12)
-    ax2.tick_params(axis="y", labelsize=12)
+    # Leyenda unificada
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2,
+               loc="upper center", bbox_to_anchor=(0.5, -0.18),
+               ncol=4, frameon=False, fontsize=10,
+               labelcolor="white")
 
-    ax1.set_ylabel("Saldo / Ahorro total (S/)", fontsize=13)
-    ax2.set_ylabel("Ingresos / Egresos mensuales (S/)", fontsize=13)
-
-    # Leyenda limpia
-    handles, labels = [], []
-
-    for a in (ax1, ax2):
-        h, l = a.get_legend_handles_labels()
-        handles += h
-        labels += l
-
-    ax1.legend(
-        handles,
-        labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.22),
-        ncol=2,
-        frameon=False,
-        fontsize=12
-    )
-
-    ax1.grid(True, linestyle="--", alpha=0.25)
-
+    ax1.grid(True, linestyle="--", alpha=0.15, color="white")
     plt.tight_layout()
     st.pyplot(fig, use_container_width=True)
 
@@ -2589,59 +2516,40 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
         st.subheader("💳 Gastos débito vs crédito")
 
-        fig_dc, ax_dc = plt.subplots(figsize=(16, 6))
+        def _bar_chart(title, col_a, col_b, lbl_a, lbl_b, color_a, color_b):
+            fig_b, ax_b = plt.subplots(figsize=(14, 5))
+            fig_b.patch.set_facecolor("#0E1117")
+            ax_b.set_facecolor("#0E1117")
+            ax_b.bar([i - ancho/2 for i in x], df_mes_tipo[col_a],
+                     width=ancho, color=color_a, alpha=0.85, label=lbl_a)
+            ax_b.bar([i + ancho/2 for i in x], df_mes_tipo[col_b],
+                     width=ancho, color=color_b, alpha=0.85, label=lbl_b)
+            ax_b.set_xticks(list(x))
+            ax_b.set_xticklabels(df_mes_tipo["Mes"], rotation=30, ha="right",
+                                  fontsize=10, color="white")
+            ax_b.tick_params(axis="y", colors="white")
+            ax_b.set_ylabel("S/", fontsize=11, color="white")
+            ax_b.set_title(title, fontsize=13, color="white", pad=12)
+            ax_b.grid(axis="y", linestyle="--", alpha=0.15, color="white")
+            ax_b.legend(fontsize=10, frameon=False, labelcolor="white")
+            ax_b.spines[["top","right","left","bottom"]].set_color("#333")
+            plt.tight_layout()
+            return fig_b
 
-        ax_dc.bar(
-            [i - ancho / 2 for i in x],
-            df_mes_tipo["Gastos débito total mensual"],
-            width=ancho,
-            label="Gastos débito total mensual"
-        )
-
-        ax_dc.bar(
-            [i + ancho / 2 for i in x],
-            df_mes_tipo["Gastos crédito total mensual"],
-            width=ancho,
-            label="Gastos crédito total mensual"
-        )
-
-        ax_dc.set_xticks(list(x))
-        ax_dc.set_xticklabels(df_mes_tipo["Mes"], rotation=35, ha="right", fontsize=12)
-        ax_dc.set_ylabel("Monto mensual (S/)", fontsize=13)
-        ax_dc.set_title("Gastos mensuales: débito vs crédito", fontsize=16, pad=18)
-        ax_dc.grid(axis="y", linestyle="--", alpha=0.25)
-        ax_dc.legend(fontsize=11)
-
-        plt.tight_layout()
-        st.pyplot(fig_dc, use_container_width=True)
+        st.pyplot(_bar_chart(
+            "Débito vs Crédito",
+            "Gastos débito total mensual", "Gastos crédito total mensual",
+            "Débito", "Crédito",
+            "#3498DB", "#E74C3C"
+        ), use_container_width=True)
 
         st.subheader("📌 Gastos fijos vs no fijos")
-
-        fig_fnf, ax_fnf = plt.subplots(figsize=(16, 6))
-
-        ax_fnf.bar(
-            [i - ancho / 2 for i in x],
-            df_mes_tipo["Gastos fijos mensuales"],
-            width=ancho,
-            label="Gastos fijos mensuales"
-        )
-
-        ax_fnf.bar(
-            [i + ancho / 2 for i in x],
-            df_mes_tipo["Gastos no fijos mensuales"],
-            width=ancho,
-            label="Gastos no fijos mensuales"
-        )
-
-        ax_fnf.set_xticks(list(x))
-        ax_fnf.set_xticklabels(df_mes_tipo["Mes"], rotation=35, ha="right", fontsize=12)
-        ax_fnf.set_ylabel("Monto mensual (S/)", fontsize=13)
-        ax_fnf.set_title("Gastos mensuales: fijos vs no fijos", fontsize=16, pad=18)
-        ax_fnf.grid(axis="y", linestyle="--", alpha=0.25)
-        ax_fnf.legend(fontsize=11)
-
-        plt.tight_layout()
-        st.pyplot(fig_fnf, use_container_width=True)
+        st.pyplot(_bar_chart(
+            "Fijos vs Variables",
+            "Gastos fijos mensuales", "Gastos no fijos mensuales",
+            "Fijos", "Variables",
+            "#8E44AD", "#F39C12"
+        ), use_container_width=True)
 
         st.dataframe(
             df_mes_tipo[
