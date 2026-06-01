@@ -135,6 +135,7 @@ defaults = {
         "Vuelos", "Salud","Entretenimiento","Combustible","Otros"],
 "cuentas_ahorro": [],
 "transferencias": [],
+"pagos_tarjeta": [],
 }
 
 for k, v in defaults.items():
@@ -153,6 +154,7 @@ claves = [
     "cuentas_ahorro",
     "transferencias",
     "categorias",
+    "pagos_tarjeta",
 ]
 for clave in claves:
     cargar(clave)
@@ -282,11 +284,20 @@ with st.expander("⚙️ 1. Configuración inicial", expanded=False):
         value=float(conf.get("ahorro_inicial", 0.0))
     )
 
+    tipo_cambio_default = st.number_input(
+        "Tipo de cambio USD → PEN (por defecto)",
+        min_value=1.0,
+        step=0.01,
+        value=float(conf.get("tipo_cambio_default", 3.85)),
+        help="Se usa cuando no se ha registrado el tipo de cambio específico para un ciclo de tarjeta"
+    )
+
     st.session_state["configuracion"] = {
         "fecha_inicio_sim": fecha_inicio_sim.isoformat(),
         "fecha_fin_sim": fecha_fin_sim.isoformat(),
         "ahorro_inicial": ahorro_inicial,
-        "nombre_cuenta_principal": nombre_cuenta_principal
+        "nombre_cuenta_principal": nombre_cuenta_principal,
+        "tipo_cambio_default": tipo_cambio_default
     }
 
     guardar("configuracion")
@@ -777,6 +788,13 @@ with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False
                     key="nueva_categoria_gasto_rec_tarjeta"
                 )
 
+            moneda_rec = st.selectbox(
+                "Moneda",
+                ["PEN", "USD"],
+                key="moneda_gasto_recurrente_tarjeta",
+                help="USD: el monto se convierte a soles usando el tipo de cambio del día de pago"
+            )
+
             monto = st.number_input(
                 "Monto mensual",
                 min_value=0.0,
@@ -816,6 +834,7 @@ with st.expander("🔁 2. Ingresos y gastos recurrentes / fijos", expanded=False
                     "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
                     "tarjeta_nombre": tarjeta_nombre,
                     "categoria": categoria,
+                    "moneda": moneda_rec,
                     "monto": float(monto),
                     "dia_cargo": int(dia_cargo),
                     "fecha_inicio": fecha_inicio.isoformat(),
@@ -1155,6 +1174,13 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     key="descripcion_gasto_tarjeta"
                 )
 
+                moneda_gt = st.selectbox(
+                    "Moneda",
+                    ["PEN", "USD"],
+                    key="moneda_gasto_tarjeta",
+                    help="USD: el monto se convierte a soles usando el tipo de cambio del día de pago"
+                )
+
                 monto = st.number_input(
                     "Monto",
                     min_value=0.0,
@@ -1182,6 +1208,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                         "tarjeta_nombre": tarjeta_nombre,
                         "categoria": categoria,
                         "descripcion": descripcion,
+                        "moneda": moneda_gt,
                         "monto": float(monto)
                     }
 
@@ -1493,6 +1520,119 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
         else:
             st.info("No hay transferencias registradas.")
+
+# ==================================================
+# SECCIÓN: TIPO DE CAMBIO Y CUENTA DE PAGO DE TARJETA
+# ==================================================
+with st.expander("💱 2b. Tipo de cambio y pago de tarjetas de crédito", expanded=False):
+
+    st.markdown("""
+    Registra aquí el **tipo de cambio USD/PEN** y la **cuenta débito** que usarás para pagar
+    cada ciclo de tus tarjetas. Se aplica al momento del pago (no al momento del gasto).
+    Si no registras un ciclo, se usa el tipo de cambio por defecto de la configuración.
+    """)
+
+    if st.session_state["tarjetas"]:
+
+        nombre_cuenta_principal_tc = st.session_state["configuracion"].get(
+            "nombre_cuenta_principal", "Cuenta principal"
+        )
+        cuentas_pago_map = {nombre_cuenta_principal_tc: "principal"}
+        for c in st.session_state["cuentas_ahorro"]:
+            cuentas_pago_map[c["nombre"]] = c["id"]
+
+        mapa_tarjetas_tc = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+
+        with st.form("form_pago_tarjeta"):
+            col_pt1, col_pt2 = st.columns(2)
+            with col_pt1:
+                tarjeta_pago_nombre = st.selectbox(
+                    "Tarjeta",
+                    list(mapa_tarjetas_tc.keys()),
+                    key="tarjeta_pago_tc"
+                )
+                ciclo_cierre_fecha = st.date_input(
+                    "Fecha de cierre del ciclo",
+                    value=hoy_peru,
+                    key="ciclo_cierre_pago"
+                )
+            with col_pt2:
+                tipo_cambio_ciclo = st.number_input(
+                    "Tipo de cambio USD → PEN ese día",
+                    min_value=1.0,
+                    step=0.01,
+                    value=float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85)),
+                    key="tc_ciclo_pago"
+                )
+                cuenta_pago_nombre = st.selectbox(
+                    "Cuenta débito para pagar esta tarjeta",
+                    list(cuentas_pago_map.keys()),
+                    key="cuenta_pago_tarjeta"
+                )
+
+            if st.form_submit_button("Registrar tipo de cambio / cuenta de pago"):
+                st.session_state["pagos_tarjeta"].append({
+                    "id": str(uuid.uuid4()),
+                    "tarjeta_id": mapa_tarjetas_tc[tarjeta_pago_nombre],
+                    "tarjeta_nombre": tarjeta_pago_nombre,
+                    "ciclo_cierre": ciclo_cierre_fecha.isoformat(),
+                    "tipo_de_cambio": float(tipo_cambio_ciclo),
+                    "cuenta_pago_id": cuentas_pago_map[cuenta_pago_nombre],
+                    "cuenta_pago_nombre": cuenta_pago_nombre
+                })
+                guardar("pagos_tarjeta")
+                st.rerun()
+
+        df_pt = pd.DataFrame(st.session_state["pagos_tarjeta"])
+
+        if not df_pt.empty:
+            st.subheader("📄 Tipos de cambio y cuentas de pago registrados")
+            df_pt["ciclo_cierre"] = pd.to_datetime(df_pt["ciclo_cierre"], errors="coerce").dt.date
+            df_pt["Eliminar"] = False
+
+            ed_pt = st.data_editor(
+                df_pt.drop(columns=[c for c in ["id", "tarjeta_id", "cuenta_pago_id"] if c in df_pt.columns]),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Eliminar": st.column_config.CheckboxColumn(),
+                    "tipo_de_cambio": st.column_config.NumberColumn("TC USD/PEN", step=0.01),
+                    "ciclo_cierre": st.column_config.DateColumn("Fecha cierre ciclo"),
+                },
+                key="editor_pagos_tarjeta"
+            )
+
+            if st.button("Guardar cambios tipos de cambio"):
+                df_temp = df_pt.copy()
+                for col in ["id", "tarjeta_id", "cuenta_pago_id"]:
+                    if col in df_temp.columns:
+                        ed_pt[col] = df_temp[col].values
+
+                df_edit_pt = ed_pt[ed_pt["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+                df_edit_pt["ciclo_cierre"] = pd.to_datetime(
+                    df_edit_pt["ciclo_cierre"], errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+                df_edit_pt["tipo_de_cambio"] = pd.to_numeric(
+                    df_edit_pt["tipo_de_cambio"], errors="coerce"
+                ).fillna(3.85)
+
+                # Sanear NaN
+                for col in ["id", "tarjeta_id", "cuenta_pago_id"]:
+                    if col in df_edit_pt.columns:
+                        df_edit_pt[col] = df_edit_pt[col].apply(
+                            lambda x: str(uuid.uuid4()) if col == "id" and (x is None or (isinstance(x, float) and pd.isna(x)))
+                            else ("principal" if col == "cuenta_pago_id" and (x is None or (isinstance(x, float) and pd.isna(x)))
+                            else str(x) if not (isinstance(x, float) and pd.isna(x)) else "")
+                        )
+
+                st.session_state["pagos_tarjeta"] = df_edit_pt.to_dict("records")
+                guardar("pagos_tarjeta")
+                st.rerun()
+        else:
+            st.info("No hay tipos de cambio registrados. Se usará el valor por defecto de la configuración.")
+    else:
+        st.warning("Primero debes registrar una tarjeta de crédito.")
+
 # ==================================================
 # 4. CÁLCULOS BASE
 # ==================================================
@@ -1518,6 +1658,10 @@ if not df_gt.empty:
     df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
     df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
     df_gt["tipo_gasto"] = "Crédito diario"
+    if "moneda" not in df_gt.columns:
+        df_gt["moneda"] = "PEN"
+    else:
+        df_gt["moneda"] = df_gt["moneda"].fillna("PEN")
 
 gastos_tarjeta_recurrentes_expandido = []
 
@@ -1536,6 +1680,7 @@ for g in st.session_state["gastos_recurrentes_tarjeta"]:
                     "tarjeta_nombre": g["tarjeta_nombre"],
                     "categoria": g["categoria"],
                     "descripcion": g["nombre"],
+                    "moneda": g.get("moneda", "PEN"),
                     "monto": float(g["monto"]),
                     "tipo_gasto": "Crédito recurrente"
                 })
@@ -1633,16 +1778,36 @@ for _, r in df_ing_punt.iterrows():
     if f in ing_punt.index:
         ing_punt.loc[f] += r["monto"]
 
-egresos_tarjeta = pd.Series(0.0, index=fechas)
+# Build lookup: (tarjeta_id, ciclo_cierre_str) -> {tipo_de_cambio, cuenta_pago_id}
+_pagos_lookup = {}
+for _p in st.session_state.get("pagos_tarjeta", []):
+    _key = (_p["tarjeta_id"], _p["ciclo_cierre"])
+    _pagos_lookup[_key] = _p
 
-if not df_gt.empty:
+_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+
+# egresos por cuenta: dict cuenta_id -> Series
+egresos_tarjeta_por_cuenta = {}
+
+if not df_gt_calc.empty:
     for t in st.session_state.tarjetas:
-        df_t = df_gt[df_gt["tarjeta_id"] == t["id"]]
+        df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
         for _, g in df_t.iterrows():
             _, cierre = obtener_ciclo_tarjeta(g["fecha"], t["dia_cierre"])
+            cierre_str = str(cierre)
+            pago_info = _pagos_lookup.get((t["id"], cierre_str), {})
+            tc = float(pago_info.get("tipo_de_cambio", _tc_default))
+            cuenta_pago = pago_info.get("cuenta_pago_id", "principal")
+            moneda_g = g.get("moneda", "PEN")
+            monto_pen = float(g["monto"]) * tc if moneda_g == "USD" else float(g["monto"])
             fecha_pago = (pd.Timestamp(cierre) + pd.DateOffset(months=1)).replace(day=t["dia_pago"])
-            if fecha_pago in egresos_tarjeta.index:
-                egresos_tarjeta.loc[fecha_pago] += g["monto"]
+            if cuenta_pago not in egresos_tarjeta_por_cuenta:
+                egresos_tarjeta_por_cuenta[cuenta_pago] = pd.Series(0.0, index=fechas)
+            if fecha_pago in egresos_tarjeta_por_cuenta[cuenta_pago].index:
+                egresos_tarjeta_por_cuenta[cuenta_pago].loc[fecha_pago] += monto_pen
+
+# egresos de cuenta principal (para saldo principal y gráfico)
+egresos_tarjeta = egresos_tarjeta_por_cuenta.get("principal", pd.Series(0.0, index=fechas))
 
 saldo = (
     ahorro_inicial
@@ -1720,6 +1885,10 @@ for cuenta in st.session_state["cuentas_ahorro"]:
 
             if t["destino"] == cuenta["id"]:
                 serie_sec.loc[f:] += float(t["monto"])
+
+    # Pagos de tarjeta de crédito desde esta cuenta secundaria
+    egr_tc_sec = egresos_tarjeta_por_cuenta.get(cuenta["id"], pd.Series(0.0, index=fechas))
+    serie_sec = serie_sec - egr_tc_sec.cumsum()
 
     # Interés diario por TEA
     tea = float(cuenta.get("tea", 0.0))
