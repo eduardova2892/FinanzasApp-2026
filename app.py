@@ -1314,11 +1314,30 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 df_gt["fecha"] = df_gt["fecha"].dt.date
                 df_gt["Eliminar"] = False
 
-                st.session_state["gastos_tarjeta"] = (
+                _df_gt_save = (
                     df_gt.drop(columns=["Eliminar"])
                     .assign(fecha=lambda d: pd.to_datetime(d["fecha"]).dt.strftime("%Y-%m-%d"))
-                    .to_dict("records")
+                    .copy()
                 )
+                # Sanear campos que pueden tener NaN (allow_nan=False en httpx)
+                _nan_defaults = {
+                    "moneda": "PEN", "descripcion": "", "categoria": "",
+                    "tarjeta_nombre": "", "tarjeta_id": ""
+                }
+                for _col, _default in _nan_defaults.items():
+                    if _col in _df_gt_save.columns:
+                        _df_gt_save[_col] = _df_gt_save[_col].apply(
+                            lambda x: _default if (x is None or (isinstance(x, float) and pd.isna(x))
+                                                   or str(x) in ["", "None", "nan"]) else str(x)
+                        )
+                if "monto" in _df_gt_save.columns:
+                    _df_gt_save["monto"] = pd.to_numeric(_df_gt_save["monto"], errors="coerce").fillna(0.0)
+                if "id" in _df_gt_save.columns:
+                    _df_gt_save["id"] = _df_gt_save["id"].apply(
+                        lambda x: str(uuid.uuid4()) if (x is None or (isinstance(x, float) and pd.isna(x))
+                                                        or str(x) in ["", "None", "nan"]) else str(x)
+                    )
+                st.session_state["gastos_tarjeta"] = _df_gt_save.to_dict("records")
                 guardar("gastos_tarjeta")
 
                 ed_gt = st.data_editor(
@@ -1345,17 +1364,24 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     df_editado = df_editado.drop(columns=["Eliminar"])
 
                     df_editado["fecha"] = pd.to_datetime(
-                        df_editado["fecha"],
-                        errors="coerce"
+                        df_editado["fecha"], errors="coerce"
                     ).dt.strftime("%Y-%m-%d")
 
-                    df_editado = df_editado.sort_values(
-                        "fecha",
-                        ascending=False
-                    )
+                    df_editado = df_editado.sort_values("fecha", ascending=False)
+
+                    # Sanear NaN antes de guardar
+                    _nan_defs2 = {"moneda": "PEN", "descripcion": "", "categoria": "",
+                                  "tarjeta_nombre": "", "tarjeta_id": ""}
+                    for _c, _d in _nan_defs2.items():
+                        if _c in df_editado.columns:
+                            df_editado[_c] = df_editado[_c].apply(
+                                lambda x: _d if (x is None or (isinstance(x, float) and pd.isna(x))
+                                                 or str(x) in ["", "None", "nan"]) else str(x)
+                            )
+                    if "monto" in df_editado.columns:
+                        df_editado["monto"] = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
 
                     st.session_state["gastos_tarjeta"] = df_editado.to_dict("records")
-
                     guardar("gastos_tarjeta")
                     st.rerun()
 
