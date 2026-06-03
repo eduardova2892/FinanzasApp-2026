@@ -1933,9 +1933,9 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         font=dict(color="white", family="Inter, sans-serif"),
         xaxis=dict(gridcolor="#1e2530", zeroline=False),
         yaxis=dict(gridcolor="#1e2530", zeroline=False),
-        legend=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)"),
         margin=dict(l=10, r=10, t=40, b=10),
     )
+    _LEGEND_BASE = dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)")
 
     PALETTE = {
         "principal": "#26C281",
@@ -2120,8 +2120,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         height=420,
         barmode="group",
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                    bgcolor="rgba(0,0,0,0)"),
+        legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
     fig_evol.update_yaxes(
         title_text="Saldo (S/)", secondary_y=False,
@@ -2292,7 +2291,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             fig_cat.update_layout(
                 **PLOTLY_LAYOUT, height=420,
                 showlegend=True,
-                legend=dict(orientation="v", x=1.01, y=0.5),
+                legend={**_LEGEND_BASE, "orientation": "v", "x": 1.01, "y": 0.5},
                 title=dict(text=f"Distribución — {mes_categoria_txt}", font=dict(size=15))
             )
         else:
@@ -2362,8 +2361,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                 barmode="group", height=380,
                 xaxis=dict(tickangle=-30, gridcolor="rgba(0,0,0,0)"),
                 yaxis=dict(gridcolor="#1e2530", tickformat=",d", title="S/"),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            bgcolor="rgba(0,0,0,0)"),
+                legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
                 hovermode="x unified"
             )
             return fig_b
