@@ -2090,11 +2090,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     # Y1: máximo = 5x el saldo máximo observado, mínimo 200k, redondeado a 50k
     _max_saldo_data = max(int(serie_cuenta_principal.max()), int(serie_ahorro_total.max()), 50000)
     _max_saldo = max(((_max_saldo_data * 5) // 50000 + 1) * 50000, 500000)
-    # Y2: máximo = 2x el flujo máximo observado, mínimo 50k, redondeado a 10k
-    _max_flujo_data = max(int(mensual["ingresos"].max()), int(mensual["egresos"].max()), 10000)
-    _max_flujo = max(((_max_flujo_data * 2) // 10000 + 1) * 10000, 50000)
-
-    _sl_col1, _sl_col2 = st.columns(2)
+    _sl_col1, _sl_col2 = st.columns([1, 1])
     with _sl_col1:
         rango_y1 = st.slider(
             "Rango eje Y — Saldo (S/)",
@@ -2103,14 +2099,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             step=10000, format="%,d",
             key="slider_y1"
         )
-    with _sl_col2:
-        rango_y2 = st.slider(
-            "Rango eje Y2 — Flujo mensual (S/)",
-            min_value=0, max_value=_max_flujo,
-            value=(0, min(int(_max_flujo_data * 1.4 // 5000 + 1) * 5000, _max_flujo)),
-            step=5000, format="%,d",
-            key="slider_y2"
-        )
+
 
     fecha_x_inicio = fechas.min()
     fecha_x_fin = min(fecha_x_inicio + pd.DateOffset(months=horizonte_meses), fechas.max())
@@ -2118,23 +2107,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     mask = (fechas >= fecha_x_inicio) & (fechas <= fecha_x_fin)
     fechas_vis = fechas[mask]
 
-    fig_evol = make_subplots(specs=[[{"secondary_y": True}]])
-
-    # Barras ingresos/egresos (eje secundario, invertido)
-    mensual_vis = mensual[
-        (mensual["fecha_mes"] >= fecha_x_inicio) &
-        (mensual["fecha_mes"] <= fecha_x_fin)
-    ]
-    fig_evol.add_trace(go.Bar(
-        x=mensual_vis["fecha_mes"], y=mensual_vis["ingresos"],
-        name="Ingresos mes", marker_color=PALETTE["ingresos"], opacity=0.55,
-        hovertemplate="<b>Ingresos</b><br>S/ %{y:,.0f}<extra></extra>"
-    ), secondary_y=True)
-    fig_evol.add_trace(go.Bar(
-        x=mensual_vis["fecha_mes"], y=mensual_vis["egresos"],
-        name="Egresos mes", marker_color=PALETTE["egresos"], opacity=0.55,
-        hovertemplate="<b>Egresos</b><br>S/ %{y:,.0f}<extra></extra>"
-    ), secondary_y=True)
+    fig_evol = go.Figure()
 
     # Línea cuenta principal
     fig_evol.add_trace(go.Scatter(
@@ -2142,7 +2115,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         name=nombre_cuenta_principal,
         line=dict(color=PALETTE["principal"], width=2.5),
         hovertemplate=f"<b>{nombre_cuenta_principal}</b><br>%{{x|%d %b %Y}}<br>S/ %{{y:,.0f}}<extra></extra>"
-    ), secondary_y=False)
+    ))
 
     # Cuentas secundarias
     if mostrar_secundarias:
@@ -2152,7 +2125,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                 name=f"↳ {nc}",
                 line=dict(color=COLORES_SEC[i % len(COLORES_SEC)], width=1.8, dash="dash"),
                 hovertemplate=f"<b>{nc}</b><br>%{{x|%d %b %Y}}<br>S/ %{{y:,.0f}}<extra></extra>"
-            ), secondary_y=False)
+            ))
 
     # Ahorro total
     if mostrar_ahorro_total:
@@ -2161,7 +2134,17 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             name="Ahorro total",
             line=dict(color=PALETTE["total"], width=2, dash="dot"),
             hovertemplate="<b>Ahorro total</b><br>%{x|%d %b %Y}<br>S/ %{y:,.0f}<extra></extra>"
-        ), secondary_y=False)
+        ))
+
+    # Área de relleno bajo la cuenta principal
+    fig_evol.add_trace(go.Scatter(
+        x=fechas_vis, y=serie_cuenta_principal[mask],
+        fill="tozeroy",
+        fillcolor=f"rgba(38,194,129,0.07)",
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo="skip"
+    ))
 
     # Línea "hoy"
     if fecha_x_inicio <= hoy <= fecha_x_fin:
@@ -2176,20 +2159,14 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
     fig_evol.update_layout(
         **PLOTLY_LAYOUT,
-        height=420,
-        barmode="group",
+        height=380,
         hovermode="x unified",
         legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
     fig_evol.update_yaxes(
-        title_text="Saldo (S/)", secondary_y=False,
+        title_text="Saldo (S/)",
         gridcolor=_grid_col, tickformat=",d", color=_font_col,
         range=[rango_y1[0], rango_y1[1]]
-    )
-    fig_evol.update_yaxes(
-        title_text="Flujo mensual (S/)", secondary_y=True,
-        gridcolor="rgba(0,0,0,0)", tickformat=",d",
-        color=_font_col, range=[rango_y2[1], rango_y2[0]]
     )
     fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
@@ -2403,8 +2380,8 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
     if df_mes_tipo["Total general"].sum() > 0:
 
-        tab_debcred, tab_fijvar, tab_tabla = st.tabs(
-            ["💳 Débito vs Crédito", "📌 Fijos vs Variables", "📋 Tabla detallada"]
+        tab_ingegr, tab_debcred, tab_fijvar, tab_tabla = st.tabs(
+            ["📈 Ingresos vs Egresos", "💳 Débito vs Crédito", "📌 Fijos vs Variables", "📋 Tabla detallada"]
         )
 
         def _plotly_bar_grouped(col_a, col_b, lbl_a, lbl_b, col_color_a, col_color_b):
@@ -2428,6 +2405,41 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             fig_b.update_xaxes(**_XAXIS_DEF, tickangle=-30, showgrid=False)
             fig_b.update_yaxes(**_YAXIS_DEF, tickformat=",d", title_text="S/")
             return fig_b
+
+        mensual_tab = mensual.copy()
+        mensual_tab["Mes"] = mensual_tab["fecha_mes"].dt.strftime("%b %Y")
+
+        with tab_ingegr:
+            fig_ing = go.Figure()
+            fig_ing.add_trace(go.Bar(
+                x=mensual_tab["Mes"], y=mensual_tab["ingresos"],
+                name="Ingresos", marker_color=PALETTE["ingresos"],
+                hovertemplate="<b>Ingresos</b><br>%{x}<br>S/ %{y:,.0f}<extra></extra>"
+            ))
+            fig_ing.add_trace(go.Bar(
+                x=mensual_tab["Mes"], y=mensual_tab["egresos"],
+                name="Egresos", marker_color=PALETTE["egresos"],
+                hovertemplate="<b>Egresos</b><br>%{x}<br>S/ %{y:,.0f}<extra></extra>"
+            ))
+            # Línea de balance neto
+            _neto = mensual_tab["ingresos"] - mensual_tab["egresos"]
+            fig_ing.add_trace(go.Scatter(
+                x=mensual_tab["Mes"], y=_neto,
+                name="Balance neto",
+                mode="lines+markers",
+                line=dict(color=PALETTE["hoy"], width=2),
+                marker=dict(size=7),
+                hovertemplate="<b>Balance neto</b><br>%{x}<br>S/ %{y:,.0f}<extra></extra>"
+            ))
+            fig_ing.update_layout(
+                **PLOTLY_LAYOUT,
+                barmode="group", height=380,
+                legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+                hovermode="x unified"
+            )
+            fig_ing.update_xaxes(**_XAXIS_DEF, tickangle=-30, showgrid=False)
+            fig_ing.update_yaxes(**_YAXIS_DEF, tickformat=",d", title_text="S/")
+            st.plotly_chart(fig_ing, use_container_width=True)
 
         with tab_debcred:
             st.plotly_chart(
@@ -2572,10 +2584,9 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     height=max(200, len(_timeline) * 52 + 60),
                     showlegend=False,
                     barmode="overlay",
-                    xaxis=dict(tickformat=",d", gridcolor=_grid_col, color=_font_col, title="Monto (S/)"),
-                    yaxis=dict(gridcolor="rgba(0,0,0,0)", color=_font_col, autorange="reversed"),
-                    margin=dict(l=10, r=120, t=20, b=30),
                 )
+                fig_tl.update_xaxes(tickformat=",d", gridcolor=_grid_col, color=_font_col, title_text="Monto (S/)")
+                fig_tl.update_yaxes(gridcolor="rgba(0,0,0,0)", color=_font_col, autorange="reversed")
                 # Línea vertical en "hoy" (monto 0)
                 fig_tl.add_annotation(
                     text="← Monto a pagar por ciclo",
