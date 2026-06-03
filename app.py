@@ -2087,26 +2087,29 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         mostrar_secundarias = st.toggle("Mostrar cuentas secundarias", value=False, key="tog_sec")
 
     # ── Sliders de rango Y ─────────────────────────────────────
-    _max_saldo = max(int(serie_cuenta_principal.max() * 1.3), int(serie_ahorro_total.max() * 1.3), 50000)
-    _max_flujo = max(int(mensual["ingresos"].max() * 1.5), int(mensual["egresos"].max() * 1.5), 20000)
-    # Round up to nearest 10k
-    _max_saldo = (((_max_saldo) // 10000) + 1) * 10000
-    _max_flujo = (((_max_flujo) // 5000) + 1) * 5000
+    # Y1: máximo = 5x el saldo máximo observado, mínimo 200k, redondeado a 50k
+    _max_saldo_data = max(int(serie_cuenta_principal.max()), int(serie_ahorro_total.max()), 50000)
+    _max_saldo = max(((_max_saldo_data * 5) // 50000 + 1) * 50000, 500000)
+    # Y2: máximo = 2x el flujo máximo observado, mínimo 50k, redondeado a 10k
+    _max_flujo_data = max(int(mensual["ingresos"].max()), int(mensual["egresos"].max()), 10000)
+    _max_flujo = max(((_max_flujo_data * 2) // 10000 + 1) * 10000, 50000)
 
     _sl_col1, _sl_col2 = st.columns(2)
     with _sl_col1:
         rango_y1 = st.slider(
             "Rango eje Y — Saldo (S/)",
             min_value=0, max_value=_max_saldo,
-            value=(0, min(_max_saldo, 150000)),
-            step=10000, format="%,d"
+            value=(0, min(int(_max_saldo_data * 1.4 // 10000 + 1) * 10000, _max_saldo)),
+            step=10000, format="%,d",
+            key="slider_y1"
         )
     with _sl_col2:
         rango_y2 = st.slider(
             "Rango eje Y2 — Flujo mensual (S/)",
             min_value=0, max_value=_max_flujo,
-            value=(0, min(_max_flujo, 40000)),
-            step=5000, format="%,d"
+            value=(0, min(int(_max_flujo_data * 1.4 // 5000 + 1) * 5000, _max_flujo)),
+            step=5000, format="%,d",
+            key="slider_y2"
         )
 
     fecha_x_inicio = fechas.min()
@@ -2185,8 +2188,8 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     )
     fig_evol.update_yaxes(
         title_text="Flujo mensual (S/)", secondary_y=True,
-        autorange="reversed", gridcolor="rgba(0,0,0,0)", tickformat=",d",
-        color=_font_col, range=[rango_y2[0], rango_y2[1]]
+        gridcolor="rgba(0,0,0,0)", tickformat=",d",
+        color=_font_col, range=[rango_y2[1], rango_y2[0]]
     )
     fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
@@ -2470,7 +2473,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     # SECCIÓN 5 — RESUMEN POR CICLO DE TARJETA
     # ─────────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("### 💳 Resumen por ciclo de tarjeta de crédito")
+    st.markdown("### 💳 Pagos de tarjeta de crédito")
 
     if not df_gt_calc.empty:
         resumen = []
@@ -2498,28 +2501,107 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                 lambda r: f"{pd.to_datetime(r['Inicio ciclo']).strftime('%d/%m/%Y')} → {pd.to_datetime(r['Cierre ciclo']).strftime('%d/%m/%Y')}",
                 axis=1
             )
-            resumen_ciclo = resumen_ciclo[["Tarjeta", "Ciclo facturación", "Cierre ciclo", "Fecha pago", "Monto"]]
 
             hoy_date = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).normalize().date()
-            pagos_futuros = resumen_ciclo[pd.to_datetime(resumen_ciclo["Fecha pago"]).dt.date >= hoy_date].copy()
+            resumen_ciclo["_fecha_pago_dt"] = pd.to_datetime(resumen_ciclo["Fecha pago"])
+            resumen_ciclo["_dias"] = (resumen_ciclo["_fecha_pago_dt"].dt.date
+                                       .apply(lambda d: (d - hoy_date).days))
 
+            pagos_futuros = resumen_ciclo[resumen_ciclo["_dias"] >= 0].copy()
+            pagos_pasados  = resumen_ciclo[resumen_ciclo["_dias"] < 0].copy()
+
+            # ── Próximos pagos como tarjetas visuales ──────────────
             if not pagos_futuros.empty:
-                proximo = pagos_futuros.sort_values("Fecha pago").iloc[0]
-                dias_restantes = (pd.to_datetime(proximo["Fecha pago"]).date() - hoy_date).days
-                alerta_col1, alerta_col2, alerta_col3 = st.columns(3)
-                alerta_col1.metric("💳 Próxima tarjeta", proximo["Tarjeta"])
-                alerta_col2.metric("Monto a pagar", f"S/ {proximo['Monto']:,.0f}")
-                alerta_col3.metric("Fecha de pago", pd.to_datetime(proximo["Fecha pago"]).strftime("%d/%m/%Y"),
-                                   delta=f"{dias_restantes} días",
-                                   delta_color="inverse" if dias_restantes <= 7 else "normal")
+                proximos = pagos_futuros.sort_values("_dias").head(4)
+                st.markdown("#### 📅 Próximos pagos")
+                _pcols = st.columns(len(proximos))
+                for _ci, (_, _row) in enumerate(proximos.iterrows()):
+                    _d = int(_row["_dias"])
+                    if _d == 0:
+                        _urgencia = "🔴 ¡HOY!"
+                        _dc = "inverse"
+                    elif _d <= 5:
+                        _urgencia = f"🔴 {_d} días"
+                        _dc = "inverse"
+                    elif _d <= 15:
+                        _urgencia = f"🟡 {_d} días"
+                        _dc = "off"
+                    else:
+                        _urgencia = f"🟢 {_d} días"
+                        _dc = "normal"
 
-            st.dataframe(
-                resumen_ciclo,
-                use_container_width=True, hide_index=True,
-                column_config={
-                    "Monto": st.column_config.NumberColumn("Monto (S/)", format="S/ %,.0f")
-                }
-            )
+                    with _pcols[_ci]:
+                        with st.container(border=True):
+                            st.caption(f"💳 {_row['Tarjeta']}")
+                            st.markdown(f"### S/ {_row['Monto']:,.0f}")
+                            st.caption(f"📆 Pago: **{_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}**")
+                            st.caption(f"🗓 Cierre: {pd.to_datetime(_row['Cierre ciclo']).strftime('%d/%m/%Y')}")
+                            st.markdown(f"**{_urgencia}**")
+
+            # ── Timeline de pagos futuros (gráfico) ────────────────
+            if not pagos_futuros.empty:
+                st.markdown("#### 📊 Timeline de pagos futuros")
+                _timeline = pagos_futuros.sort_values("_dias").copy()
+                _timeline["label"] = _timeline.apply(
+                    lambda r: f"{r['Tarjeta']}<br>S/ {r['Monto']:,.0f}", axis=1
+                )
+                _timeline["color"] = _timeline["_dias"].apply(
+                    lambda d: "#E74C3C" if d <= 5 else ("#F39C12" if d <= 15 else "#26C281")
+                )
+
+                fig_tl = go.Figure()
+                for _, _row in _timeline.iterrows():
+                    fig_tl.add_trace(go.Bar(
+                        x=[_row["Monto"]],
+                        y=[f"{_row['Tarjeta']} — {_row['_fecha_pago_dt'].strftime('%d/%m')}"],
+                        orientation="h",
+                        marker_color=_row["color"],
+                        text=f"S/ {_row['Monto']:,.0f}  ({int(_row['_dias'])} días)",
+                        textposition="outside",
+                        hovertemplate=(
+                            f"<b>{_row['Tarjeta']}</b><br>"
+                            f"Ciclo: {_row['Ciclo facturación']}<br>"
+                            f"Pago: {_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}<br>"
+                            f"<b>S/ {_row['Monto']:,.0f}</b><extra></extra>"
+                        ),
+                        showlegend=False
+                    ))
+
+                fig_tl.update_layout(
+                    **PLOTLY_LAYOUT,
+                    height=max(200, len(_timeline) * 52 + 60),
+                    showlegend=False,
+                    barmode="overlay",
+                    xaxis=dict(tickformat=",d", gridcolor=_grid_col, color=_font_col, title="Monto (S/)"),
+                    yaxis=dict(gridcolor="rgba(0,0,0,0)", color=_font_col, autorange="reversed"),
+                    margin=dict(l=10, r=120, t=20, b=30),
+                )
+                # Línea vertical en "hoy" (monto 0)
+                fig_tl.add_annotation(
+                    text="← Monto a pagar por ciclo",
+                    xref="paper", yref="paper",
+                    x=0.5, y=1.05, showarrow=False,
+                    font=dict(size=11, color=_font_col)
+                )
+                st.plotly_chart(fig_tl, use_container_width=True)
+
+            # ── Tabla completa ─────────────────────────────────────
+            with st.expander("📋 Ver historial completo de ciclos", expanded=False):
+                _tabla_show = resumen_ciclo[
+                    ["Tarjeta", "Ciclo facturación", "Cierre ciclo", "Fecha pago", "Monto", "_dias"]
+                ].copy()
+                _tabla_show["Estado"] = _tabla_show["_dias"].apply(
+                    lambda d: "✅ Pagado" if d < 0 else ("🔴 Urgente" if d <= 5 else ("🟡 Próximo" if d <= 15 else "🟢 Futuro"))
+                )
+                _tabla_show = _tabla_show.drop(columns=["_dias"])
+                st.dataframe(
+                    _tabla_show,
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "Monto": st.column_config.NumberColumn("Monto (S/)", format="S/ %,.0f"),
+                        "Estado": st.column_config.TextColumn("Estado"),
+                    }
+                )
         else:
             st.info("No hay gastos válidos con tarjeta para calcular ciclos.")
     else:
