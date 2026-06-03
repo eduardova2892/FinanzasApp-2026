@@ -2050,9 +2050,13 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     st.markdown("### 📈 Evolución de saldos")
 
     # ── Cuadro de saldos actuales ──────────────────────────────
-    _fecha_ref = hoy if (fechas.min() <= hoy <= fechas.max()) else fechas.max()
-    # Fecha más cercana disponible
-    _idx_ref = (fechas - _fecha_ref).abs().argmin()
+    # Normalizar _fecha_ref al mismo tipo que fechas (sin tz, solo fecha)
+    _hoy_naive = pd.Timestamp(hoy_peru)
+    _f_min = fechas.min().normalize()
+    _f_max = fechas.max().normalize()
+    _fecha_ref = _hoy_naive if (_f_min <= _hoy_naive <= _f_max) else _f_max
+    # Índice de la fecha más cercana
+    _idx_ref = int((fechas.normalize() - _fecha_ref).abs().argmin())
     _fecha_ref_real = fechas[_idx_ref]
 
     _saldo_principal_hoy = float(serie_cuenta_principal.iloc[_idx_ref])
