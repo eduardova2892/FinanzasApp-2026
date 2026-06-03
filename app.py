@@ -1927,15 +1927,25 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
     }
 
+    # ── Detección de tema light / dark ────────────────────────
+    try:
+        _tema = st.get_option("theme.base") or "dark"
+    except Exception:
+        _tema = "dark"
+    _is_dark   = (_tema != "light")
+    _font_col  = "white"                  if _is_dark else "#1a1a2e"
+    _grid_col  = "#1e2530"               if _is_dark else "#d0d0d0"
+    _plot_bg   = "rgba(14,17,23,1)"      if _is_dark else "rgba(248,249,250,1)"
+
     PLOTLY_LAYOUT = dict(
         paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(14,17,23,1)",
-        font=dict(color="white", family="Inter, sans-serif"),
-        xaxis=dict(gridcolor="#1e2530", zeroline=False),
-        yaxis=dict(gridcolor="#1e2530", zeroline=False),
+        plot_bgcolor=_plot_bg,
+        font=dict(color=_font_col, family="Inter, sans-serif"),
         margin=dict(l=10, r=10, t=40, b=10),
     )
-    _LEGEND_BASE = dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)")
+    _LEGEND_BASE = dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)", font=dict(color=_font_col))
+    _XAXIS_DEF   = dict(gridcolor=_grid_col, zeroline=False, color=_font_col)
+    _YAXIS_DEF   = dict(gridcolor=_grid_col, zeroline=False, color=_font_col)
 
     PALETTE = {
         "principal": "#26C281",
@@ -2039,6 +2049,26 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     # ─────────────────────────────────────────────────────────
     st.markdown("### 📈 Evolución de saldos")
 
+    # ── Cuadro de saldos actuales ──────────────────────────────
+    _fecha_ref = hoy if (fechas.min() <= hoy <= fechas.max()) else fechas.max()
+    # Fecha más cercana disponible
+    _idx_ref = (fechas - _fecha_ref).abs().argmin()
+    _fecha_ref_real = fechas[_idx_ref]
+
+    _saldo_principal_hoy = float(serie_cuenta_principal.iloc[_idx_ref])
+    _saldo_total_hoy     = float(serie_ahorro_total.iloc[_idx_ref])
+
+    _lbl_fecha = _fecha_ref_real.strftime("%d/%m/%Y")
+    with st.container(border=True):
+        st.caption(f"💰 Saldos al {_lbl_fecha}")
+        _sb_cols = st.columns(2 + len(saldos_sec))
+        _sb_cols[0].metric(nombre_cuenta_principal, f"S/ {_saldo_principal_hoy:,.0f}")
+        for _i, (_nc, _ss) in enumerate(saldos_sec.items()):
+            _v = float(_ss.iloc[_idx_ref])
+            _sb_cols[1 + _i].metric(f"↳ {_nc}", f"S/ {_v:,.0f}")
+        _sb_cols[-1].metric("🏦 Total ahorros", f"S/ {_saldo_total_hoy:,.0f}")
+
+    # ── Controles del gráfico ──────────────────────────────────
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
     with ctrl_col1:
         horizonte_meses = st.selectbox(
@@ -2052,6 +2082,29 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         mostrar_ahorro_total = st.toggle("Mostrar ahorro total", value=True, key="tog_total")
     with ctrl_col3:
         mostrar_secundarias = st.toggle("Mostrar cuentas secundarias", value=False, key="tog_sec")
+
+    # ── Sliders de rango Y ─────────────────────────────────────
+    _max_saldo = max(int(serie_cuenta_principal.max() * 1.3), int(serie_ahorro_total.max() * 1.3), 50000)
+    _max_flujo = max(int(mensual["ingresos"].max() * 1.5), int(mensual["egresos"].max() * 1.5), 20000)
+    # Round up to nearest 10k
+    _max_saldo = (((_max_saldo) // 10000) + 1) * 10000
+    _max_flujo = (((_max_flujo) // 5000) + 1) * 5000
+
+    _sl_col1, _sl_col2 = st.columns(2)
+    with _sl_col1:
+        rango_y1 = st.slider(
+            "Rango eje Y — Saldo (S/)",
+            min_value=0, max_value=_max_saldo,
+            value=(0, min(_max_saldo, 150000)),
+            step=10000, format="%,d"
+        )
+    with _sl_col2:
+        rango_y2 = st.slider(
+            "Rango eje Y2 — Flujo mensual (S/)",
+            min_value=0, max_value=_max_flujo,
+            value=(0, min(_max_flujo, 40000)),
+            step=5000, format="%,d"
+        )
 
     fecha_x_inicio = fechas.min()
     fecha_x_fin = min(fecha_x_inicio + pd.DateOffset(months=horizonte_meses), fechas.max())
@@ -2124,13 +2177,15 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     )
     fig_evol.update_yaxes(
         title_text="Saldo (S/)", secondary_y=False,
-        gridcolor="#1e2530", tickformat=",d"
+        gridcolor=_grid_col, tickformat=",d", color=_font_col,
+        range=[rango_y1[0], rango_y1[1]]
     )
     fig_evol.update_yaxes(
         title_text="Flujo mensual (S/)", secondary_y=True,
-        autorange="reversed", gridcolor="rgba(0,0,0,0)", tickformat=",d"
+        autorange="reversed", gridcolor="rgba(0,0,0,0)", tickformat=",d",
+        color=_font_col, range=[rango_y2[0], rango_y2[1]]
     )
-    fig_evol.update_xaxes(showgrid=False)
+    fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
     st.plotly_chart(fig_evol, use_container_width=True)
 
@@ -2187,7 +2242,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             "axis": {"range": [0, max(ingresos_mes_actual, gastos_comprometidos * 1.2)],
                      "tickformat": ",.0f", "tickcolor": "white"},
             "bar": {"color": "#E74C3C" if monto_disponible_para_gastar < 0 else "#26C281"},
-            "bgcolor": "#1e2530",
+            "bgcolor": _plot_bg,
             "bordercolor": "#333",
             "threshold": {
                 "line": {"color": PALETTE["hoy"], "width": 3},
@@ -2201,7 +2256,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             ]
         }
     ))
-    fig_gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color="white", height=260,
+    fig_gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color=_font_col, height=260,
                             margin=dict(l=20, r=20, t=40, b=10))
     st.plotly_chart(fig_gauge, use_container_width=True)
 
@@ -2286,7 +2341,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             ))
             fig_cat.add_annotation(
                 text=f"S/ {total_mes:,.0f}",
-                x=0.5, y=0.5, font=dict(size=16, color="white"), showarrow=False
+                x=0.5, y=0.5, font=dict(size=16, color=_font_col), showarrow=False
             )
             fig_cat.update_layout(
                 **PLOTLY_LAYOUT, height=420,
@@ -2311,9 +2366,11 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             ))
             fig_cat.update_layout(
                 **PLOTLY_LAYOUT, height=max(350, len(resumen_cat) * 38),
-                xaxis=dict(gridcolor="#1e2530", tickformat=",d"),
-                title=dict(text=f"Gastos por categoría — {mes_categoria_txt}", font=dict(size=15))
+                title=dict(text=f"Gastos por categoría — {mes_categoria_txt}",
+                           font=dict(size=15, color=_font_col))
             )
+            fig_cat.update_xaxes(**_XAXIS_DEF, tickformat=",d")
+            fig_cat.update_yaxes(**_YAXIS_DEF)
 
         chart_col, table_col = st.columns([1.6, 1])
         with chart_col:
@@ -2359,11 +2416,11 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             fig_b.update_layout(
                 **PLOTLY_LAYOUT,
                 barmode="group", height=380,
-                xaxis=dict(tickangle=-30, gridcolor="rgba(0,0,0,0)"),
-                yaxis=dict(gridcolor="#1e2530", tickformat=",d", title="S/"),
                 legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
                 hovermode="x unified"
             )
+            fig_b.update_xaxes(**_XAXIS_DEF, tickangle=-30, showgrid=False)
+            fig_b.update_yaxes(**_YAXIS_DEF, tickformat=",d", title_text="S/")
             return fig_b
 
         with tab_debcred:
