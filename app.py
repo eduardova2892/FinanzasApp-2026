@@ -60,10 +60,17 @@ if "user" not in st.session_state:
                         st.error("❌ Usuario o contraseña incorrectos")
     st.stop()
 
-supabase.auth.set_session(
-    st.session_state["access_token"],
-    st.session_state["refresh_token"]
-)
+try:
+    supabase.auth.set_session(
+        st.session_state["access_token"],
+        st.session_state["refresh_token"]
+    )
+except Exception:
+    # Sesión expirada — limpiar y pedir login de nuevo
+    for _k in ["user", "access_token", "refresh_token"]:
+        st.session_state.pop(_k, None)
+    st.warning("⏳ Tu sesión expiró. Por favor vuelve a iniciar sesión.")
+    st.rerun()
 
 user_id = st.session_state["user"].id
 
@@ -1028,34 +1035,35 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
         with st.form("form_gasto_diario", clear_on_submit=True):
 
-            fecha = st.date_input(
-                "Fecha",
-                value=hoy_peru,
-                key="fecha_gasto_diario_debito"
-            )
+            _col_izq, _col_der = st.columns(2)
 
-            cuenta_origen_nombre = st.selectbox(
-                "Cuenta de origen",
-                list(cuentas_debito_map.keys()),
-                key="cuenta_origen_gasto_diario"
-            )
+            with _col_izq:
+                fecha = st.date_input(
+                    "📅 Fecha",
+                    value=hoy_peru,
+                    key="fecha_gasto_diario_debito"
+                )
+                cuenta_origen_nombre = st.selectbox(
+                    "🏦 Cuenta",
+                    list(cuentas_debito_map.keys()),
+                    key="cuenta_origen_gasto_diario"
+                )
 
-            categoria = st.selectbox(
-                "Categoría",
-                sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
-                key="categoria_gasto_diario_debito"
-            )
+            with _col_der:
+                categoria = st.selectbox(
+                    "🏷️ Categoría",
+                    sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
+                    key="categoria_gasto_diario_debito"
+                )
+                descripcion = st.text_input("📝 Descripción")
+                monto = st.number_input(
+                    "💰 Monto (S/)",
+                    min_value=0.0,
+                    step=1.0,
+                    key="monto_gasto_diario_debito"
+                )
 
-            descripcion = st.text_input("Descripción")
-
-            monto = st.number_input(
-                "Monto",
-                min_value=0.0,
-                step=1.0,
-                key="monto_gasto_diario_debito"
-            )
-
-            submitted = st.form_submit_button("Agregar gasto")
+            submitted = st.form_submit_button("➕ Agregar gasto débito", use_container_width=True, type="primary")
 
             if submitted:
 
@@ -1197,44 +1205,47 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             with st.form("form_gasto_tarjeta", clear_on_submit=True):
 
-                fecha = st.date_input(
-                    "Fecha gasto",
-                    value=hoy_peru,
-                    key="fecha_gasto_tarjeta"
-                )
+                _col_izq_t, _col_der_t = st.columns(2)
 
-                tarjeta_nombre = st.selectbox(
-                    "Tarjeta",
-                    list(mapa_tarjetas.keys()),
-                    key="tarjeta_gasto_diario"
-                )
+                with _col_izq_t:
+                    fecha = st.date_input(
+                        "📅 Fecha",
+                        value=hoy_peru,
+                        key="fecha_gasto_tarjeta"
+                    )
+                    tarjeta_nombre = st.selectbox(
+                        "💳 Tarjeta",
+                        list(mapa_tarjetas.keys()),
+                        key="tarjeta_gasto_diario"
+                    )
 
-                categoria = st.selectbox(
-                    "Categoría",
-                    sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
-                    key="categoria_gasto_tarjeta"
-                )
+                with _col_der_t:
+                    categoria = st.selectbox(
+                        "🏷️ Categoría",
+                        sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
+                        key="categoria_gasto_tarjeta"
+                    )
+                    descripcion = st.text_input(
+                        "📝 Descripción",
+                        key="descripcion_gasto_tarjeta"
+                    )
+                    _mc, _mm = st.columns([1, 2])
+                    with _mc:
+                        moneda_gt = st.selectbox(
+                            "Moneda",
+                            ["PEN", "USD"],
+                            key="moneda_gasto_tarjeta",
+                            help="USD se convierte al tipo de cambio del día de pago"
+                        )
+                    with _mm:
+                        monto = st.number_input(
+                            "💰 Monto",
+                            min_value=0.0,
+                            step=1.0,
+                            key="monto_gasto_tarjeta"
+                        )
 
-                descripcion = st.text_input(
-                    "Descripción",
-                    key="descripcion_gasto_tarjeta"
-                )
-
-                moneda_gt = st.selectbox(
-                    "Moneda",
-                    ["PEN", "USD"],
-                    key="moneda_gasto_tarjeta",
-                    help="USD: el monto se convierte a soles usando el tipo de cambio del día de pago"
-                )
-
-                monto = st.number_input(
-                    "Monto",
-                    min_value=0.0,
-                    step=1.0,
-                    key="monto_gasto_tarjeta"
-                )
-
-                if st.form_submit_button("Agregar gasto tarjeta"):
+                if st.form_submit_button("➕ Agregar gasto tarjeta", use_container_width=True, type="primary"):
 
                     if not categoria:
                         st.error("Debes ingresar una categoría válida.")
