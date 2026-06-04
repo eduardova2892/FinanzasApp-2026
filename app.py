@@ -1127,61 +1127,47 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             ).reset_index(drop=True)
 
             df_g["fecha"] = df_g["fecha"].dt.date
-            df_g["Eliminar"] = False
 
-            columnas_ocultas = ["id", "cuenta_origen"]
+            _cats_debito = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
 
-            df_g_show = df_g.drop(
-                columns=[c for c in columnas_ocultas if c in df_g.columns]
-            )
+            st.caption("✏️ Edita celdas directamente · Selecciona filas y usa la tecla **Delete** (o el ícono 🗑 que aparece al seleccionar) para borrar · Luego **Guardar cambios**.")
 
             ed_g = st.data_editor(
-                df_g_show,
+                df_g,
                 use_container_width=True,
                 hide_index=True,
+                num_rows="dynamic",
                 column_config={
-                    "fecha": st.column_config.DateColumn("Fecha"),
-                    "cuenta_origen_nombre": st.column_config.TextColumn("Cuenta"),
-                    "categoria": st.column_config.TextColumn("Categoría"),
-                    "descripcion": st.column_config.TextColumn("Descripción"),
-                    "monto": st.column_config.NumberColumn("Monto (S/)", min_value=0.0, step=1.0),
-                    "Eliminar": st.column_config.CheckboxColumn("🗑")
+                    "id":                None,
+                    "cuenta_origen":     None,
+                    "fecha":             st.column_config.DateColumn("Fecha", required=True),
+                    "cuenta_origen_nombre": st.column_config.TextColumn("Cuenta", disabled=True),
+                    "categoria":         st.column_config.SelectboxColumn("Categoría", options=_cats_debito, required=True),
+                    "descripcion":       st.column_config.TextColumn("Descripción"),
+                    "monto":             st.column_config.NumberColumn("Monto (S/)", min_value=0.0, step=1.0, required=True),
                 },
                 key="editor_gastos_debito"
             )
 
-            if st.button("Guardar cambios gastos débito / ahorros"):
-
-                df_temp = df_g.copy()
-
-                for col in ["id", "cuenta_origen"]:
-                    if col in df_temp.columns:
-                        ed_g[col] = df_temp[col].values
-
-                df_editado = (
-                    ed_g[
-                        ed_g["Eliminar"] == False
-                    ]
-                    .drop(columns=["Eliminar"])
-                    .copy()
+            if st.button("💾 Guardar cambios — Gastos débito", type="primary"):
+                df_editado = ed_g.copy()
+                # Restaurar columnas ocultas que el editor pudo haber perdido
+                for _col in ["id", "cuenta_origen"]:
+                    if _col not in df_editado.columns:
+                        df_editado[_col] = df_g[_col].values[:len(df_editado)] if _col in df_g.columns else ""
+                # Asegurar IDs únicos para filas nuevas
+                df_editado["id"] = df_editado["id"].apply(
+                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
                 )
-
-                if "fecha" in df_editado.columns:
-                    df_editado["fecha"] = pd.to_datetime(
-                        df_editado["fecha"],
-                        errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-
-                df_editado = df_editado.sort_values(
-                    "fecha",
-                    ascending=False
-                )
-
-                st.session_state["gastos_diarios"] = (
-                    df_editado.to_dict("records")
-                )
-
+                df_editado["cuenta_origen"] = df_editado["cuenta_origen"].fillna("principal")
+                df_editado["descripcion"]   = df_editado["descripcion"].fillna("").astype(str)
+                df_editado["categoria"]     = df_editado["categoria"].fillna("Sin categoría").astype(str)
+                df_editado["monto"]         = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
+                df_editado["fecha"]         = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
+                st.session_state["gastos_diarios"] = df_editado.to_dict("records")
                 guardar("gastos_diarios")
+                st.success("✅ Guardado.")
                 st.rerun()
 
         else:
@@ -1314,77 +1300,51 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 ).reset_index(drop=True)
 
                 df_gt["fecha"] = df_gt["fecha"].dt.date
-                df_gt["Eliminar"] = False
 
-                _df_gt_save = (
-                    df_gt.drop(columns=["Eliminar"])
-                    .assign(fecha=lambda d: pd.to_datetime(d["fecha"]).dt.strftime("%Y-%m-%d"))
-                    .copy()
-                )
-                # Sanear campos que pueden tener NaN (allow_nan=False en httpx)
-                _nan_defaults = {
-                    "moneda": "PEN", "descripcion": "", "categoria": "",
-                    "tarjeta_nombre": "", "tarjeta_id": ""
-                }
-                for _col, _default in _nan_defaults.items():
-                    if _col in _df_gt_save.columns:
-                        _df_gt_save[_col] = _df_gt_save[_col].apply(
-                            lambda x: _default if (x is None or (isinstance(x, float) and pd.isna(x))
-                                                   or str(x) in ["", "None", "nan"]) else str(x)
-                        )
-                if "monto" in _df_gt_save.columns:
-                    _df_gt_save["monto"] = pd.to_numeric(_df_gt_save["monto"], errors="coerce").fillna(0.0)
-                if "id" in _df_gt_save.columns:
-                    _df_gt_save["id"] = _df_gt_save["id"].apply(
-                        lambda x: str(uuid.uuid4()) if (x is None or (isinstance(x, float) and pd.isna(x))
-                                                        or str(x) in ["", "None", "nan"]) else str(x)
-                    )
-                st.session_state["gastos_tarjeta"] = _df_gt_save.to_dict("records")
-                guardar("gastos_tarjeta")
+                _cats_tarjeta = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+                _tarjetas_nombres = [t["nombre"] for t in st.session_state["tarjetas"]]
+
+                st.caption("✏️ Edita celdas directamente · Selecciona filas y usa la tecla **Delete** (o el ícono 🗑 que aparece al seleccionar) para borrar · Luego **Guardar cambios**.")
 
                 ed_gt = st.data_editor(
                     df_gt,
                     use_container_width=True,
                     hide_index=True,
+                    num_rows="dynamic",
                     column_config={
-                        "id": None,
-                        "tarjeta_id": None,
-                        "fecha": st.column_config.DateColumn("Fecha"),
-                        "tarjeta_nombre": st.column_config.TextColumn("Tarjeta"),
-                        "categoria": st.column_config.TextColumn("Categoría"),
-                        "descripcion": st.column_config.TextColumn("Descripción"),
-                        "moneda": st.column_config.SelectboxColumn("Moneda", options=["PEN", "USD"]),
-                        "monto": st.column_config.NumberColumn("Monto", min_value=0.0, step=1.0),
-                        "Eliminar": st.column_config.CheckboxColumn("🗑")
+                        "id":            None,
+                        "tarjeta_id":    None,
+                        "fecha":         st.column_config.DateColumn("Fecha", required=True),
+                        "tarjeta_nombre": st.column_config.SelectboxColumn("Tarjeta", options=_tarjetas_nombres, required=True),
+                        "categoria":     st.column_config.SelectboxColumn("Categoría", options=_cats_tarjeta, required=True),
+                        "descripcion":   st.column_config.TextColumn("Descripción"),
+                        "moneda":        st.column_config.SelectboxColumn("Moneda", options=["PEN", "USD"]),
+                        "monto":         st.column_config.NumberColumn("Monto", min_value=0.0, step=1.0, required=True),
                     },
                     key="editor_gastos_tarjeta"
                 )
 
-                if st.button("Guardar cambios gastos tarjeta"):
-
-                    df_editado = ed_gt[ed_gt["Eliminar"] == False].copy()
-                    df_editado = df_editado.drop(columns=["Eliminar"])
-
-                    df_editado["fecha"] = pd.to_datetime(
-                        df_editado["fecha"], errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-
-                    df_editado = df_editado.sort_values("fecha", ascending=False)
-
-                    # Sanear NaN antes de guardar
-                    _nan_defs2 = {"moneda": "PEN", "descripcion": "", "categoria": "",
-                                  "tarjeta_nombre": "", "tarjeta_id": ""}
-                    for _c, _d in _nan_defs2.items():
+                if st.button("💾 Guardar cambios — Gastos tarjeta", type="primary"):
+                    df_editado = ed_gt.copy()
+                    # Restaurar tarjeta_id desde el nombre (puede haber cambiado)
+                    _mapa_id = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+                    df_editado["tarjeta_id"] = df_editado["tarjeta_nombre"].map(_mapa_id).fillna("")
+                    # Asegurar IDs únicos
+                    df_editado["id"] = df_editado.get("id", pd.Series(dtype=str)).apply(
+                        lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                    ) if "id" in df_editado.columns else [str(uuid.uuid4()) for _ in range(len(df_editado))]
+                    # Sanear
+                    for _c, _d in {"moneda": "PEN", "descripcion": "", "categoria": "", "tarjeta_nombre": "", "tarjeta_id": ""}.items():
                         if _c in df_editado.columns:
                             df_editado[_c] = df_editado[_c].apply(
-                                lambda x: _d if (x is None or (isinstance(x, float) and pd.isna(x))
-                                                 or str(x) in ["", "None", "nan"]) else str(x)
+                                lambda x: _d if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"]) else str(x)
                             )
-                    if "monto" in df_editado.columns:
-                        df_editado["monto"] = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
-
+                    df_editado["monto"] = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
+                    df_editado["fecha"] = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
                     st.session_state["gastos_tarjeta"] = df_editado.to_dict("records")
                     guardar("gastos_tarjeta")
+                    st.success("✅ Guardado.")
                     st.rerun()
 
             else:
