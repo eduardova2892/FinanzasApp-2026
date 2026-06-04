@@ -1099,68 +1099,41 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         df_g = pd.DataFrame(st.session_state["gastos_diarios"])
 
         if not df_g.empty:
-            # Mini resumen compacto siempre visible
-            _dg_total   = pd.to_numeric(pd.DataFrame(st.session_state["gastos_diarios"]).get("monto", pd.Series(dtype=float)), errors="coerce").sum()
-            _dg_count   = len(st.session_state["gastos_diarios"])
-            _dg_c1, _dg_c2, _dg_c3 = st.columns(3)
-            _dg_c1.metric("Gastos débito registrados", _dg_count)
-            _dg_c2.metric("Total gastado", f"S/ {_dg_total:,.0f}")
-            _dg_c3.metric("Promedio por gasto", f"S/ {_dg_total/_dg_count:,.0f}" if _dg_count else "—")
 
-            with st.expander(f"📋 Ver / editar los {_dg_count} gastos débito", expanded=False):
-
-             if "id" not in df_g.columns:
+            if "id" not in df_g.columns:
                 df_g["id"] = None
-
             df_g["id"] = df_g["id"].apply(
                 lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
             )
-
             if "cuenta_origen" not in df_g.columns:
                 df_g["cuenta_origen"] = "principal"
-
             if "cuenta_origen_nombre" not in df_g.columns:
                 df_g["cuenta_origen_nombre"] = nombre_cuenta_principal
-
             df_g["cuenta_origen"] = df_g["cuenta_origen"].fillna("principal")
-            df_g["cuenta_origen_nombre"] = df_g["cuenta_origen_nombre"].fillna(
-                nombre_cuenta_principal
-            )
-
-            df_g["fecha"] = pd.to_datetime(
-                df_g["fecha"],
-                errors="coerce"
-            )
-
-            df_g["monto"] = pd.to_numeric(
-                df_g["monto"],
-                errors="coerce"
-            ).fillna(0)
-
-            df_g = df_g.sort_values(
-                by="fecha",
-                ascending=False
-            ).reset_index(drop=True)
-
+            df_g["cuenta_origen_nombre"] = df_g["cuenta_origen_nombre"].fillna(nombre_cuenta_principal)
+            df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
+            df_g["monto"] = pd.to_numeric(df_g["monto"], errors="coerce").fillna(0)
+            df_g = df_g.sort_values(by="fecha", ascending=False).reset_index(drop=True)
             df_g["fecha"] = df_g["fecha"].dt.date
 
             _cats_debito = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
 
-            st.caption("✏️ Edita celdas directamente · Selecciona filas y usa la tecla **Delete** (o el ícono 🗑 que aparece al seleccionar) para borrar · Luego **Guardar cambios**.")
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
 
             ed_g = st.data_editor(
                 df_g,
                 use_container_width=True,
                 hide_index=True,
                 num_rows="dynamic",
+                height=min(38 * len(df_g) + 46, 320),
                 column_config={
-                    "id":                None,
-                    "cuenta_origen":     None,
-                    "fecha":             st.column_config.DateColumn("Fecha", required=True),
-                    "cuenta_origen_nombre": st.column_config.TextColumn("Cuenta", disabled=True),
-                    "categoria":         st.column_config.SelectboxColumn("Categoría", options=_cats_debito, required=True),
-                    "descripcion":       st.column_config.TextColumn("Descripción"),
-                    "monto":             st.column_config.NumberColumn("Monto (S/)", min_value=0.0, step=1.0, required=True),
+                    "id":                   None,
+                    "cuenta_origen":        None,
+                    "fecha":                st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
+                    "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
+                    "categoria":            st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_debito, required=True, width="medium"),
+                    "descripcion":          st.column_config.TextColumn("📝 Descripción", width="large"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=1.0, required=True, format="S/ %,.2f", width="small"),
                 },
                 key="editor_gastos_debito"
             )
@@ -1281,71 +1254,41 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
 
             if not df_gt.empty:
-                # Mini resumen compacto
-                _gt_total = pd.to_numeric(pd.DataFrame(st.session_state["gastos_tarjeta"]).get("monto", pd.Series(dtype=float)), errors="coerce").sum()
-                _gt_count = len(st.session_state["gastos_tarjeta"])
-                _gt_c1, _gt_c2, _gt_c3 = st.columns(3)
-                _gt_c1.metric("Gastos tarjeta registrados", _gt_count)
-                _gt_c2.metric("Total gastado", f"S/ {_gt_total:,.0f}")
-                _gt_c3.metric("Promedio por gasto", f"S/ {_gt_total/_gt_count:,.0f}" if _gt_count else "—")
 
-                with st.expander(f"📋 Ver / editar los {_gt_count} gastos tarjeta", expanded=False):
-
-                 if "id" not in df_gt.columns:
+                if "id" not in df_gt.columns:
                     df_gt["id"] = None
-
                 df_gt["id"] = df_gt["id"].apply(
                     lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
                 )
-
                 df_gt = df_gt.drop_duplicates(
-                    subset=[
-                        "fecha",
-                        "tarjeta_id",
-                        "tarjeta_nombre",
-                        "categoria",
-                        "descripcion",
-                        "monto"
-                    ],
+                    subset=["fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "monto"],
                     keep="first"
                 )
-
-                df_gt["fecha"] = pd.to_datetime(
-                    df_gt["fecha"],
-                    errors="coerce"
-                )
-
-                df_gt["monto"] = pd.to_numeric(
-                    df_gt["monto"],
-                    errors="coerce"
-                ).fillna(0)
-
-                df_gt = df_gt.sort_values(
-                    "fecha",
-                    ascending=False
-                ).reset_index(drop=True)
-
+                df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
+                df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
+                df_gt = df_gt.sort_values("fecha", ascending=False).reset_index(drop=True)
                 df_gt["fecha"] = df_gt["fecha"].dt.date
 
                 _cats_tarjeta = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
                 _tarjetas_nombres = [t["nombre"] for t in st.session_state["tarjetas"]]
 
-                st.caption("✏️ Edita celdas directamente · Selecciona filas y usa la tecla **Delete** (o el ícono 🗑 que aparece al seleccionar) para borrar · Luego **Guardar cambios**.")
+                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
 
                 ed_gt = st.data_editor(
                     df_gt,
                     use_container_width=True,
                     hide_index=True,
                     num_rows="dynamic",
+                    height=min(38 * len(df_gt) + 46, 320),
                     column_config={
-                        "id":            None,
-                        "tarjeta_id":    None,
-                        "fecha":         st.column_config.DateColumn("Fecha", required=True),
-                        "tarjeta_nombre": st.column_config.SelectboxColumn("Tarjeta", options=_tarjetas_nombres, required=True),
-                        "categoria":     st.column_config.SelectboxColumn("Categoría", options=_cats_tarjeta, required=True),
-                        "descripcion":   st.column_config.TextColumn("Descripción"),
-                        "moneda":        st.column_config.SelectboxColumn("Moneda", options=["PEN", "USD"]),
-                        "monto":         st.column_config.NumberColumn("Monto", min_value=0.0, step=1.0, required=True),
+                        "id":             None,
+                        "tarjeta_id":     None,
+                        "fecha":          st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
+                        "tarjeta_nombre": st.column_config.SelectboxColumn("💳 Tarjeta", options=_tarjetas_nombres, required=True, width="small"),
+                        "categoria":      st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_tarjeta, required=True, width="medium"),
+                        "descripcion":    st.column_config.TextColumn("📝 Descripción", width="large"),
+                        "moneda":         st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
+                        "monto":          st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=1.0, required=True, format="S/ %,.2f", width="small"),
                     },
                     key="editor_gastos_tarjeta"
                 )
