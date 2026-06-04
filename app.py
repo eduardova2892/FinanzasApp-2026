@@ -26,45 +26,38 @@ supabase = create_client(
 )
 
 # ==================================================
-# LOGIN SUPABASE
+# LOGIN SUPABASE — pantalla completa, desaparece al entrar
 # ==================================================
-st.sidebar.title("🔐 Acceso")
-
-modo = st.sidebar.radio("Selecciona", ["Iniciar sesión", "Crear cuenta"])
-email = st.sidebar.text_input("Email")
-password = st.sidebar.text_input("Contraseña", type="password")
-
-if modo == "Crear cuenta":
-    if st.sidebar.button("Crear cuenta"):
-        try:
-            supabase.auth.sign_up({
-                "email": email,
-                "password": password
-            })
-            st.sidebar.success("Cuenta creada. Ahora inicia sesión.")
-        except Exception as e:
-            st.sidebar.error(f"Error: {e}")
-
-if modo == "Iniciar sesión":
-    if st.sidebar.button("Ingresar"):
-        try:
-            res = supabase.auth.sign_in_with_password({
-                "email": email,
-                "password": password
-            })
-
-            st.session_state["user"] = res.user
-            st.session_state["access_token"] = res.session.access_token
-            st.session_state["refresh_token"] = res.session.refresh_token
-
-            st.sidebar.success("Login exitoso")
-            st.rerun()
-
-        except Exception as e:
-            st.sidebar.error("Usuario o contraseña incorrectos")
-
 if "user" not in st.session_state:
-    st.warning("Debes iniciar sesión para usar la app")
+    st.markdown(
+        "<h1 style='text-align:center;margin-top:80px'>📊 Finanzas Personales</h1>"
+        "<p style='text-align:center;color:gray;margin-bottom:40px'>Inicia sesión para continuar</p>",
+        unsafe_allow_html=True
+    )
+    _lc, _lm, _rc = st.columns([1, 2, 1])
+    with _lm:
+        with st.container(border=True):
+            _modo = st.radio("", ["Iniciar sesión", "Crear cuenta"], horizontal=True, label_visibility="collapsed")
+            _email    = st.text_input("📧 Email", placeholder="tu@email.com")
+            _password = st.text_input("🔑 Contraseña", type="password", placeholder="••••••••")
+            st.write("")
+            if _modo == "Crear cuenta":
+                if st.button("Crear cuenta", use_container_width=True, type="primary"):
+                    try:
+                        supabase.auth.sign_up({"email": _email, "password": _password})
+                        st.success("✅ Cuenta creada. Ahora inicia sesión.")
+                    except Exception as _e:
+                        st.error(f"Error: {_e}")
+            else:
+                if st.button("Ingresar →", use_container_width=True, type="primary"):
+                    try:
+                        _res = supabase.auth.sign_in_with_password({"email": _email, "password": _password})
+                        st.session_state["user"]          = _res.user
+                        st.session_state["access_token"]  = _res.session.access_token
+                        st.session_state["refresh_token"] = _res.session.refresh_token
+                        st.rerun()
+                    except Exception:
+                        st.error("❌ Usuario o contraseña incorrectos")
     st.stop()
 
 supabase.auth.set_session(
@@ -73,6 +66,14 @@ supabase.auth.set_session(
 )
 
 user_id = st.session_state["user"].id
+
+# Sidebar minimalista: solo usuario y cerrar sesión
+with st.sidebar:
+    st.caption(f"👤 {st.session_state['user'].email}")
+    if st.button("🚪 Cerrar sesión", use_container_width=True):
+        for _k in ["user", "access_token", "refresh_token"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
 
 st.title("📊 Dashboard de Finanzas Personales")
 st.caption("Control de ingresos, gastos, tarjetas, cuentas de ahorro y proyección mensual.")
@@ -981,7 +982,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
     # ==================================================
     # 3.1 GASTOS DIARIOS DÉBITO Y CRÉDITO
     # ==================================================
-    with st.expander("🧾 3.1 Gastos diarios débito y crédito", expanded=True):
+    with st.expander("🧾 3.1 Gastos diarios débito y crédito", expanded=False):
 
         # ==================================================
         # GASTOS DIARIOS DÉBITO
@@ -1090,10 +1091,17 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         df_g = pd.DataFrame(st.session_state["gastos_diarios"])
 
         if not df_g.empty:
+            # Mini resumen compacto siempre visible
+            _dg_total   = pd.to_numeric(pd.DataFrame(st.session_state["gastos_diarios"]).get("monto", pd.Series(dtype=float)), errors="coerce").sum()
+            _dg_count   = len(st.session_state["gastos_diarios"])
+            _dg_c1, _dg_c2, _dg_c3 = st.columns(3)
+            _dg_c1.metric("Gastos débito registrados", _dg_count)
+            _dg_c2.metric("Total gastado", f"S/ {_dg_total:,.0f}")
+            _dg_c3.metric("Promedio por gasto", f"S/ {_dg_total/_dg_count:,.0f}" if _dg_count else "—")
 
-            st.subheader("📄 Resumen gastos diarios débito")
+            with st.expander(f"📋 Ver / editar los {_dg_count} gastos débito", expanded=False):
 
-            if "id" not in df_g.columns:
+             if "id" not in df_g.columns:
                 df_g["id"] = None
 
             df_g["id"] = df_g["id"].apply(
@@ -1262,10 +1270,17 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
 
             if not df_gt.empty:
+                # Mini resumen compacto
+                _gt_total = pd.to_numeric(pd.DataFrame(st.session_state["gastos_tarjeta"]).get("monto", pd.Series(dtype=float)), errors="coerce").sum()
+                _gt_count = len(st.session_state["gastos_tarjeta"])
+                _gt_c1, _gt_c2, _gt_c3 = st.columns(3)
+                _gt_c1.metric("Gastos tarjeta registrados", _gt_count)
+                _gt_c2.metric("Total gastado", f"S/ {_gt_total:,.0f}")
+                _gt_c3.metric("Promedio por gasto", f"S/ {_gt_total/_gt_count:,.0f}" if _gt_count else "—")
 
-                st.subheader("📄 Resumen gastos diarios tarjeta crédito")
+                with st.expander(f"📋 Ver / editar los {_gt_count} gastos tarjeta", expanded=False):
 
-                if "id" not in df_gt.columns:
+                 if "id" not in df_gt.columns:
                     df_gt["id"] = None
 
                 df_gt["id"] = df_gt["id"].apply(
