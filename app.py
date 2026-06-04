@@ -820,15 +820,9 @@ with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False
 
             categoria = st.selectbox(
                 "Categoría",
-                st.session_state["categorias"] + ["➕ Nueva"],
+                sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
                 key="categoria_gasto_rec_tarjeta"
             )
-
-            if categoria == "➕ Nueva":
-                categoria = st.text_input(
-                    "Nueva categoría",
-                    key="nueva_categoria_gasto_rec_tarjeta"
-                )
 
             moneda_rec = st.selectbox(
                 "Moneda",
@@ -865,10 +859,6 @@ with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False
             )
 
             if st.form_submit_button("Agregar gasto recurrente"):
-
-                if categoria not in st.session_state["categorias"]:
-                    st.session_state["categorias"].append(categoria)
-                    guardar("categorias")
 
                 st.session_state["gastos_recurrentes_tarjeta"].append({
                     "id": str(uuid.uuid4()),
@@ -1008,6 +998,33 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         for c in st.session_state["cuentas_ahorro"]:
             cuentas_debito_map[c["nombre"]] = c["id"]
 
+
+        # ── Gestionar categorías ─────────────────────────────────
+        with st.popover("🏷️ Agregar / eliminar categoría", use_container_width=False):
+            st.markdown("**Categorías guardadas**")
+            _cats = sorted(st.session_state["categorias"])
+            for _c in _cats:
+                _col_c, _col_del = st.columns([4, 1])
+                _col_c.write(_c)
+                if _col_del.button("🗑️", key=f"del_cat_{_c}", help=f"Eliminar {_c}"):
+                    st.session_state["categorias"] = [x for x in st.session_state["categorias"] if x != _c]
+                    guardar("categorias")
+                    st.rerun()
+            st.divider()
+            _nueva_cat_input = st.text_input("➕ Nueva categoría", placeholder="ej: Educación", key="popover_nueva_cat")
+            if st.button("Guardar categoría", key="popover_save_cat", type="primary"):
+                _nc = _nueva_cat_input.strip()
+                if not _nc:
+                    st.warning("Escribe un nombre.")
+                elif _nc in st.session_state["categorias"]:
+                    st.info(f'"{_nc}" ya existe.')
+                else:
+                    st.session_state["categorias"].append(_nc)
+                    st.session_state["categorias"] = sorted(list(set(st.session_state["categorias"])))
+                    guardar("categorias")
+                    st.success(f'✅ "{_nc}" guardada.')
+                    st.rerun()
+
         with st.form("form_gasto_diario", clear_on_submit=True):
 
             fecha = st.date_input(
@@ -1022,20 +1039,11 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 key="cuenta_origen_gasto_diario"
             )
 
-            categoria_sel = st.selectbox(
+            categoria = st.selectbox(
                 "Categoría",
-                sorted(st.session_state["categorias"]) + ["➕ Nueva categoría"],
+                sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
                 key="categoria_gasto_diario_debito"
             )
-
-            if categoria_sel == "➕ Nueva categoría":
-                nueva_categoria = st.text_input(
-                    "Nueva categoría",
-                    key="nueva_categoria_gasto_diario_debito"
-                )
-                categoria = nueva_categoria.strip()
-            else:
-                categoria = categoria_sel
 
             descripcion = st.text_input("Descripción")
 
@@ -1207,20 +1215,11 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     key="tarjeta_gasto_diario"
                 )
 
-                categoria_sel = st.selectbox(
+                categoria = st.selectbox(
                     "Categoría",
-                    sorted(st.session_state["categorias"]) + ["➕ Nueva categoría"],
+                    sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
                     key="categoria_gasto_tarjeta"
                 )
-
-                if categoria_sel == "➕ Nueva categoría":
-                    nueva_categoria = st.text_input(
-                        "Nueva categoría",
-                        key="nueva_categoria_gasto_tarjeta"
-                    )
-                    categoria = nueva_categoria.strip()
-                else:
-                    categoria = categoria_sel
 
                 descripcion = st.text_input(
                     "Descripción",
