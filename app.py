@@ -2075,18 +2075,43 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     continue
                 inicio, cierre = obtener_ciclo_tarjeta(fecha_gasto, int(t["dia_cierre"]))
                 fecha_pago = (pd.Timestamp(cierre) + pd.DateOffset(months=1)).replace(day=int(t["dia_pago"]))
+                _anio_mes_pago = fecha_pago.strftime("%Y-%m")
+                tc = _tc_lookup.get((t["id"], _anio_mes_pago), _tc_default)
+                moneda_g = g.get("moneda", "PEN")
+                monto_orig = float(g["monto"])
+                monto_usd  = monto_orig if moneda_g == "USD" else 0.0
+                monto_pen  = monto_orig * tc if moneda_g == "USD" else monto_orig
                 resumen.append({
-                    "Tarjeta": t["nombre"], "Inicio ciclo": inicio,
-                    "Cierre ciclo": cierre, "Fecha pago": fecha_pago.date(),
-                    "Monto": float(g["monto"])
+                    "Tarjeta": t["nombre"],
+                    "Tarjeta ID": t["id"],
+                    "Inicio ciclo": inicio,
+                    "Cierre ciclo": cierre,
+                    "Fecha pago": fecha_pago.date(),
+                    "Monto PEN": monto_pen,
+                    "Monto USD": monto_usd,
+                    "TC usado": tc if moneda_g == "USD" else None,
                 })
 
         df_res = pd.DataFrame(resumen)
         if not df_res.empty:
             resumen_ciclo = (
-                df_res.groupby(["Tarjeta", "Inicio ciclo", "Cierre ciclo", "Fecha pago"], as_index=False)["Monto"]
-                .sum().sort_values("Fecha pago")
+                df_res.groupby(["Tarjeta", "Tarjeta ID", "Inicio ciclo", "Cierre ciclo", "Fecha pago"], as_index=False)
+                .agg({"Monto PEN": "sum", "Monto USD": "sum"})
+                .sort_values("Fecha pago")
             )
+            # TC representativo del ciclo (promedio ponderado si hay varios USD)
+            _tc_rep = (
+                df_res[df_res["Monto USD"] > 0]
+                .groupby(["Tarjeta ID", "Inicio ciclo"])["TC usado"]
+                .mean()
+                .reset_index()
+                .rename(columns={"TC usado": "TC rep"})
+            )
+            resumen_ciclo = resumen_ciclo.merge(
+                _tc_rep, on=["Tarjeta ID", "Inicio ciclo"], how="left"
+            )
+            resumen_ciclo["TC rep"] = resumen_ciclo["TC rep"].fillna(_tc_default)
+
             resumen_ciclo["Ciclo facturación"] = resumen_ciclo.apply(
                 lambda r: f"{pd.to_datetime(r['Inicio ciclo']).strftime('%d/%m/%Y')} → {pd.to_datetime(r['Cierre ciclo']).strftime('%d/%m/%Y')}",
                 axis=1
@@ -2109,21 +2134,19 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     _d = int(_row["_dias"])
                     if _d == 0:
                         _urgencia = "🔴 ¡HOY!"
-                        _dc = "inverse"
                     elif _d <= 5:
                         _urgencia = f"🔴 {_d} días"
-                        _dc = "inverse"
                     elif _d <= 15:
                         _urgencia = f"🟡 {_d} días"
-                        _dc = "off"
                     else:
                         _urgencia = f"🟢 {_d} días"
-                        _dc = "normal"
 
                     with _pcols[_ci]:
                         with st.container(border=True):
                             st.caption(f"💳 {_row['Tarjeta']}")
-                            st.markdown(f"### S/ {_row['Monto']:,.0f}")
+                            st.markdown(f"### S/ {_row['Monto PEN']:,.0f}")
+                            if _row["Monto USD"] > 0:
+                                st.caption(f"💵 Incluye USD {_row['Monto USD']:,.2f} × {_row['TC rep']:.2f}")
                             st.caption(f"📆 Pago: **{_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}**")
                             st.caption(f"🗓 Cierre: {pd.to_datetime(_row['Cierre ciclo']).strftime('%d/%m/%Y')}")
                             st.markdown(f"**{_urgencia}**")
@@ -2132,27 +2155,27 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             if not pagos_futuros.empty:
                 st.markdown("#### 📊 Timeline de pagos futuros")
                 _timeline = pagos_futuros.sort_values("_dias").copy()
-                _timeline["label"] = _timeline.apply(
-                    lambda r: f"{r['Tarjeta']}<br>S/ {r['Monto']:,.0f}", axis=1
-                )
                 _timeline["color"] = _timeline["_dias"].apply(
                     lambda d: "#E74C3C" if d <= 5 else ("#F39C12" if d <= 15 else "#26C281")
                 )
 
                 fig_tl = go.Figure()
                 for _, _row in _timeline.iterrows():
+                    _usd_txt = f" | USD {_row['Monto USD']:,.2f} × {_row['TC rep']:.2f}" if _row["Monto USD"] > 0 else ""
                     fig_tl.add_trace(go.Bar(
-                        x=[_row["Monto"]],
+                        x=[_row["Monto PEN"]],
                         y=[f"{_row['Tarjeta']} — {_row['_fecha_pago_dt'].strftime('%d/%m')}"],
                         orientation="h",
                         marker_color=_row["color"],
-                        text=f"S/ {_row['Monto']:,.0f}  ({int(_row['_dias'])} días)",
+                        text=f"S/ {_row['Monto PEN']:,.0f}  ({int(_row['_dias'])} días){_usd_txt}",
                         textposition="outside",
                         hovertemplate=(
                             f"<b>{_row['Tarjeta']}</b><br>"
                             f"Ciclo: {_row['Ciclo facturación']}<br>"
                             f"Pago: {_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}<br>"
-                            f"<b>S/ {_row['Monto']:,.0f}</b><extra></extra>"
+                            f"<b>Total S/ {_row['Monto PEN']:,.2f}</b><br>"
+                            + (f"💵 USD {_row['Monto USD']:,.2f} @ TC {_row['TC rep']:.2f}<br>" if _row["Monto USD"] > 0 else "")
+                            + f"<extra></extra>"
                         ),
                         showlegend=False
                     ))
@@ -2177,18 +2200,27 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             # ── Tabla completa ─────────────────────────────────────
             with st.expander("📋 Ver historial completo de ciclos", expanded=False):
                 _tabla_show = resumen_ciclo[
-                    ["Tarjeta", "Ciclo facturación", "Cierre ciclo", "Fecha pago", "Monto", "_dias"]
+                    ["Tarjeta", "Ciclo facturación", "Cierre ciclo", "Fecha pago",
+                     "Monto PEN", "Monto USD", "TC rep", "_dias"]
                 ].copy()
                 _tabla_show["Estado"] = _tabla_show["_dias"].apply(
                     lambda d: "✅ Pagado" if d < 0 else ("🔴 Urgente" if d <= 5 else ("🟡 Próximo" if d <= 15 else "🟢 Futuro"))
                 )
                 _tabla_show = _tabla_show.drop(columns=["_dias"])
+                _tabla_show["TC rep"] = _tabla_show.apply(
+                    lambda r: f"{r['TC rep']:.2f}" if r["Monto USD"] > 0 else "—", axis=1
+                )
+                _tabla_show["Monto USD"] = _tabla_show["Monto USD"].apply(
+                    lambda x: f"USD {x:,.2f}" if x > 0 else "—"
+                )
                 st.dataframe(
                     _tabla_show,
                     use_container_width=True, hide_index=True,
                     column_config={
-                        "Monto": st.column_config.NumberColumn("Monto (S/)", format="S/ %,.0f"),
-                        "Estado": st.column_config.TextColumn("Estado"),
+                        "Monto PEN":  st.column_config.NumberColumn("Total (S/)", format="S/ %,.0f"),
+                        "Monto USD":  st.column_config.TextColumn("En USD"),
+                        "TC rep":     st.column_config.TextColumn("TC usado"),
+                        "Estado":     st.column_config.TextColumn("Estado"),
                     }
                 )
         else:
