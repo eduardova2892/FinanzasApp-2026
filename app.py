@@ -549,435 +549,196 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
 # ==================================================
 with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False):
 
-    st.markdown("### 💰 Ingresos recurrentes")
-    with st.form("form_ingreso_rec"):
-        nombre = st.text_input("Nombre", "Sueldo")
-        monto = st.number_input(
-            "Monto mensual",
-            min_value=0.0,
-            step=100.0
-        )
+    with st.expander("💰 Ingresos recurrentes", expanded=False):
 
-        fecha_ini = st.date_input(
-            "Fecha inicio",
-            fecha_inicio_sim
-        )
+        with st.form("form_ingreso_rec"):
+            _ci1, _ci2 = st.columns(2)
+            with _ci1:
+                nombre   = st.text_input("📝 Nombre", "Sueldo")
+                fecha_ini = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
+            with _ci2:
+                monto = st.number_input("💰 Monto mensual (S/)", min_value=0.0, step=100.0)
+                dia   = st.number_input("📆 Día de cobro", 1, 31, 25)
+            if st.form_submit_button("➕ Agregar ingreso recurrente", use_container_width=True, type="primary"):
+                st.session_state["ingresos_recurrentes"].append({
+                    "nombre": nombre, "monto": monto,
+                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": dia
+                })
+                guardar("ingresos_recurrentes")
+                st.rerun()
 
-        dia = st.number_input(
-            "Día de cobro",
-            1,
-            31,
-            25
-        )
-
-        if st.form_submit_button("Agregar ingreso recurrente"):
-
-            st.session_state["ingresos_recurrentes"].append({
-                "nombre": nombre,
-                "monto": monto,
-                "fecha_inicio": fecha_ini.isoformat(),
-                "dia_cobro": dia
-            })
-
-            guardar("ingresos_recurrentes")
-            st.rerun()
-
-    # ==================================================
-    # RESUMEN INGRESOS RECURRENTES
-    # ==================================================
-    df_ing_rec = pd.DataFrame(
-        st.session_state["ingresos_recurrentes"]
-    )
-
-    if not df_ing_rec.empty:
-
-        df_ing_rec["fecha_inicio"] = pd.to_datetime(
-            df_ing_rec["fecha_inicio"],
-            errors="coerce"
-        ).dt.date
-
-        df_ing_rec["Eliminar"] = False
-
-        st.subheader("📄 Resumen de Ingresos recurrentes registrados")
-
-        ed_ing_rec = st.data_editor(
-            df_ing_rec,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Eliminar": st.column_config.CheckboxColumn()
-            },
-            key="editor_ingresos_recurrentes"
-        )
-
-        if st.button("Guardar cambios ingresos recurrentes"):
-
-            df_editado = (
-                ed_ing_rec[
-                    ed_ing_rec["Eliminar"] == False
-                ]
-                .drop(columns=["Eliminar"])
-                .copy()
+        df_ing_rec = pd.DataFrame(st.session_state["ingresos_recurrentes"])
+        if not df_ing_rec.empty:
+            df_ing_rec["fecha_inicio"] = pd.to_datetime(df_ing_rec["fecha_inicio"], errors="coerce").dt.date
+            df_ing_rec["monto"] = pd.to_numeric(df_ing_rec["monto"], errors="coerce").fillna(0)
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+            ed_ing_rec = st.data_editor(
+                df_ing_rec, use_container_width=True, hide_index=True,
+                num_rows="dynamic", height=min(38 * len(df_ing_rec) + 46, 300),
+                column_config={
+                    "nombre":       st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "monto":        st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=100.0, format="S/ %,.0f", width="small"),
+                    "fecha_inicio": st.column_config.DateColumn("📅 Desde", width="small"),
+                    "dia_cobro":    st.column_config.NumberColumn("📆 Día cobro", min_value=1, max_value=31, width="small"),
+                }, key="editor_ingresos_recurrentes"
             )
+            if st.button("💾 Guardar cambios — Ingresos recurrentes", type="primary"):
+                df_ed = ed_ing_rec.copy()
+                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
+                df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                df_ed["dia_cobro"] = pd.to_numeric(df_ed["dia_cobro"], errors="coerce").fillna(1).astype(int)
+                df_ed["nombre"] = df_ed["nombre"].fillna("").astype(str)
+                st.session_state["ingresos_recurrentes"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
+                guardar("ingresos_recurrentes")
+                st.success("✅ Guardado.")
+                st.rerun()
+        else:
+            st.info("No hay ingresos recurrentes registrados.")
 
-            if "fecha_inicio" in df_editado.columns:
-                df_editado["fecha_inicio"] = pd.to_datetime(
-                    df_editado["fecha_inicio"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
+    with st.expander("💰 Gastos recurrentes con débito", expanded=False):
 
-            st.session_state["ingresos_recurrentes"] = (
-                df_editado.to_dict("records")
+        nombre_cuenta_principal = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        cuentas_debito_map = {nombre_cuenta_principal: "principal"}
+        for c in st.session_state["cuentas_ahorro"]:
+            cuentas_debito_map[c["nombre"]] = c["id"]
+
+        with st.form("form_gasto_fijo"):
+            _cf1, _cf2 = st.columns(2)
+            with _cf1:
+                nombre             = st.text_input("📝 Nombre")
+                fecha_ini          = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
+                cuenta_origen_nombre = st.selectbox("🏦 Cuenta de origen", list(cuentas_debito_map.keys()), key="cuenta_origen_gasto_fijo")
+            with _cf2:
+                monto = st.number_input("💰 Monto mensual (S/)", min_value=0.0, step=10.0)
+                dia   = st.number_input("📆 Día de cobro", 1, 31, 5)
+            if st.form_submit_button("➕ Agregar gasto fijo débito", use_container_width=True, type="primary"):
+                st.session_state["gastos_fijos"].append({
+                    "id": str(uuid.uuid4()), "nombre": nombre, "monto": float(monto),
+                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia),
+                    "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
+                    "cuenta_origen_nombre": cuenta_origen_nombre
+                })
+                guardar("gastos_fijos")
+                st.rerun()
+
+        df_fijos = pd.DataFrame(st.session_state["gastos_fijos"])
+        if not df_fijos.empty:
+            df_fijos["fecha_inicio"] = pd.to_datetime(df_fijos["fecha_inicio"], errors="coerce").dt.date
+            df_fijos["monto"] = pd.to_numeric(df_fijos["monto"], errors="coerce").fillna(0)
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+            ed_fijos = st.data_editor(
+                df_fijos, use_container_width=True, hide_index=True,
+                num_rows="dynamic", height=min(38 * len(df_fijos) + 46, 300),
+                column_config={
+                    "id":                   None,
+                    "cuenta_origen":        None,
+                    "nombre":               st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=10.0, format="S/ %,.0f", width="small"),
+                    "dia_cobro":            st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
+                    "fecha_inicio":         st.column_config.DateColumn("📅 Desde", width="small"),
+                    "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
+                }, key="editor_gastos_fijos"
             )
+            if st.button("💾 Guardar cambios — Gastos fijos débito", type="primary"):
+                df_ed = ed_fijos.copy()
+                _ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+                def _san(x, d): return d if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"]) else str(x)
+                df_ed["id"]                   = df_ed["id"].apply(lambda x: _san(x, str(uuid.uuid4())) if "id" in df_ed.columns else str(uuid.uuid4()))
+                df_ed["cuenta_origen"]        = df_ed.get("cuenta_origen", pd.Series(dtype=str)).apply(lambda x: _san(x, "principal"))
+                df_ed["cuenta_origen_nombre"] = df_ed.get("cuenta_origen_nombre", pd.Series(dtype=str)).apply(lambda x: _san(x, _ncp))
+                df_ed["monto"]    = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0.0)
+                df_ed["dia_cobro"]= pd.to_numeric(df_ed["dia_cobro"], errors="coerce").fillna(1).astype(int)
+                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
+                st.session_state["gastos_fijos"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
+                guardar("gastos_fijos")
+                st.success("✅ Guardado.")
+                st.rerun()
+        else:
+            st.info("No hay gastos fijos registrados.")
 
-            guardar("ingresos_recurrentes")
-            st.rerun()
+    with st.expander("💳 Gastos recurrentes con tarjeta de crédito", expanded=False):
 
-    else:
-        st.info("No hay ingresos recurrentes registrados.")
-
-    st.divider()
-    st.markdown("### 💰 Gastos recurrentes con tarjeta de débito")
-
-    nombre_cuenta_principal = st.session_state["configuracion"].get(
-        "nombre_cuenta_principal",
-        "Cuenta principal"
-    )
-
-    cuentas_debito_map = {nombre_cuenta_principal: "principal"}
-
-    for c in st.session_state["cuentas_ahorro"]:
-        cuentas_debito_map[c["nombre"]] = c["id"]
-    with st.form("form_gasto_fijo"):
-
-        nombre = st.text_input("Nombre")
-        monto = st.number_input(
-            "Monto mensual",
-            min_value=0.0,
-            step=10.0
-        )
-
-        fecha_ini = st.date_input(
-            "Fecha inicio",
-            fecha_inicio_sim
-        )
-
-        cuenta_origen_nombre = st.selectbox(
-            "Cuenta de origen",
-            list(cuentas_debito_map.keys()),
-            key="cuenta_origen_gasto_fijo"
-        )
-
-        dia = st.number_input(
-            "Día de cobro",
-            1,
-            31,
-            5
-        )
-
-        if st.form_submit_button("Agregar gasto fijo"):
-
-            st.session_state["gastos_fijos"].append({
-                "id": str(uuid.uuid4()),
-                "nombre": nombre,
-                "monto": float(monto),
-                "fecha_inicio": fecha_ini.isoformat(),
-                "dia_cobro": int(dia),
-                "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
-                "cuenta_origen_nombre": cuenta_origen_nombre
-            })
-
-            guardar("gastos_fijos")
-            st.rerun()
-
-    # ==================================================
-    # RESUMEN Y EDICIÓN DE GASTOS FIJOS
-    # ==================================================
-    df_fijos = pd.DataFrame(st.session_state["gastos_fijos"])
-
-    if not df_fijos.empty:
-
-        st.subheader("📄 Resumen de gastos recurrentes de tarjeta de débito registrados")
-
-        df_fijos["fecha_inicio"] = pd.to_datetime(
-            df_fijos["fecha_inicio"],
-            errors="coerce"
-        ).dt.date
-
-        df_fijos["monto"] = pd.to_numeric(
-            df_fijos["monto"],
-            errors="coerce"
-        ).fillna(0)
-
-        df_fijos["Eliminar"] = False
-
-        ed_fijos = st.data_editor(
-            df_fijos.drop(columns=[c for c in ["id", "cuenta_origen"] if c in df_fijos.columns]),
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "nombre": st.column_config.TextColumn("Nombre"),
-                "monto": st.column_config.NumberColumn("Monto mensual (S/)", min_value=0.0, step=10.0),
-                "dia_cobro": st.column_config.NumberColumn("Día cobro", min_value=1, max_value=31),
-                "fecha_inicio": st.column_config.DateColumn("Desde"),
-                "cuenta_origen_nombre": st.column_config.TextColumn("Cuenta débito"),
-                "Eliminar": st.column_config.CheckboxColumn("🗑")
-            },
-            key="editor_gastos_fijos"
-        )
-
-        if st.button("Guardar cambios gastos fijos"):
-
-            # Restaurar columnas ocultas desde df original
-            _df_fijos_orig = df_fijos.copy()
-            ed_fijos_full = ed_fijos.copy()
-            for _col in ["id", "cuenta_origen"]:
-                if _col in _df_fijos_orig.columns and _col not in ed_fijos_full.columns:
-                    ed_fijos_full[_col] = _df_fijos_orig[_col].values
-
-            df_editado = (
-                ed_fijos_full[
-                    ed_fijos_full["Eliminar"] == False
-                ]
-                .drop(columns=["Eliminar"])
-                .copy()
-            )
-
-            if "fecha_inicio" in df_editado.columns:
-                df_editado["fecha_inicio"] = pd.to_datetime(
-                    df_editado["fecha_inicio"],
-                    errors="coerce"
-                ).dt.strftime("%Y-%m-%d")
-
-            # Sanear campos que en registros viejos pueden ser NaN/None
-            # (causan ValueError al serializar a JSON con allow_nan=False)
-            if "id" not in df_editado.columns:
-                df_editado["id"] = [str(uuid.uuid4()) for _ in range(len(df_editado))]
-            else:
-                df_editado["id"] = df_editado["id"].apply(
-                    lambda x: str(uuid.uuid4())
-                    if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"])
-                    else str(x)
-                )
-
-            if "cuenta_origen" not in df_editado.columns:
-                df_editado["cuenta_origen"] = "principal"
-            else:
-                df_editado["cuenta_origen"] = df_editado["cuenta_origen"].apply(
-                    lambda x: "principal"
-                    if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"])
-                    else str(x)
-                )
-
-            if "cuenta_origen_nombre" not in df_editado.columns:
-                df_editado["cuenta_origen_nombre"] = nombre_cuenta_principal
-            else:
-                df_editado["cuenta_origen_nombre"] = df_editado["cuenta_origen_nombre"].apply(
-                    lambda x: nombre_cuenta_principal
-                    if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"])
-                    else str(x)
-                )
-
-            if "dia_cobro" in df_editado.columns:
-                df_editado["dia_cobro"] = (
-                    pd.to_numeric(df_editado["dia_cobro"], errors="coerce")
-                    .fillna(1).astype(int)
-                )
-
-            if "monto" in df_editado.columns:
-                df_editado["monto"] = (
-                    pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
-                )
-
-            st.session_state["gastos_fijos"] = (
-                df_editado.to_dict("records")
-            )
-
-            guardar("gastos_fijos")
-            st.rerun()
-
-    else:
-        st.info("No hay gastos fijos registrados.")
-
-    st.divider()
-    st.markdown("### 💳 Gastos recurrentes con tarjeta de crédito")
-
-    if st.session_state["tarjetas"]:
-
-        mapa_tarjetas = {
+        if not st.session_state["tarjetas"]:
+            st.info("Primero agrega una tarjeta en la sección de Configuración.")
+        else:
+         mapa_tarjetas = {
             t["nombre"]: t["id"]
             for t in st.session_state["tarjetas"]
-        }
+         }
 
         # ==================================================
         # GASTOS RECURRENTES CON TARJETA
         # ==================================================
         
         with st.form("form_gasto_recurrente_tarjeta"):
-
-            nombre = st.text_input(
-                "Nombre del gasto recurrente",
-                "Gimnasio"
-            )
-
-            tarjeta_nombre = st.selectbox(
-                "Tarjeta asociada",
-                list(mapa_tarjetas.keys()),
-                key="tarjeta_gasto_recurrente"
-            )
-
-            categoria = st.selectbox(
-                "Categoría",
-                sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
-                key="categoria_gasto_rec_tarjeta"
-            )
-
-            moneda_rec = st.selectbox(
-                "Moneda",
-                ["PEN", "USD"],
-                key="moneda_gasto_recurrente_tarjeta",
-                help="USD: el monto se convierte a soles usando el tipo de cambio del día de pago"
-            )
-
-            monto = st.number_input(
-                "Monto mensual",
-                min_value=0.0,
-                step=10.0,
-                key="monto_gasto_recurrente_tarjeta"
-            )
-
-            dia_cargo = st.number_input(
-                "Día de cargo mensual",
-                1,
-                31,
-                15,
-                key="dia_cargo_gasto_recurrente_tarjeta"
-            )
-
-            fecha_inicio = st.date_input(
-                "Fecha inicio",
-                fecha_inicio_sim,
-                key="fecha_inicio_gasto_recurrente_tarjeta"
-            )
-
-            fecha_fin = st.date_input(
-                "Fecha fin opcional",
-                fecha_fin_sim,
-                key="fecha_fin_gasto_recurrente_tarjeta"
-            )
-
-            if st.form_submit_button("Agregar gasto recurrente"):
-
+            _gr1, _gr2 = st.columns(2)
+            with _gr1:
+                nombre        = st.text_input("📝 Nombre", "Gimnasio")
+                tarjeta_nombre = st.selectbox("💳 Tarjeta", list(mapa_tarjetas.keys()), key="tarjeta_gasto_recurrente")
+                fecha_inicio  = st.date_input("📅 Fecha inicio", fecha_inicio_sim, key="fecha_inicio_gasto_recurrente_tarjeta")
+                fecha_fin     = st.date_input("📅 Fecha fin", fecha_fin_sim, key="fecha_fin_gasto_recurrente_tarjeta")
+            with _gr2:
+                _cats_grt = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+                categoria  = st.selectbox("🏷️ Categoría", _cats_grt, key="categoria_gasto_rec_tarjeta")
+                _mc2, _mm2 = st.columns([1, 2])
+                with _mc2:
+                    moneda_rec = st.selectbox("💱", ["PEN", "USD"], key="moneda_gasto_recurrente_tarjeta")
+                with _mm2:
+                    monto = st.number_input("💰 Monto mensual", min_value=0.0, step=10.0, key="monto_gasto_recurrente_tarjeta")
+                dia_cargo = st.number_input("📆 Día de cargo", 1, 31, 15, key="dia_cargo_gasto_recurrente_tarjeta")
+            if st.form_submit_button("➕ Agregar gasto recurrente tarjeta", use_container_width=True, type="primary"):
                 st.session_state["gastos_recurrentes_tarjeta"].append({
-                    "id": str(uuid.uuid4()),
-                    "nombre": nombre,
-                    "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
-                    "tarjeta_nombre": tarjeta_nombre,
-                    "categoria": categoria,
-                    "moneda": moneda_rec,
-                    "monto": float(monto),
-                    "dia_cargo": int(dia_cargo),
-                    "fecha_inicio": fecha_inicio.isoformat(),
-                    "fecha_fin": fecha_fin.isoformat()
+                    "id": str(uuid.uuid4()), "nombre": nombre,
+                    "tarjeta_id": mapa_tarjetas[tarjeta_nombre], "tarjeta_nombre": tarjeta_nombre,
+                    "categoria": categoria, "moneda": moneda_rec, "monto": float(monto),
+                    "dia_cargo": int(dia_cargo), "fecha_inicio": fecha_inicio.isoformat(), "fecha_fin": fecha_fin.isoformat()
                 })
-
                 guardar("gastos_recurrentes_tarjeta")
                 st.rerun()
 
-        # ==================================================
-        # RESUMEN GASTOS RECURRENTES CON TARJETA
-        # ==================================================
-        df_grt = pd.DataFrame(
-            st.session_state["gastos_recurrentes_tarjeta"]
-        )
-
+        df_grt = pd.DataFrame(st.session_state["gastos_recurrentes_tarjeta"])
         if not df_grt.empty:
-
-            st.subheader("📄 Resumen de gastos recurrentes con tarjeta de crédito registrados")
-
-            df_grt["fecha_inicio"] = pd.to_datetime(
-                df_grt["fecha_inicio"],
-                errors="coerce"
-            ).dt.date
-
-            df_grt["fecha_fin"] = pd.to_datetime(
-                df_grt["fecha_fin"],
-                errors="coerce"
-            ).dt.date
-
-            df_grt["monto"] = pd.to_numeric(
-                df_grt["monto"],
-                errors="coerce"
-            ).fillna(0)
-
-            df_grt["Eliminar"] = False
-
-            columnas_ocultas = [
-                "id",
-                "tarjeta_id"
-]
-
-            df_grt_show = df_grt.drop(
-                columns=[c for c in columnas_ocultas if c in df_grt.columns]
-)
-
+            df_grt["fecha_inicio"] = pd.to_datetime(df_grt["fecha_inicio"], errors="coerce").dt.date
+            df_grt["fecha_fin"]    = pd.to_datetime(df_grt["fecha_fin"],    errors="coerce").dt.date
+            df_grt["monto"]        = pd.to_numeric(df_grt["monto"], errors="coerce").fillna(0)
+            _cats_grt_ed = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+            _tars_ed     = [t["nombre"] for t in st.session_state["tarjetas"]]
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
             ed_grt = st.data_editor(
-                df_grt_show,
-                use_container_width=True,
-                hide_index=True,
+                df_grt, use_container_width=True, hide_index=True,
+                num_rows="dynamic", height=min(38 * len(df_grt) + 46, 300),
                 column_config={
-                    "nombre": st.column_config.TextColumn("Nombre"),
-                    "tarjeta_nombre": st.column_config.TextColumn("Tarjeta"),
-                    "categoria": st.column_config.TextColumn("Categoría"),
-                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["PEN", "USD"]),
-                    "monto": st.column_config.NumberColumn("Monto mensual", min_value=0.0, step=10.0),
-                    "dia_cargo": st.column_config.NumberColumn("Día cargo", min_value=1, max_value=31),
-                    "fecha_inicio": st.column_config.DateColumn("Desde"),
-                    "fecha_fin": st.column_config.DateColumn("Hasta"),
-                    "Eliminar": st.column_config.CheckboxColumn("🗑")
-                },
-                key="editor_gastos_recurrentes_tarjeta"
+                    "id":            None,
+                    "tarjeta_id":    None,
+                    "nombre":        st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "tarjeta_nombre":st.column_config.SelectboxColumn("💳 Tarjeta", options=_tars_ed, width="small"),
+                    "categoria":     st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_grt_ed, width="medium"),
+                    "moneda":        st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
+                    "monto":         st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=10.0, format="S/ %,.0f", width="small"),
+                    "dia_cargo":     st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
+                    "fecha_inicio":  st.column_config.DateColumn("📅 Desde", width="small"),
+                    "fecha_fin":     st.column_config.DateColumn("📅 Hasta", width="small"),
+                }, key="editor_gastos_recurrentes_tarjeta"
             )
-
-            if st.button("Guardar cambios gastos recurrentes"):
-
-                # Recuperar IDs originales
-                df_temp = df_grt.copy()
-
-                # Reinsertar columnas ocultas
-                for col in ["id", "tarjeta_id"]:
-                    if col in df_temp.columns:
-                        ed_grt[col] = df_temp[col].values
-
-                df_editado = (
-                    ed_grt[
-                        ed_grt["Eliminar"] == False
-    ]
-                    .drop(columns=["Eliminar"])
-                    .copy()
-)
-
-                if "fecha_inicio" in df_editado.columns:
-                    df_editado["fecha_inicio"] = pd.to_datetime(
-                        df_editado["fecha_inicio"],
-                        errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-
-                if "fecha_fin" in df_editado.columns:
-                    df_editado["fecha_fin"] = pd.to_datetime(
-                        df_editado["fecha_fin"],
-                        errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-
-                st.session_state["gastos_recurrentes_tarjeta"] = (
-                    df_editado.to_dict("records")
-                )
-
+            if st.button("💾 Guardar cambios — Gastos recurrentes tarjeta", type="primary"):
+                df_ed = ed_grt.copy()
+                _mapa_id = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+                df_ed["tarjeta_id"]   = df_ed["tarjeta_nombre"].map(_mapa_id).fillna("")
+                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
+                df_ed["fecha_fin"]    = pd.to_datetime(df_ed["fecha_fin"],    errors="coerce").dt.strftime("%Y-%m-%d")
+                df_ed["monto"]        = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0.0)
+                df_ed["dia_cargo"]    = pd.to_numeric(df_ed["dia_cargo"], errors="coerce").fillna(1).astype(int)
+                for _c in ["id"]:
+                    if _c in df_ed.columns:
+                        df_ed[_c] = df_ed[_c].apply(lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x))
+                    else:
+                        df_ed[_c] = [str(uuid.uuid4()) for _ in range(len(df_ed))]
+                st.session_state["gastos_recurrentes_tarjeta"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
                 guardar("gastos_recurrentes_tarjeta")
+                st.success("✅ Guardado.")
                 st.rerun()
-
         else:
-            st.info("No hay gastos recurrentes con tarjeta registrados.")
+                st.info("No hay gastos recurrentes con tarjeta registrados.")
 
 # ==================================================
 # 3. MOVIMIENTOS Y GASTOS VARIABLES / PUNTUALES
@@ -1330,208 +1091,97 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         # ==================================================
         # INGRESOS PUNTUALES
         # ==================================================
-        st.markdown("### 💵 Ingresos puntuales")
+        with st.expander("💵 Ingresos puntuales", expanded=False):
+            with st.form("form_ingreso_puntual"):
+                _ip1, _ip2 = st.columns(2)
+                with _ip1:
+                    concepto = st.text_input("📝 Concepto")
+                    fecha    = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_ingreso_puntual")
+                with _ip2:
+                    monto = st.number_input("💰 Monto (S/)", min_value=0.0)
+                if st.form_submit_button("➕ Agregar ingreso puntual", use_container_width=True, type="primary"):
+                    st.session_state["ingresos_puntuales"].append({"concepto": concepto, "fecha": fecha.isoformat(), "monto": monto})
+                    guardar("ingresos_puntuales")
+                    st.rerun()
 
-        with st.form("form_ingreso_puntual"):
-
-            concepto = st.text_input("Concepto")
-
-            fecha = st.date_input(
-                "Fecha",
-                value=hoy_peru,
-                key="fecha_ingreso_puntual"
-            )
-
-            monto = st.number_input(
-                "Monto",
-                min_value=0.0
-            )
-
-            if st.form_submit_button("Agregar ingreso puntual"):
-
-                st.session_state["ingresos_puntuales"].append({
-                    "concepto": concepto,
-                    "fecha": fecha.isoformat(),
-                    "monto": monto
-                })
-
-                guardar("ingresos_puntuales")
-                st.rerun()
-
-        # ==================================================
-        # RESUMEN INGRESOS PUNTUALES
-        # ==================================================
-        df_ing_punt = pd.DataFrame(
-            st.session_state["ingresos_puntuales"]
-        )
-
-        if not df_ing_punt.empty:
-
-            df_ing_punt["fecha"] = pd.to_datetime(
-                df_ing_punt["fecha"],
-                errors="coerce"
-            ).dt.date
-
-            df_ing_punt = df_ing_punt.sort_values(
-                by="fecha",
-                ascending=False
-            )
-
-            df_ing_punt["Eliminar"] = False
-
-            st.subheader("📄 Ingresos puntuales registrados")
-
-            ed_ing_punt = st.data_editor(
-                df_ing_punt,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Eliminar": st.column_config.CheckboxColumn()
-                },
-                key="editor_ingresos_puntuales"
-            )
-
-            if st.button("Guardar cambios ingresos puntuales"):
-
-                df_editado = (
-                    ed_ing_punt[
-                        ed_ing_punt["Eliminar"] == False
-                    ]
-                    .drop(columns=["Eliminar"])
-                    .copy()
+            df_ing_punt = pd.DataFrame(st.session_state["ingresos_puntuales"])
+            if not df_ing_punt.empty:
+                df_ing_punt["fecha"] = pd.to_datetime(df_ing_punt["fecha"], errors="coerce").dt.date
+                df_ing_punt["monto"] = pd.to_numeric(df_ing_punt["monto"], errors="coerce").fillna(0)
+                df_ing_punt = df_ing_punt.sort_values("fecha", ascending=False).reset_index(drop=True)
+                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+                ed_ing_punt = st.data_editor(
+                    df_ing_punt, use_container_width=True, hide_index=True,
+                    num_rows="dynamic", height=min(38 * len(df_ing_punt) + 46, 300),
+                    column_config={
+                        "concepto": st.column_config.TextColumn("📝 Concepto", width="large"),
+                        "fecha":    st.column_config.DateColumn("📅 Fecha", width="small"),
+                        "monto":    st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
+                    }, key="editor_ingresos_puntuales"
                 )
+                if st.button("💾 Guardar cambios — Ingresos puntuales", type="primary"):
+                    df_ed = ed_ing_punt.copy()
+                    df_ed["fecha"] = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                    df_ed["concepto"] = df_ed["concepto"].fillna("").astype(str)
+                    st.session_state["ingresos_puntuales"] = df_ed.dropna(subset=["fecha"]).sort_values("fecha", ascending=False).to_dict("records")
+                    guardar("ingresos_puntuales")
+                    st.success("✅ Guardado.")
+                    st.rerun()
+            else:
+                st.info("No hay ingresos puntuales registrados.")
 
-                if "fecha" in df_editado.columns:
-                    df_editado["fecha"] = pd.to_datetime(
-                        df_editado["fecha"],
-                        errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
+        with st.expander("🔁 Transferencias entre cuentas", expanded=False):
+            nombre_cuenta_principal = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+            cuentas_map = {nombre_cuenta_principal: "principal"}
+            for c in st.session_state["cuentas_ahorro"]:
+                cuentas_map[c["nombre"]] = c["id"]
 
-                df_editado = df_editado.sort_values(
-                    "fecha",
-                    ascending=False
+            with st.form("form_transferencia"):
+                _tr1, _tr2 = st.columns(2)
+                with _tr1:
+                    fecha   = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_transferencia")
+                    origen  = st.selectbox("🏦 Cuenta origen",  list(cuentas_map.keys()), key="transferencia_origen")
+                with _tr2:
+                    monto   = st.number_input("💰 Monto (S/)", min_value=0.0, key="monto_transferencia")
+                    destino = st.selectbox("➡️ Cuenta destino", list(cuentas_map.keys()), key="transferencia_destino")
+                if st.form_submit_button("➕ Registrar transferencia", use_container_width=True, type="primary"):
+                    if origen == destino:
+                        st.warning("Origen y destino deben ser distintos.")
+                    else:
+                        st.session_state["transferencias"].append({
+                            "fecha": fecha.isoformat(), "origen": cuentas_map[origen],
+                            "destino": cuentas_map[destino], "monto": monto
+                        })
+                        guardar("transferencias")
+                        st.rerun()
+
+            df_transf = pd.DataFrame(st.session_state["transferencias"])
+            if not df_transf.empty:
+                df_transf["fecha"] = pd.to_datetime(df_transf["fecha"], errors="coerce").dt.date
+                df_transf["monto"] = pd.to_numeric(df_transf["monto"], errors="coerce").fillna(0)
+                df_transf = df_transf.sort_values("fecha", ascending=False).reset_index(drop=True)
+                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+                ed = st.data_editor(
+                    df_transf, use_container_width=True, hide_index=True,
+                    num_rows="dynamic", height=min(38 * len(df_transf) + 46, 300),
+                    column_config={
+                        "fecha":   st.column_config.DateColumn("📅 Fecha", width="small"),
+                        "origen":  st.column_config.TextColumn("🏦 Origen", width="small"),
+                        "destino": st.column_config.TextColumn("➡️ Destino", width="small"),
+                        "monto":   st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
+                    }, key="editor_transferencias"
                 )
-
-                st.session_state["ingresos_puntuales"] = (
-                    df_editado.to_dict("records")
-                )
-
-                guardar("ingresos_puntuales")
-                st.rerun()
-
-        else:
-            st.info("No hay ingresos puntuales registrados.")
-
-        st.divider()
-
-        # ==================================================
-        # TRANSFERENCIAS ENTRE CUENTAS
-        # ==================================================
-        st.markdown("### 🔁 Transferencias entre cuentas")
-
-        nombre_cuenta_principal = st.session_state["configuracion"].get(
-            "nombre_cuenta_principal",
-            "Cuenta principal"
-        )
-
-        cuentas_map = {nombre_cuenta_principal: "principal"}
-
-        for c in st.session_state["cuentas_ahorro"]:
-            cuentas_map[c["nombre"]] = c["id"]
-
-        with st.form("form_transferencia"):
-
-            fecha = st.date_input(
-                "Fecha",
-                value=hoy_peru,
-                key="fecha_transferencia"
-            )
-
-            origen = st.selectbox(
-                "Cuenta origen",
-                list(cuentas_map.keys()),
-                key="transferencia_origen"
-            )
-
-            destino = st.selectbox(
-                "Cuenta destino",
-                list(cuentas_map.keys()),
-                key="transferencia_destino"
-            )
-
-            monto = st.number_input(
-                "Monto",
-                min_value=0.0,
-                key="monto_transferencia"
-            )
-
-            if st.form_submit_button("Registrar transferencia") and origen != destino:
-                st.session_state["transferencias"].append({
-                    "fecha": fecha.isoformat(),
-                    "origen": cuentas_map[origen],
-                    "destino": cuentas_map[destino],
-                    "monto": monto
-                })
-                guardar("transferencias")
-                st.rerun()
-
-        # ==================================================
-        # RESUMEN TRANSFERENCIAS
-        # ==================================================
-        df_transf = pd.DataFrame(st.session_state["transferencias"])
-
-        if not df_transf.empty:
-
-            df_transf["fecha"] = pd.to_datetime(
-                df_transf["fecha"],
-                errors="coerce"
-            ).dt.date
-
-            df_transf = df_transf.sort_values(
-                by="fecha",
-                ascending=False
-            )
-
-            df_transf["Eliminar"] = False
-
-            st.subheader("📄 Historial de transferencias")
-
-            ed = st.data_editor(
-                df_transf,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Eliminar": st.column_config.CheckboxColumn()
-                },
-                key="editor_transferencias"
-            )
-
-            if st.button("Guardar cambios transferencias"):
-
-                df_editado = (
-                    ed[ed["Eliminar"] == False]
-                    .drop(columns=["Eliminar"])
-                    .copy()
-                )
-
-                if "fecha" in df_editado.columns:
-                    df_editado["fecha"] = pd.to_datetime(
-                        df_editado["fecha"],
-                        errors="coerce"
-                    ).dt.strftime("%Y-%m-%d")
-
-                df_editado = df_editado.sort_values(
-                    "fecha",
-                    ascending=False
-                )
-
-                st.session_state["transferencias"] = df_editado.to_dict("records")
-
-                guardar("transferencias")
-                st.rerun()
-
-        else:
-            st.info("No hay transferencias registradas.")
+                if st.button("💾 Guardar cambios — Transferencias", type="primary"):
+                    df_ed = ed.copy()
+                    df_ed["fecha"] = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                    st.session_state["transferencias"] = df_ed.dropna(subset=["fecha"]).sort_values("fecha", ascending=False).to_dict("records")
+                    guardar("transferencias")
+                    st.success("✅ Guardado.")
+                    st.rerun()
+            else:
+                st.info("No hay transferencias registradas.")
 
 # ==================================================
 # 4. CÁLCULOS BASE
