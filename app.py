@@ -148,6 +148,7 @@ defaults = {
 "transferencias": [],
 "pagos_tarjeta": [],
 "tipos_cambio": [],
+"gastos_reembolsables": [],
 }
 
 for k, v in defaults.items():
@@ -168,6 +169,7 @@ claves = [
     "categorias",
     "pagos_tarjeta",
     "tipos_cambio",
+    "gastos_reembolsables",
 ]
 for clave in claves:
     cargar(clave)
@@ -1182,6 +1184,131 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     st.rerun()
             else:
                 st.info("No hay transferencias registradas.")
+
+    with st.expander("🔄 3.3 Gastos reembolsables", expanded=False):
+        st.caption("Registra gastos que otra persona o empresa te devolverá. No se suman a tus gastos personales. Al marcarlos como reembolsados, el monto se registra automáticamente como ingreso puntual.")
+
+        _remb_list  = st.session_state.get("gastos_reembolsables", [])
+        _remb_pend  = [r for r in _remb_list if r.get("estado") == "pendiente"]
+        _remb_total = sum(
+            float(r["monto"]) * (_tc_default if r.get("moneda") == "USD" else 1.0)
+            for r in _remb_pend
+        ) if _remb_pend else 0.0
+
+        if _remb_pend:
+            st.info(
+                "Tienes " + str(len(_remb_pend)) + " gasto(s) pendiente(s) de reembolso"
+                " por un total de S/ " + f"{_remb_total:,.0f}"
+            )
+
+        with st.form("form_reembolsable", clear_on_submit=True):
+            _rr1, _rr2 = st.columns(2)
+            with _rr1:
+                _r_fecha   = st.date_input("Fecha del gasto", value=hoy_peru, key="fecha_reembolsable")
+                _r_desc    = st.text_input("Descripcion", placeholder="ej: Taxi para reunion con cliente")
+                _r_empresa = st.text_input("Quien reembolsa", placeholder="ej: Mi empresa")
+            with _rr2:
+                _r_medio  = st.selectbox("Medio de pago", ["Debito", "Tarjeta de credito"], key="medio_reembolsable")
+                _rm_c, _rm_m = st.columns([1, 2])
+                with _rm_c:
+                    _r_moneda = st.selectbox("Moneda", ["PEN", "USD"], key="moneda_reembolsable")
+                with _rm_m:
+                    _r_monto  = st.number_input("Monto", min_value=0.0, step=1.0, key="monto_reembolsable")
+                _r_fecha_esp = st.date_input(
+                    "Fecha esperada de reembolso",
+                    value=hoy_peru + timedelta(days=14),
+                    key="fecha_esp_reembolsable"
+                )
+            if st.form_submit_button("Agregar gasto reembolsable", use_container_width=True, type="primary"):
+                if _r_monto > 0 and _r_desc.strip():
+                    st.session_state["gastos_reembolsables"].append({
+                        "id":              str(uuid.uuid4()),
+                        "fecha":           _r_fecha.isoformat(),
+                        "descripcion":     _r_desc.strip(),
+                        "empresa":         _r_empresa.strip(),
+                        "medio_pago":      _r_medio,
+                        "moneda":          _r_moneda,
+                        "monto":           float(_r_monto),
+                        "fecha_esperada":  _r_fecha_esp.isoformat(),
+                        "estado":          "pendiente",
+                        "fecha_reembolso": None,
+                    })
+                    guardar("gastos_reembolsables")
+                    st.success("Gasto reembolsable registrado.")
+                    st.rerun()
+                else:
+                    st.warning("Completa descripcion y monto.")
+
+        df_remb = pd.DataFrame(st.session_state.get("gastos_reembolsables", []))
+        if not df_remb.empty:
+            df_remb["fecha"]          = pd.to_datetime(df_remb["fecha"],          errors="coerce").dt.date
+            df_remb["fecha_esperada"] = pd.to_datetime(df_remb["fecha_esperada"], errors="coerce").dt.date
+            df_remb["monto"]          = pd.to_numeric(df_remb["monto"],           errors="coerce").fillna(0)
+
+            _tab_pend, _tab_done = st.tabs(["Pendientes de reembolso", "Reembolsados"])
+
+            with _tab_pend:
+                _df_pend = df_remb[df_remb["estado"] == "pendiente"].copy().reset_index(drop=True)
+                if not _df_pend.empty:
+                    for _idx, _row in _df_pend.iterrows():
+                        with st.container(border=True):
+                            _pc1, _pc2, _pc3 = st.columns([2, 1, 1])
+                            _mon = _row.get("moneda", "PEN")
+                            _monto_s = ("USD " + f"{_row['monto']:,.2f}") if _mon == "USD" else ("S/ " + f"{_row['monto']:,.0f}")
+                            _empresa_s = str(_row.get("empresa", "")) or "—"
+                            _medio_s   = str(_row.get("medio_pago", ""))
+                            _fecha_s   = str(_row["fecha"])
+                            _desc_s    = str(_row["descripcion"])
+                            _fesp_s    = str(_row["fecha_esperada"])
+                            _pc1.markdown("**" + _desc_s + "**")
+                            _pc1.caption(_empresa_s + " · " + _medio_s + " · " + _fecha_s)
+                            _pc2.metric("Monto", _monto_s)
+                            _pc2.caption("Esperado: " + _fesp_s)
+                            with _pc3:
+                                _fkey = "fecha_remb_" + str(_row["id"])
+                                _bkey = "btn_remb_"   + str(_row["id"])
+                                _fecha_remb_input = st.date_input("Fecha reembolso", value=hoy_peru, key=_fkey)
+                                if st.button("Marcar reembolsado", key=_bkey, use_container_width=True):
+                                    for _r in st.session_state["gastos_reembolsables"]:
+                                        if _r["id"] == _row["id"]:
+                                            _r["estado"] = "reembolsado"
+                                            _r["fecha_reembolso"] = _fecha_remb_input.isoformat()
+                                            break
+                                    _tc_remb    = _tc_default if _mon == "USD" else 1.0
+                                    _monto_remb = float(_row["monto"]) * _tc_remb
+                                    st.session_state["ingresos_puntuales"].append({
+                                        "concepto": "Reembolso: " + _desc_s,
+                                        "fecha":    _fecha_remb_input.isoformat(),
+                                        "monto":    _monto_remb,
+                                    })
+                                    guardar("gastos_reembolsables")
+                                    guardar("ingresos_puntuales")
+                                    st.success("Reembolso de S/ " + f"{_monto_remb:,.0f}" + " registrado como ingreso puntual.")
+                                    st.rerun()
+                else:
+                    st.success("No tienes gastos reembolsables pendientes.")
+
+            with _tab_done:
+                _df_done = df_remb[df_remb["estado"] == "reembolsado"].copy().reset_index(drop=True)
+                if not _df_done.empty:
+                    _df_done["fecha_reembolso"] = pd.to_datetime(_df_done["fecha_reembolso"], errors="coerce").dt.date
+                    st.dataframe(
+                        _df_done[["fecha", "descripcion", "empresa", "medio_pago", "moneda", "monto", "fecha_reembolso"]],
+                        use_container_width=True, hide_index=True,
+                        column_config={
+                            "fecha":           st.column_config.DateColumn("Fecha gasto",    width="small"),
+                            "descripcion":     st.column_config.TextColumn("Descripcion",    width="large"),
+                            "empresa":         st.column_config.TextColumn("Empresa",        width="small"),
+                            "medio_pago":      st.column_config.TextColumn("Medio",          width="small"),
+                            "moneda":          st.column_config.TextColumn("Moneda",         width="small"),
+                            "monto":           st.column_config.NumberColumn("Monto",        format="%.2f", width="small"),
+                            "fecha_reembolso": st.column_config.DateColumn("Reembolsado el", width="small"),
+                        }
+                    )
+                else:
+                    st.info("Aun no tienes reembolsos completados.")
+        else:
+            st.info("No hay gastos reembolsables registrados.")
 
 # ==================================================
 # 4. CÁLCULOS BASE
