@@ -1265,9 +1265,24 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                             + " · " + str(_row.get("medio_pago",""))
                             + " · " + str(_row["fecha"])
                         )
-                        _cb.caption(_monto_s + "  \nEsp: " + str(_row["fecha_esperada"]))
+                        _cb.caption(_monto_s)
                         with _cc:
-                            _fecha_remb_input = st.date_input("", value=hoy_peru, key=_fkey, label_visibility="collapsed")
+                            _val_esp = _row["fecha_esperada"] if pd.notna(_row["fecha_esperada"]) else hoy_peru
+                            _fecha_esp_edit = st.date_input(
+                                "Fecha esperada reembolso", value=_val_esp,
+                                key="esp_" + str(_row["id"])
+                            )
+                            if _fecha_esp_edit != _row["fecha_esperada"]:
+                                for _r in st.session_state["gastos_reembolsables"]:
+                                    if _r["id"] == _row["id"]:
+                                        _r["fecha_esperada"] = _fecha_esp_edit.isoformat()
+                                        break
+                                guardar("gastos_reembolsables")
+                                st.rerun()
+                            _fecha_remb_input = st.date_input(
+                                "Fecha real reembolso", value=_fecha_esp_edit,
+                                key=_fkey
+                            )
                             if st.button("✅ Reembolsado", key=_bkey, use_container_width=True):
                                 for _r in st.session_state["gastos_reembolsables"]:
                                     if _r["id"] == _row["id"]:
