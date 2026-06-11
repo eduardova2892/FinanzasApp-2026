@@ -1251,40 +1251,50 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 _df_pend = df_remb[df_remb["estado"] == "pendiente"].copy().reset_index(drop=True)
                 if not _df_pend.empty:
                     for _idx, _row in _df_pend.iterrows():
-                        with st.container(border=True):
-                            _pc1, _pc2, _pc3 = st.columns([2, 1, 1])
-                            _mon = _row.get("moneda", "PEN")
-                            _monto_s = ("USD " + f"{_row['monto']:,.2f}") if _mon == "USD" else ("S/ " + f"{_row['monto']:,.0f}")
-                            _empresa_s = str(_row.get("empresa", "")) or "—"
-                            _medio_s   = str(_row.get("medio_pago", ""))
-                            _fecha_s   = str(_row["fecha"])
-                            _desc_s    = str(_row["descripcion"])
-                            _fesp_s    = str(_row["fecha_esperada"])
-                            _pc1.markdown("**" + _desc_s + "**")
-                            _pc1.caption(_empresa_s + " · " + _medio_s + " · " + _fecha_s)
-                            _pc2.metric("Monto", _monto_s)
-                            _pc2.caption("Esperado: " + _fesp_s)
-                            with _pc3:
-                                _fkey = "fecha_remb_" + str(_row["id"])
-                                _bkey = "btn_remb_"   + str(_row["id"])
-                                _fecha_remb_input = st.date_input("Fecha reembolso", value=hoy_peru, key=_fkey)
-                                if st.button("Marcar reembolsado", key=_bkey, use_container_width=True):
-                                    for _r in st.session_state["gastos_reembolsables"]:
-                                        if _r["id"] == _row["id"]:
-                                            _r["estado"] = "reembolsado"
-                                            _r["fecha_reembolso"] = _fecha_remb_input.isoformat()
-                                            break
-                                    _tc_remb    = _tc_default if _mon == "USD" else 1.0
-                                    _monto_remb = float(_row["monto"]) * _tc_remb
-                                    st.session_state["ingresos_puntuales"].append({
-                                        "concepto": "Reembolso: " + _desc_s,
-                                        "fecha":    _fecha_remb_input.isoformat(),
-                                        "monto":    _monto_remb,
-                                    })
-                                    guardar("gastos_reembolsables")
-                                    guardar("ingresos_puntuales")
-                                    st.success("Reembolso de S/ " + f"{_monto_remb:,.0f}" + " registrado como ingreso puntual.")
-                                    st.rerun()
+                        _mon    = _row.get("moneda", "PEN")
+                        _monto_s = ("USD " + f"{_row['monto']:,.2f}") if _mon == "USD" else ("S/ " + f"{_row['monto']:,.1f}")
+                        _desc_s  = str(_row["descripcion"])
+                        _fkey    = "fecha_remb_" + str(_row["id"])
+                        _bkey    = "btn_remb_"   + str(_row["id"])
+                        _dkey    = "btn_del_"    + str(_row["id"])
+
+                        # Fila compacta: descripción | monto+fecha | acciones
+                        _ca, _cb, _cc, _cd = st.columns([3, 2, 2, 1])
+                        _ca.caption(
+                            "**" + _desc_s + "**  \n" + str(_row.get("empresa","—"))
+                            + " · " + str(_row.get("medio_pago",""))
+                            + " · " + str(_row["fecha"])
+                        )
+                        _cb.caption(_monto_s + "  \nEsp: " + str(_row["fecha_esperada"]))
+                        with _cc:
+                            _fecha_remb_input = st.date_input("", value=hoy_peru, key=_fkey, label_visibility="collapsed")
+                            if st.button("✅ Reembolsado", key=_bkey, use_container_width=True):
+                                for _r in st.session_state["gastos_reembolsables"]:
+                                    if _r["id"] == _row["id"]:
+                                        _r["estado"] = "reembolsado"
+                                        _r["fecha_reembolso"] = _fecha_remb_input.isoformat()
+                                        break
+                                _tc_remb    = _tc_default if _mon == "USD" else 1.0
+                                _monto_remb = float(_row["monto"]) * _tc_remb
+                                st.session_state["ingresos_puntuales"].append({
+                                    "concepto": "Reembolso: " + _desc_s,
+                                    "fecha":    _fecha_remb_input.isoformat(),
+                                    "monto":    _monto_remb,
+                                })
+                                guardar("gastos_reembolsables")
+                                guardar("ingresos_puntuales")
+                                st.rerun()
+                        with _cd:
+                            st.write("")
+                            if st.button("🗑️", key=_dkey, help="Eliminar", use_container_width=True):
+                                st.session_state["gastos_reembolsables"] = [
+                                    _r for _r in st.session_state["gastos_reembolsables"]
+                                    if _r["id"] != str(_row["id"])
+                                ]
+                                guardar("gastos_reembolsables")
+                                st.rerun()
+
+                        st.divider()
                 else:
                     st.success("No tienes gastos reembolsables pendientes.")
 
@@ -1292,19 +1302,26 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 _df_done = df_remb[df_remb["estado"] == "reembolsado"].copy().reset_index(drop=True)
                 if not _df_done.empty:
                     _df_done["fecha_reembolso"] = pd.to_datetime(_df_done["fecha_reembolso"], errors="coerce").dt.date
-                    st.dataframe(
-                        _df_done[["fecha", "descripcion", "empresa", "medio_pago", "moneda", "monto", "fecha_reembolso"]],
-                        use_container_width=True, hide_index=True,
-                        column_config={
-                            "fecha":           st.column_config.DateColumn("Fecha gasto",    width="small"),
-                            "descripcion":     st.column_config.TextColumn("Descripcion",    width="large"),
-                            "empresa":         st.column_config.TextColumn("Empresa",        width="small"),
-                            "medio_pago":      st.column_config.TextColumn("Medio",          width="small"),
-                            "moneda":          st.column_config.TextColumn("Moneda",         width="small"),
-                            "monto":           st.column_config.NumberColumn("Monto",        format="%.2f", width="small"),
-                            "fecha_reembolso": st.column_config.DateColumn("Reembolsado el", width="small"),
-                        }
-                    )
+                    for _idx2, _row2 in _df_done.iterrows():
+                        _mon2    = _row2.get("moneda", "PEN")
+                        _monto2  = ("USD " + f"{_row2['monto']:,.2f}") if _mon2 == "USD" else ("S/ " + f"{_row2['monto']:,.1f}")
+                        _dkey2   = "btn_del_done_" + str(_row2["id"])
+                        _da, _db, _dc = st.columns([4, 2, 1])
+                        _da.caption(
+                            "**" + str(_row2["descripcion"]) + "**  \n" + str(_row2.get("empresa","—"))
+                            + " · " + str(_row2["fecha"])
+                        )
+                        _db.caption(_monto2 + "  \nReembolsado: " + str(_row2.get("fecha_reembolso","—")))
+                        with _dc:
+                            st.write("")
+                            if st.button("🗑️", key=_dkey2, help="Eliminar", use_container_width=True):
+                                st.session_state["gastos_reembolsables"] = [
+                                    _r for _r in st.session_state["gastos_reembolsables"]
+                                    if _r["id"] != str(_row2["id"])
+                                ]
+                                guardar("gastos_reembolsables")
+                                st.rerun()
+                        st.divider()
                 else:
                     st.info("Aun no tienes reembolsos completados.")
         else:
