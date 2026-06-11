@@ -1509,31 +1509,49 @@ if not df_gt_calc.empty:
 # egresos de cuenta principal (para saldo principal y gráfico)
 egresos_tarjeta = egresos_tarjeta_por_cuenta.get("principal", pd.Series(0.0, index=fechas))
 
-# ── Gastos reembolsables: impacto real en cuenta ─────────────
-# Débito: restan en la fecha del gasto (salida inmediata de cuenta)
-# Crédito: restan en la fecha de pago estimada (ciclo de 30 días aprox)
+# ── Gastos reembolsables: impacto NETO en cuenta ─────────────
+# Para cada reembolsable:
+#   - Resta en la fecha del gasto (o fecha de pago para crédito)
+#   - Suma de vuelta en fecha_esperada si está PENDIENTE
+#     (si ya está reembolsado, la suma viene de ingresos_puntuales)
 _g_remb = pd.Series(0.0, index=fechas)
+
+def _nearest(series, fecha):
+    """Agrega monto a la fecha más cercana disponible en el índice."""
+    f = pd.Timestamp(fecha)
+    if f in series.index:
+        return f
+    if len(series.index) == 0:
+        return None
+    return series.index[int((series.index - f).abs().argmin())]
+
 for _r in st.session_state.get("gastos_reembolsables", []):
     _f = pd.to_datetime(_r.get("fecha"), errors="coerce")
     if pd.isna(_f):
         continue
-    _monto_r = float(_r.get("monto", 0))
-    _mon_r   = _r.get("moneda", "PEN")
+    _monto_r     = float(_r.get("monto", 0))
+    _mon_r       = _r.get("moneda", "PEN")
     _monto_pen_r = _monto_r * _tc_default if _mon_r == "USD" else _monto_r
+    _estado_r    = _r.get("estado", "pendiente")
 
+    # ── Fecha en que sale el dinero ──────────────────────────
     if _r.get("medio_pago", "Debito") == "Debito":
-        # Débito: impacto en fecha del gasto
-        _fecha_impacto = _f
+        _fecha_salida = _f
     else:
-        # Crédito: impacto estimado 30 días después (fecha de pago del ciclo)
-        _fecha_impacto = _f + pd.DateOffset(days=30)
+        _fecha_salida = _f + pd.DateOffset(days=30)
 
-    # Buscar la fecha más cercana en el índice
-    if _fecha_impacto in _g_remb.index:
-        _g_remb.loc[_fecha_impacto] += _monto_pen_r
-    elif len(_g_remb.index) > 0:
-        _idx_r = (_g_remb.index - _fecha_impacto).abs().argmin()
-        _g_remb.iloc[_idx_r] += _monto_pen_r
+    _fs = _nearest(_g_remb, _fecha_salida)
+    if _fs is not None:
+        _g_remb.loc[_fs] += _monto_pen_r
+
+    # ── Fecha en que vuelve el dinero (solo si pendiente) ────
+    # Si ya está reembolsado, ingresos_puntuales ya lo tiene.
+    if _estado_r == "pendiente":
+        _f_esp = pd.to_datetime(_r.get("fecha_esperada"), errors="coerce")
+        if not pd.isna(_f_esp):
+            _fe = _nearest(_g_remb, _f_esp)
+            if _fe is not None:
+                _g_remb.loc[_fe] -= _monto_pen_r   # resta negativa = suma
 
 saldo = (
     ahorro_inicial
