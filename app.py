@@ -752,7 +752,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
     # ==================================================
     # 3.1 GASTOS DIARIOS DÉBITO Y CRÉDITO
     # ==================================================
-    with st.expander("🧾 3.1 Gastos diarios débito y crédito", expanded=False):
+    with st.expander("💳 3.1a Gastos diarios débito", expanded=False):
 
         # ==================================================
         # GASTOS DIARIOS DÉBITO
@@ -925,7 +925,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         else:
             st.info("No hay gastos débito registrados.")
 
-        st.divider()
+    with st.expander("💳 3.1b Gastos diarios con tarjeta de crédito", expanded=False):
 
         # ==================================================
         # GASTOS DIARIOS CON TARJETA DE CRÉDITO
@@ -1201,14 +1201,37 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 " por un total de S/ " + f"{_remb_total:,.0f}"
             )
 
+        # Mapas de cuentas y tarjetas
+        _r_ncp   = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        _r_ctas  = {_r_ncp: "principal"}
+        for _rc in st.session_state["cuentas_ahorro"]:
+            _r_ctas[_rc["nombre"]] = _rc["id"]
+        _r_tarjs = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+
         with st.form("form_reembolsable", clear_on_submit=True):
             _rr1, _rr2 = st.columns(2)
             with _rr1:
                 _r_fecha   = st.date_input("Fecha del gasto", value=hoy_peru, key="fecha_reembolsable")
                 _r_desc    = st.text_input("Descripcion", placeholder="ej: Taxi para reunion con cliente")
                 _r_empresa = st.text_input("Quien reembolsa", placeholder="ej: Mi empresa")
+                _r_cta_remb = st.selectbox(
+                    "Cuenta que recibe el reembolso",
+                    list(_r_ctas.keys()),
+                    key="cta_remb_destino"
+                )
             with _rr2:
-                _r_medio  = st.selectbox("Medio de pago", ["Debito", "Tarjeta de credito"], key="medio_reembolsable")
+                _r_medio = st.selectbox("Medio de pago", ["Debito", "Tarjeta de credito"], key="medio_reembolsable")
+                # Conditional: show account or card selector depending on medio
+                _r_cta_origen_n  = st.selectbox(
+                    "Cuenta de débito usada",
+                    list(_r_ctas.keys()),
+                    key="cta_remb_origen"
+                ) if True else None   # always render both, hide logic on save
+                _r_tarj_n = st.selectbox(
+                    "Tarjeta de crédito usada",
+                    list(_r_tarjs.keys()) if _r_tarjs else ["(sin tarjetas)"],
+                    key="tarj_remb_origen"
+                )
                 _rm_c, _rm_m = st.columns([1, 2])
                 with _rm_c:
                     _r_moneda = st.selectbox("Moneda", ["PEN", "USD"], key="moneda_reembolsable")
@@ -1221,17 +1244,26 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 )
             if st.form_submit_button("Agregar gasto reembolsable", use_container_width=True, type="primary"):
                 if _r_monto > 0 and _r_desc.strip():
+                    _es_credito = (_r_medio == "Tarjeta de credito")
+                    _tarj_id_r  = _r_tarjs.get(_r_tarj_n, "") if _es_credito and _r_tarjs else ""
+                    _cta_orig_id = _r_ctas.get(_r_cta_origen_n, "principal") if not _es_credito else ""
                     st.session_state["gastos_reembolsables"].append({
-                        "id":              str(uuid.uuid4()),
-                        "fecha":           _r_fecha.isoformat(),
-                        "descripcion":     _r_desc.strip(),
-                        "empresa":         _r_empresa.strip(),
-                        "medio_pago":      _r_medio,
-                        "moneda":          _r_moneda,
-                        "monto":           float(_r_monto),
-                        "fecha_esperada":  _r_fecha_esp.isoformat(),
-                        "estado":          "pendiente",
-                        "fecha_reembolso": None,
+                        "id":                  str(uuid.uuid4()),
+                        "fecha":               _r_fecha.isoformat(),
+                        "descripcion":         _r_desc.strip(),
+                        "empresa":             _r_empresa.strip(),
+                        "medio_pago":          _r_medio,
+                        "tarjeta_nombre":      _r_tarj_n if _es_credito else "",
+                        "tarjeta_id":          _tarj_id_r,
+                        "cuenta_origen_nombre":_r_cta_origen_n if not _es_credito else "",
+                        "cuenta_origen_id":    _cta_orig_id,
+                        "cuenta_reembolso_nombre": _r_cta_remb,
+                        "cuenta_reembolso_id": _r_ctas.get(_r_cta_remb, "principal"),
+                        "moneda":              _r_moneda,
+                        "monto":               float(_r_monto),
+                        "fecha_esperada":      _r_fecha_esp.isoformat(),
+                        "estado":              "pendiente",
+                        "fecha_reembolso":     None,
                     })
                     guardar("gastos_reembolsables")
                     st.success("Gasto reembolsable registrado.")
@@ -1521,6 +1553,37 @@ if not df_gt_calc.empty:
             if fecha_pago in egresos_tarjeta_por_cuenta[_cuenta_pago_t].index:
                 egresos_tarjeta_por_cuenta[_cuenta_pago_t].loc[fecha_pago] += monto_pen
 
+# ── Reembolsables con tarjeta: agregar al ciclo de pago ──────
+for _r in st.session_state.get("gastos_reembolsables", []):
+    if _r.get("medio_pago") != "Tarjeta de credito":
+        continue
+    _tarj_id_r = _r.get("tarjeta_id", "")
+    _f_r = pd.to_datetime(_r.get("fecha"), errors="coerce")
+    if pd.isna(_f_r) or not _tarj_id_r:
+        continue
+    # Buscar la tarjeta para obtener dia_cierre y dia_pago
+    _t_match = next((t for t in st.session_state["tarjetas"] if t["id"] == _tarj_id_r), None)
+    if _t_match is None:
+        continue
+    _, _cierre_r = obtener_ciclo_tarjeta(_f_r, int(_t_match["dia_cierre"]))
+    _fecha_pago_r = (pd.Timestamp(_cierre_r) + pd.DateOffset(months=1)).replace(day=int(_t_match["dia_pago"]))
+    _anio_mes_r = _fecha_pago_r.strftime("%Y-%m")
+    _tc_r = _tc_lookup.get((_tarj_id_r, _anio_mes_r), _tc_default)
+    _mon_r = _r.get("moneda", "PEN")
+    _monto_pen_r = float(_r["monto"]) * _tc_r if _mon_r == "USD" else float(_r["monto"])
+    # Cuenta de pago de la tarjeta (igual que gastos normales)
+    _t_pago_r = next(
+        (t.get("cuenta_pago", "principal") for t in st.session_state["tarjetas"] if t["id"] == _tarj_id_r),
+        "principal"
+    )
+    if _t_pago_r not in egresos_tarjeta_por_cuenta:
+        egresos_tarjeta_por_cuenta[_t_pago_r] = pd.Series(0.0, index=fechas)
+    if _fecha_pago_r in egresos_tarjeta_por_cuenta[_t_pago_r].index:
+        egresos_tarjeta_por_cuenta[_t_pago_r].loc[_fecha_pago_r] += _monto_pen_r
+    else:
+        _idx_nearest = int((egresos_tarjeta_por_cuenta[_t_pago_r].index - _fecha_pago_r).abs().argmin())
+        egresos_tarjeta_por_cuenta[_t_pago_r].iloc[_idx_nearest] += _monto_pen_r
+
 # egresos de cuenta principal (para saldo principal y gráfico)
 egresos_tarjeta = egresos_tarjeta_por_cuenta.get("principal", pd.Series(0.0, index=fechas))
 
@@ -1549,19 +1612,18 @@ for _r in st.session_state.get("gastos_reembolsables", []):
     _monto_pen_r = _monto_r * _tc_default if _mon_r == "USD" else _monto_r
     _estado_r    = _r.get("estado", "pendiente")
 
-    # ── Fecha en que sale el dinero ──────────────────────────
+    # ── Fecha en que sale el dinero (solo débito) ────────────
+    # Crédito ya va por egresos_tarjeta_por_cuenta (ciclo de pago real)
     if _r.get("medio_pago", "Debito") == "Debito":
-        _fecha_salida = _f
-    else:
-        _fecha_salida = _f + pd.DateOffset(days=30)
+        _fs = _nearest(_g_remb, _f)
+        if _fs is not None:
+            _g_remb.loc[_fs] += _monto_pen_r
 
-    _fs = _nearest(_g_remb, _fecha_salida)
-    if _fs is not None:
-        _g_remb.loc[_fs] += _monto_pen_r
 
-    # ── Fecha en que vuelve el dinero (solo si pendiente) ────
-    # Si ya está reembolsado, ingresos_puntuales ya lo tiene.
-    if _estado_r == "pendiente":
+    # ── Fecha en que vuelve el dinero (solo débito pendiente) ───
+    # Crédito: el reembolso va a la cuenta de ahorro seleccionada → se registra
+    # como ingreso puntual al marcar reembolsado.
+    if _estado_r == "pendiente" and _r.get("medio_pago", "Debito") == "Debito":
         _f_esp = pd.to_datetime(_r.get("fecha_esperada"), errors="coerce")
         if not pd.isna(_f_esp):
             _fe = _nearest(_g_remb, _f_esp)
@@ -1873,14 +1935,14 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         horizonte_meses = st.selectbox(
             "Horizonte",
             [3, 6, 9, 12],
-            index=1,
+            index=0,
             format_func=lambda x: f"{x} meses",
             key="horizonte_evol"
         )
     with ctrl_col2:
         mostrar_ahorro_total = st.toggle("Mostrar ahorro total", value=True, key="tog_total")
     with ctrl_col3:
-        mostrar_secundarias = st.toggle("Mostrar cuentas secundarias", value=False, key="tog_sec")
+        mostrar_secundarias = st.toggle("Mostrar cuentas secundarias", value=True, key="tog_sec")
 
     # ── Sliders de rango Y ─────────────────────────────────────
     # Y1: máximo = 5x el saldo máximo observado, mínimo 200k, redondeado a 50k
@@ -1955,8 +2017,9 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
     fig_evol.update_layout(
         **PLOTLY_LAYOUT,
-        height=380,
+        height=min(380, 300),
         hovermode="x unified",
+        autosize=True,
         legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
     fig_evol.update_yaxes(
@@ -1978,10 +2041,15 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
     meta_col, _ = st.columns([1, 2])
     with meta_col:
+        _meta_saved = float(st.session_state["configuracion"].get("meta_ahorro_mensual", 2000.0))
         meta_ahorro = st.number_input(
             "¿Cuánto quieres ahorrar este mes? (S/)",
-            min_value=0.0, step=100.0, value=2000.0
+            min_value=0.0, step=100.0, value=_meta_saved,
+            key="meta_ahorro_input"
         )
+        if meta_ahorro != _meta_saved:
+            st.session_state["configuracion"]["meta_ahorro_mensual"] = meta_ahorro
+            guardar("configuracion")
 
     ingresos_mes_actual = (
         (ing_rec + ing_punt)
@@ -2283,10 +2351,13 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     st.markdown("---")
     st.markdown("### 💳 Pagos de tarjeta de crédito")
 
-    if not df_gt_calc.empty:
+    if not df_gt_calc.empty or any(
+        r.get("medio_pago") == "Tarjeta de credito"
+        for r in st.session_state.get("gastos_reembolsables", [])
+    ):
         resumen = []
         for t in st.session_state["tarjetas"]:
-            df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
+            df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]] if not df_gt_calc.empty else pd.DataFrame()
             for _, g in df_t.iterrows():
                 fecha_gasto = pd.to_datetime(g["fecha"], errors="coerce")
                 if pd.isna(fecha_gasto):
@@ -2309,6 +2380,34 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     "Monto USD": monto_usd,
                     "TC usado": tc if moneda_g == "USD" else None,
                 })
+
+        # ── Agregar reembolsables con tarjeta al resumen ──────────
+        for _rr in st.session_state.get("gastos_reembolsables", []):
+            if _rr.get("medio_pago") != "Tarjeta de credito":
+                continue
+            _t_rr = next((t for t in st.session_state["tarjetas"] if t["id"] == _rr.get("tarjeta_id","")), None)
+            if _t_rr is None:
+                continue
+            _f_rr = pd.to_datetime(_rr.get("fecha"), errors="coerce")
+            if pd.isna(_f_rr):
+                continue
+            _inicio_rr, _cierre_rr = obtener_ciclo_tarjeta(_f_rr, int(_t_rr["dia_cierre"]))
+            _fp_rr = (pd.Timestamp(_cierre_rr) + pd.DateOffset(months=1)).replace(day=int(_t_rr["dia_pago"]))
+            _anio_mes_rr = _fp_rr.strftime("%Y-%m")
+            _tc_rr = _tc_lookup.get((_t_rr["id"], _anio_mes_rr), _tc_default)
+            _mon_rr = _rr.get("moneda", "PEN")
+            _monto_usd_rr = float(_rr["monto"]) if _mon_rr == "USD" else 0.0
+            _monto_pen_rr = float(_rr["monto"]) * _tc_rr if _mon_rr == "USD" else float(_rr["monto"])
+            resumen.append({
+                "Tarjeta": _t_rr["nombre"] + " (reembolsable)",
+                "Tarjeta ID": _t_rr["id"],
+                "Inicio ciclo": _inicio_rr,
+                "Cierre ciclo": _cierre_rr,
+                "Fecha pago": _fp_rr.date(),
+                "Monto PEN": _monto_pen_rr,
+                "Monto USD": _monto_usd_rr,
+                "TC usado": _tc_rr if _mon_rr == "USD" else None,
+            })
 
         df_res = pd.DataFrame(resumen)
         if not df_res.empty:
