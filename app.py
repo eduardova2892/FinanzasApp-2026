@@ -896,7 +896,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
                     "categoria":            st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_debito, required=True, width="medium"),
                     "descripcion":          st.column_config.TextColumn("📝 Descripción", width="large"),
-                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=1.0, required=True, format="S/ %,.2f", width="small"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=0.1, required=True, format="S/ %,.1f", width="small"),
                 },
                 key="editor_gastos_debito"
             )
@@ -1051,7 +1051,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                         "categoria":      st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_tarjeta, required=True, width="medium"),
                         "descripcion":    st.column_config.TextColumn("📝 Descripción", width="large"),
                         "moneda":         st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
-                        "monto":          st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=1.0, required=True, format="S/ %,.2f", width="small"),
+                        "monto":          st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=0.1, required=True, format="%,.1f", width="small"),
                     },
                     key="editor_gastos_tarjeta"
                 )
@@ -1492,6 +1492,32 @@ if not df_gt_calc.empty:
 # egresos de cuenta principal (para saldo principal y gráfico)
 egresos_tarjeta = egresos_tarjeta_por_cuenta.get("principal", pd.Series(0.0, index=fechas))
 
+# ── Gastos reembolsables: impacto real en cuenta ─────────────
+# Débito: restan en la fecha del gasto (salida inmediata de cuenta)
+# Crédito: restan en la fecha de pago estimada (ciclo de 30 días aprox)
+_g_remb = pd.Series(0.0, index=fechas)
+for _r in st.session_state.get("gastos_reembolsables", []):
+    _f = pd.to_datetime(_r.get("fecha"), errors="coerce")
+    if pd.isna(_f):
+        continue
+    _monto_r = float(_r.get("monto", 0))
+    _mon_r   = _r.get("moneda", "PEN")
+    _monto_pen_r = _monto_r * _tc_default if _mon_r == "USD" else _monto_r
+
+    if _r.get("medio_pago", "Debito") == "Debito":
+        # Débito: impacto en fecha del gasto
+        _fecha_impacto = _f
+    else:
+        # Crédito: impacto estimado 30 días después (fecha de pago del ciclo)
+        _fecha_impacto = _f + pd.DateOffset(days=30)
+
+    # Buscar la fecha más cercana en el índice
+    if _fecha_impacto in _g_remb.index:
+        _g_remb.loc[_fecha_impacto] += _monto_pen_r
+    elif len(_g_remb.index) > 0:
+        _idx_r = (_g_remb.index - _fecha_impacto).abs().argmin()
+        _g_remb.iloc[_idx_r] += _monto_pen_r
+
 saldo = (
     ahorro_inicial
     + ing_rec.cumsum()
@@ -1499,6 +1525,7 @@ saldo = (
     - g_diarios_principal.cumsum()
     - g_fijos.cumsum()
     - egresos_tarjeta.cumsum()
+    - _g_remb.cumsum()
 )
 
 
@@ -1767,14 +1794,28 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     _saldo_total_hoy     = float(serie_ahorro_total.iloc[_idx_ref])
 
     _lbl_fecha = _fecha_ref_real.strftime("%d/%m/%Y")
+    # Calcular total reembolsables pendientes al día de hoy
+    _remb_pend_monto = sum(
+        float(r["monto"]) * (_tc_default if r.get("moneda") == "USD" else 1.0)
+        for r in st.session_state.get("gastos_reembolsables", [])
+        if r.get("estado") == "pendiente"
+    )
+
     with st.container(border=True):
         st.caption(f"💰 Saldos al {_lbl_fecha}")
-        _sb_cols = st.columns(2 + len(saldos_sec))
+        _sb_cols = st.columns(2 + len(saldos_sec) + (1 if _remb_pend_monto > 0 else 0))
         _sb_cols[0].metric(nombre_cuenta_principal, f"S/ {_saldo_principal_hoy:,.0f}")
         for _i, (_nc, _ss) in enumerate(saldos_sec.items()):
             _v = float(_ss.iloc[_idx_ref])
             _sb_cols[1 + _i].metric(f"↳ {_nc}", f"S/ {_v:,.0f}")
-        _sb_cols[-1].metric("🏦 Total ahorros", f"S/ {_saldo_total_hoy:,.0f}")
+        _sb_cols[1 + len(saldos_sec)].metric("🏦 Total ahorros", f"S/ {_saldo_total_hoy:,.0f}")
+        if _remb_pend_monto > 0:
+            _sb_cols[-1].metric(
+                "🔄 Por reembolsar",
+                f"S/ {_remb_pend_monto:,.0f}",
+                delta="incluido en saldo",
+                delta_color="off"
+            )
 
     # ── Controles del gráfico ──────────────────────────────────
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
