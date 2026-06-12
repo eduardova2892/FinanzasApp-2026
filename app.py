@@ -2387,6 +2387,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     "Fecha pago": fecha_pago.date(),
                     "Monto PEN": monto_pen,
                     "Monto USD": monto_usd,
+                    "Monto remb PEN": 0.0,
                     "TC usado": tc if moneda_g == "USD" else None,
                 })
 
@@ -2408,13 +2409,14 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             _monto_usd_rr = float(_rr["monto"]) if _mon_rr == "USD" else 0.0
             _monto_pen_rr = float(_rr["monto"]) * _tc_rr if _mon_rr == "USD" else float(_rr["monto"])
             resumen.append({
-                "Tarjeta": _t_rr["nombre"] + " (reembolsable)",
+                "Tarjeta": _t_rr["nombre"],
                 "Tarjeta ID": _t_rr["id"],
                 "Inicio ciclo": _inicio_rr,
                 "Cierre ciclo": _cierre_rr,
                 "Fecha pago": _fp_rr.date(),
                 "Monto PEN": _monto_pen_rr,
                 "Monto USD": _monto_usd_rr,
+                "Monto remb PEN": _monto_pen_rr,
                 "TC usado": _tc_rr if _mon_rr == "USD" else None,
             })
 
@@ -2422,7 +2424,8 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         if not df_res.empty:
             resumen_ciclo = (
                 df_res.groupby(["Tarjeta", "Tarjeta ID", "Inicio ciclo", "Cierre ciclo", "Fecha pago"], as_index=False)
-                .agg({"Monto PEN": "sum", "Monto USD": "sum"})
+                .agg({"Monto PEN": "sum", "Monto USD": "sum",
+                      "Monto remb PEN": "sum"})
                 .sort_values("Fecha pago")
             )
             # TC representativo del ciclo (promedio ponderado si hay varios USD)
@@ -2472,7 +2475,11 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                             st.caption(f"💳 {_row['Tarjeta']}")
                             st.markdown(f"### S/ {_row['Monto PEN']:,.0f}")
                             if _row["Monto USD"] > 0:
-                                st.caption(f"💵 Incluye USD {_row['Monto USD']:,.2f} × {_row['TC rep']:.2f}")
+                                st.caption(f"💵 USD {_row['Monto USD']:,.2f} × {_row['TC rep']:.2f}")
+                            _remb_row = _row.get("Monto remb PEN", 0.0)
+                            if _remb_row > 0:
+                                _neto = _row["Monto PEN"] - _remb_row
+                                st.caption(f"🔄 S/ {_remb_row:,.0f} reembolsable · neto S/ {_neto:,.0f}")
                             st.caption(f"📆 Pago: **{_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}**")
                             st.caption(f"🗓 Cierre: {pd.to_datetime(_row['Cierre ciclo']).strftime('%d/%m/%Y')}")
                             st.markdown(f"**{_urgencia}**")
@@ -2487,13 +2494,15 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
                 fig_tl = go.Figure()
                 for _, _row in _timeline.iterrows():
-                    _usd_txt = f" | USD {_row['Monto USD']:,.2f} × {_row['TC rep']:.2f}" if _row["Monto USD"] > 0 else ""
+                    _usd_txt  = f" | USD {_row['Monto USD']:,.2f}×{_row['TC rep']:.2f}" if _row["Monto USD"] > 0 else ""
+                    _remb_val = _row.get("Monto remb PEN", 0.0)
+                    _remb_txt = f" | 🔄 remb S/ {_remb_val:,.0f}" if _remb_val > 0 else ""
                     fig_tl.add_trace(go.Bar(
                         x=[_row["Monto PEN"]],
                         y=[f"{_row['Tarjeta']} — {_row['_fecha_pago_dt'].strftime('%d/%m')}"],
                         orientation="h",
                         marker_color=_row["color"],
-                        text=f"S/ {_row['Monto PEN']:,.0f}  ({int(_row['_dias'])} días){_usd_txt}",
+                        text=f"S/ {_row['Monto PEN']:,.0f}  ({int(_row['_dias'])} días){_usd_txt}{_remb_txt}",
                         textposition="outside",
                         hovertemplate=(
                             f"<b>{_row['Tarjeta']}</b><br>"
@@ -2501,6 +2510,8 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                             f"Pago: {_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}<br>"
                             f"<b>Total S/ {_row['Monto PEN']:,.2f}</b><br>"
                             + (f"💵 USD {_row['Monto USD']:,.2f} @ TC {_row['TC rep']:.2f}<br>" if _row["Monto USD"] > 0 else "")
+                            + (f"🔄 Reembolsable S/ {_remb_val:,.2f}<br>" if _remb_val > 0 else "")
+                            + (f"Neto a pagar S/ {_row['Monto PEN']-_remb_val:,.2f}<br>" if _remb_val > 0 else "")
                             + f"<extra></extra>"
                         ),
                         showlegend=False
@@ -2527,7 +2538,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             with st.expander("📋 Ver historial completo de ciclos", expanded=False):
                 _tabla_show = resumen_ciclo[
                     ["Tarjeta", "Ciclo facturación", "Cierre ciclo", "Fecha pago",
-                     "Monto PEN", "Monto USD", "TC rep", "_dias"]
+                     "Monto PEN", "Monto remb PEN", "Monto USD", "TC rep", "_dias"]
                 ].copy()
                 _tabla_show["Estado"] = _tabla_show["_dias"].apply(
                     lambda d: "✅ Pagado" if d < 0 else ("🔴 Urgente" if d <= 5 else ("🟡 Próximo" if d <= 15 else "🟢 Futuro"))
@@ -2543,10 +2554,11 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     _tabla_show,
                     use_container_width=True, hide_index=True,
                     column_config={
-                        "Monto PEN":  st.column_config.NumberColumn("Total (S/)", format="S/ %,.0f"),
-                        "Monto USD":  st.column_config.TextColumn("En USD"),
-                        "TC rep":     st.column_config.TextColumn("TC usado"),
-                        "Estado":     st.column_config.TextColumn("Estado"),
+                        "Monto PEN":      st.column_config.NumberColumn("Total (S/)",      format="S/ %,.0f"),
+                        "Monto remb PEN": st.column_config.NumberColumn("Reembolsable (S/)", format="S/ %,.0f"),
+                        "Monto USD":      st.column_config.TextColumn("En USD"),
+                        "TC rep":         st.column_config.TextColumn("TC usado"),
+                        "Estado":         st.column_config.TextColumn("Estado"),
                     }
                 )
         else:
