@@ -2473,13 +2473,17 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
                     with _pcols[_ci]:
                         with st.container(border=True):
                             st.caption(f"💳 {_row['Tarjeta']}")
-                            st.markdown(f"### S/ {_row['Monto PEN']:,.0f}")
+                            _remb_row = float(_row.get("Monto remb PEN", 0.0))
+                            _total_banco = _row["Monto PEN"]
+                            _neto = _total_banco - _remb_row
+                            # Número grande = total que cobra el banco
+                            st.markdown(f"### S/ {_total_banco:,.0f}")
                             if _row["Monto USD"] > 0:
                                 st.caption(f"💵 USD {_row['Monto USD']:,.2f} × {_row['TC rep']:.2f}")
-                            _remb_row = _row.get("Monto remb PEN", 0.0)
                             if _remb_row > 0:
-                                _neto = _row["Monto PEN"] - _remb_row
-                                st.caption(f"🔄 S/ {_remb_row:,.0f} reembolsable · neto S/ {_neto:,.0f}")
+                                st.caption(f"🏦 Total banco: S/ {_total_banco:,.0f}")
+                                st.caption(f"🔄 Reembolsable: S/ {_remb_row:,.0f}")
+                                st.caption(f"💰 **Tu gasto neto: S/ {_neto:,.0f}**")
                             st.caption(f"📆 Pago: **{_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}**")
                             st.caption(f"🗓 Cierre: {pd.to_datetime(_row['Cierre ciclo']).strftime('%d/%m/%Y')}")
                             st.markdown(f"**{_urgencia}**")
