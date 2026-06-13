@@ -1759,10 +1759,16 @@ _ing_prestamos = pd.Series(0.0, index=fechas)
 
 def _add_to(series, fecha, monto):
     f = pd.Timestamp(fecha)
+    if len(series.index) == 0:
+        return
+    # Skip dates outside the simulation range
+    if f < series.index[0] or f > series.index[-1]:
+        return
     if f in series.index:
         series.loc[f] += monto
-    elif len(series.index) > 0:
-        series.iloc[int((series.index - f).abs().argmin())] += monto
+    else:
+        _idx = int((series.index.astype("int64") - f.value).abs().argmin())
+        series.iloc[_idx] += monto
 
 for _sim in st.session_state.get("simulaciones_prestamo", []):
     if not _sim.get("activo", True):
