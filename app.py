@@ -1096,39 +1096,70 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         # INGRESOS PUNTUALES
         # ==================================================
         with st.expander("💵 Ingresos puntuales", expanded=False):
+            # Mapa de cuentas
+            _ip_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+            _ip_ctas = {_ip_ncp: "principal"}
+            for _ipc in st.session_state["cuentas_ahorro"]:
+                _ip_ctas[_ipc["nombre"]] = _ipc["id"]
+            _ip_ctas_nombres = list(_ip_ctas.keys())
+
             with st.form("form_ingreso_puntual"):
                 _ip1, _ip2 = st.columns(2)
                 with _ip1:
-                    concepto = st.text_input("📝 Concepto")
-                    fecha    = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_ingreso_puntual")
+                    concepto  = st.text_input("📝 Concepto")
+                    fecha     = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_ingreso_puntual")
                 with _ip2:
-                    monto = st.number_input("💰 Monto (S/)", min_value=0.0)
+                    monto     = st.number_input("💰 Monto (S/)", min_value=0.0)
+                    _ip_cta   = st.selectbox("🏦 Cuenta que recibe", _ip_ctas_nombres, key="cta_ingreso_puntual")
                 if st.form_submit_button("➕ Agregar ingreso puntual", use_container_width=True, type="primary"):
-                    st.session_state["ingresos_puntuales"].append({"concepto": concepto, "fecha": fecha.isoformat(), "monto": monto})
+                    st.session_state["ingresos_puntuales"].append({
+                        "concepto":          concepto,
+                        "fecha":             fecha.isoformat(),
+                        "monto":             monto,
+                        "cuenta_destino_id": _ip_ctas[_ip_cta],
+                        "cuenta_destino_nombre": _ip_cta,
+                    })
                     guardar("ingresos_puntuales")
                     st.rerun()
 
             df_ing_punt = pd.DataFrame(st.session_state["ingresos_puntuales"])
             if not df_ing_punt.empty:
+                # Asegurar columnas nuevas en registros viejos
+                if "cuenta_destino_id" not in df_ing_punt.columns:
+                    df_ing_punt["cuenta_destino_id"] = "principal"
+                if "cuenta_destino_nombre" not in df_ing_punt.columns:
+                    df_ing_punt["cuenta_destino_nombre"] = _ip_ncp
+                df_ing_punt["cuenta_destino_id"]     = df_ing_punt["cuenta_destino_id"].fillna("principal")
+                df_ing_punt["cuenta_destino_nombre"] = df_ing_punt["cuenta_destino_nombre"].fillna(_ip_ncp)
                 df_ing_punt["fecha"] = pd.to_datetime(df_ing_punt["fecha"], errors="coerce").dt.date
                 df_ing_punt["monto"] = pd.to_numeric(df_ing_punt["monto"], errors="coerce").fillna(0)
                 df_ing_punt = df_ing_punt.sort_values("fecha", ascending=False).reset_index(drop=True)
                 st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
                 ed_ing_punt = st.data_editor(
                     df_ing_punt, use_container_width=True, hide_index=True,
-                    num_rows="dynamic", height=min(38 * len(df_ing_punt) + 46, 300),
+                    num_rows="dynamic", height=min(38 * len(df_ing_punt) + 46, 320),
                     column_config={
-                        "concepto": st.column_config.TextColumn("📝 Concepto", width="large"),
-                        "fecha":    st.column_config.DateColumn("📅 Fecha", width="small"),
-                        "monto":    st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
+                        "concepto":              st.column_config.TextColumn("📝 Concepto", width="large"),
+                        "fecha":                 st.column_config.DateColumn("📅 Fecha", width="small"),
+                        "monto":                 st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
+                        "cuenta_destino_nombre": st.column_config.SelectboxColumn("🏦 Cuenta", options=_ip_ctas_nombres, width="medium"),
+                        "cuenta_destino_id":     None,
                     }, key="editor_ingresos_puntuales"
                 )
                 if st.button("💾 Guardar cambios — Ingresos puntuales", type="primary"):
                     df_ed = ed_ing_punt.copy()
-                    df_ed["fecha"] = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
-                    df_ed["concepto"] = df_ed["concepto"].fillna("").astype(str)
-                    st.session_state["ingresos_puntuales"] = df_ed.dropna(subset=["fecha"]).sort_values("fecha", ascending=False).to_dict("records")
+                    df_ed["fecha"]   = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_ed["monto"]   = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                    df_ed["concepto"]= df_ed["concepto"].fillna("").astype(str)
+                    # Sync cuenta_destino_id from nombre
+                    df_ed["cuenta_destino_id"] = df_ed["cuenta_destino_nombre"].map(
+                        lambda n: _ip_ctas.get(str(n), "principal")
+                    )
+                    st.session_state["ingresos_puntuales"] = (
+                        df_ed.dropna(subset=["fecha"])
+                             .sort_values("fecha", ascending=False)
+                             .to_dict("records")
+                    )
                     guardar("ingresos_puntuales")
                     st.success("✅ Guardado.")
                     st.rerun()
