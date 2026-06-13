@@ -2026,15 +2026,15 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
 
     fig_evol.update_layout(
         **PLOTLY_LAYOUT,
-        height=min(380, 300),
+        height=520,
         hovermode="x unified",
-        autosize=True,
         legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
     fig_evol.update_yaxes(
         title_text="Saldo (S/)",
         gridcolor=_grid_col, tickformat=",d", color=_font_col,
-        range=[rango_y1[0], rango_y1[1]]
+        range=[rango_y1[0], rango_y1[1]],
+        tickcount=8,
     )
     fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
