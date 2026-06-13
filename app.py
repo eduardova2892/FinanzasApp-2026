@@ -2135,6 +2135,27 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
             except:
                 pass
 
+    # ── Agregar cuotas de préstamos activos a gastos fijos ──────
+    for _sim_f in st.session_state.get("simulaciones_prestamo", []):
+        if not _sim_f.get("activo", True):
+            continue
+        _sf_primera = pd.to_datetime(_sim_f.get("fecha_primera_cuota", _sim_f.get("fecha_inicio", hoy_peru)))
+        _sf_fin     = pd.to_datetime(_sim_f["fecha_fin"])
+        _sf_dia     = int(_sim_f.get("dia_cuota", 5))
+        _sf_cuota   = float(_sim_f["cuota"])
+        _sf_cierre  = pd.to_datetime(_sim_f["fecha_cierre"]) if _sim_f.get("fecha_cierre") and _sim_f.get("monto_cierre", 0) > 0 else None
+        _sf_limite  = min(_sf_fin, _sf_cierre) if _sf_cierre else _sf_fin
+        # Pago de cierre también aparece como fijo ese mes
+        if _sf_cierre and float(_sim_f.get("monto_cierre", 0)) > 0:
+            gastos_fijos_expandido.append({"fecha": _sf_cierre, "monto": float(_sim_f["monto_cierre"])})
+        _cur_f = _sf_primera.replace(day=min(_sf_dia, 28))
+        while _cur_f <= _sf_limite:
+            gastos_fijos_expandido.append({"fecha": _cur_f, "monto": _sf_cuota})
+            try:
+                _cur_f = (_cur_f + pd.DateOffset(months=1)).replace(day=min(_sf_dia, 28))
+            except Exception:
+                _cur_f = _cur_f + pd.DateOffset(months=1)
+
     df_fijos_expandido = pd.DataFrame(gastos_fijos_expandido)
     if not df_fijos_expandido.empty:
         df_fijos_expandido["mes"] = pd.to_datetime(df_fijos_expandido["fecha"]).dt.to_period("M")
