@@ -2034,7 +2034,7 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         title_text="Saldo (S/)",
         gridcolor=_grid_col, tickformat=",d", color=_font_col,
         range=[rango_y1[0], rango_y1[1]],
-        tickcount=8,
+        nticks=8,
     )
     fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
