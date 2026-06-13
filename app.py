@@ -1391,48 +1391,81 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
     # ── Formulario nueva simulación ───────────────────────────────
     with st.form("form_prestamo", clear_on_submit=True):
         st.markdown("#### ➕ Nueva simulación")
+
+        st.markdown("**🏦 Préstamo**")
         _fp1, _fp2 = st.columns(2)
         with _fp1:
             _p_nombre    = st.text_input("📝 Nombre", placeholder="ej: Préstamo vehículo")
             _p_monto_pre = st.number_input("💰 Monto del préstamo (S/)", min_value=0.0, step=1000.0)
-            _p_monto_tot = st.number_input("🏷️ Costo total del bien (S/)", min_value=0.0, step=1000.0,
-                                            help="Si el bien cuesta más que el préstamo, la diferencia sale de tus ahorros")
-            _p_fecha_ini = st.date_input("📅 Fecha de desembolso", value=hoy_peru, key="prestamo_fecha_ini")
+            _p_cta_desembolso = st.selectbox(
+                "🏦 Cuenta que recibe el préstamo",
+                list(_p_ctas.keys()), key="prestamo_cta_desembolso"
+            )
         with _fp2:
-            _p_cuota     = st.number_input("📆 Cuota mensual (S/)", min_value=0.0, step=100.0)
-            _p_medio_pago = st.selectbox("💳 Cuenta/tarjeta de pago de cuotas", _p_medios, key="prestamo_medio")
-            _p_fecha_fin = st.date_input("📅 Última cuota", value=hoy_peru, key="prestamo_fecha_fin")
-            _p_desc      = st.text_area("📝 Notas", placeholder="Condiciones, banco, etc.", height=80)
+            _p_fecha_desembolso = st.date_input("📅 Fecha de desembolso", value=hoy_peru, key="prestamo_fecha_desembolso")
+            _p_desc = st.text_area("📝 Notas", placeholder="Condiciones, banco, tasa, etc.", height=80)
+
+        st.markdown("**🛒 Compra del bien**")
+        _fg1, _fg2 = st.columns(2)
+        with _fg1:
+            _p_monto_tot = st.number_input(
+                "🏷️ Costo total del bien (S/)", min_value=0.0, step=1000.0,
+                help="Si es mayor al préstamo, la diferencia sale de la cuenta seleccionada"
+            )
+            _p_cta_pago_bien = st.selectbox(
+                "💳 Cuenta que paga el bien",
+                list(_p_ctas.keys()), key="prestamo_cta_pago_bien"
+            )
+        with _fg2:
+            _p_fecha_compra = st.date_input("📅 Fecha de compra del bien", value=hoy_peru, key="prestamo_fecha_compra")
+
+        st.markdown("**📆 Cuotas mensuales**")
+        _fq1, _fq2, _fq3, _fq4 = st.columns(4)
+        with _fq1:
+            _p_cuota = st.number_input("💰 Cuota mensual (S/)", min_value=0.0, step=100.0)
+        with _fq2:
+            _p_medio_pago = st.selectbox("💳 Cuenta/tarjeta de cuotas", _p_medios, key="prestamo_medio")
+        with _fq3:
+            _p_fecha_primera_cuota = st.date_input("📅 Primera cuota", value=hoy_peru, key="prestamo_fecha_primera")
+            _p_dia_cuota = st.number_input("📆 Día del mes", min_value=1, max_value=31, value=5, key="prestamo_dia")
+        with _fq4:
+            _p_fecha_ultima_cuota = st.date_input("📅 Última cuota", value=hoy_peru, key="prestamo_fecha_fin")
 
         if st.form_submit_button("💾 Guardar simulación", use_container_width=True, type="primary"):
             if _p_nombre.strip() and _p_monto_pre > 0 and _p_cuota > 0:
-                # Determinar si el medio es tarjeta o cuenta
                 if _p_medio_pago.startswith("Tarjeta: "):
-                    _tarj_name = _p_medio_pago.replace("Tarjeta: ", "")
-                    _medio_id  = _p_tarjs.get(_tarj_name, "")
+                    _tarj_name  = _p_medio_pago.replace("Tarjeta: ", "")
+                    _medio_id   = _p_tarjs.get(_tarj_name, "")
                     _medio_tipo = "tarjeta"
                 else:
                     _medio_id   = _p_ctas.get(_p_medio_pago, "principal")
                     _medio_tipo = "cuenta"
                 st.session_state["simulaciones_prestamo"].append({
-                    "id":              str(uuid.uuid4()),
-                    "nombre":          _p_nombre.strip(),
-                    "monto_prestamo":  float(_p_monto_pre),
-                    "monto_total":     float(_p_monto_tot) if _p_monto_tot > 0 else float(_p_monto_pre),
-                    "cuota":           float(_p_cuota),
-                    "fecha_inicio":    _p_fecha_ini.isoformat(),
-                    "fecha_fin":       _p_fecha_fin.isoformat(),
-                    "medio_pago":      _p_medio_pago,
-                    "medio_id":        _medio_id,
-                    "medio_tipo":      _medio_tipo,
-                    "descripcion":     _p_desc.strip(),
-                    "activo":          True,
+                    "id":                    str(uuid.uuid4()),
+                    "nombre":                _p_nombre.strip(),
+                    "monto_prestamo":        float(_p_monto_pre),
+                    "monto_total":           float(_p_monto_tot) if _p_monto_tot > 0 else float(_p_monto_pre),
+                    "cta_desembolso":        _p_cta_desembolso,
+                    "cta_desembolso_id":     _p_ctas.get(_p_cta_desembolso, "principal"),
+                    "fecha_desembolso":      _p_fecha_desembolso.isoformat(),
+                    "cta_pago_bien":         _p_cta_pago_bien,
+                    "cta_pago_bien_id":      _p_ctas.get(_p_cta_pago_bien, "principal"),
+                    "fecha_compra":          _p_fecha_compra.isoformat(),
+                    "cuota":                 float(_p_cuota),
+                    "medio_pago":            _p_medio_pago,
+                    "medio_id":              _medio_id,
+                    "medio_tipo":            _medio_tipo,
+                    "fecha_primera_cuota":   _p_fecha_primera_cuota.isoformat(),
+                    "dia_cuota":             int(_p_dia_cuota),
+                    "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
+                    "descripcion":           _p_desc.strip(),
+                    "activo":                True,
                 })
                 guardar("simulaciones_prestamo")
                 st.success("✅ Simulación guardada.")
                 st.rerun()
             else:
-                st.warning("Completa nombre, monto y cuota.")
+                st.warning("Completa nombre, monto del préstamo y cuota.")
 
     # ── Lista de simulaciones guardadas ───────────────────────────
     _sims = st.session_state.get("simulaciones_prestamo", [])
@@ -1445,14 +1478,18 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
                 _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
                 _sc1.markdown(f"**{_sim['nombre']}**")
                 _sc1.caption(
-                    f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  |  "
-                    f"Costo total: S/ {_sim['monto_total']:,.0f}  |  "
+                    f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
+                    f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
+                )
+                _sc1.caption(
+                    f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
+                    f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
                     f"De tus ahorros: S/ {_gasto_propio:,.0f}"
                 )
                 _sc1.caption(
-                    f"Cuota: S/ {_sim['cuota']:,.0f}/mes  ·  "
+                    f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
                     f"{_sim['medio_pago']}  ·  "
-                    f"{_sim['fecha_inicio']} → {_sim['fecha_fin']}"
+                    f"{_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} → {_sim['fecha_fin']}"
                 )
                 if _sim.get("descripcion"):
                     _sc1.caption(f"📝 {_sim['descripcion']}")
@@ -1773,22 +1810,27 @@ def _add_to(series, fecha, monto):
 for _sim in st.session_state.get("simulaciones_prestamo", []):
     if not _sim.get("activo", True):
         continue
-    _f_ini_s = pd.to_datetime(_sim["fecha_inicio"])
-    _f_fin_s = pd.to_datetime(_sim["fecha_fin"])
+    _f_desembolso = pd.to_datetime(_sim.get("fecha_desembolso", _sim.get("fecha_inicio", hoy_peru)))
+    _f_compra     = pd.to_datetime(_sim.get("fecha_compra",     _sim.get("fecha_inicio", hoy_peru)))
+    _f_primera    = pd.to_datetime(_sim.get("fecha_primera_cuota", _sim.get("fecha_inicio", hoy_peru)))
+    _f_fin_s      = pd.to_datetime(_sim["fecha_fin"])
+    _dia_cuota_s  = int(_sim.get("dia_cuota", 5))
     _monto_pre_s  = float(_sim["monto_prestamo"])
     _monto_tot_s  = float(_sim.get("monto_total", _monto_pre_s))
-    _gasto_prop_s = max(0.0, _monto_tot_s - _monto_pre_s)
-    _cuota_s = float(_sim["cuota"])
+    _cuota_s      = float(_sim["cuota"])
 
-    # 1. Desembolso: el banco te da el préstamo (ingreso)
-    _add_to(_ing_prestamos, _f_ini_s, _monto_pre_s)
-    # 2. Gasto inicial del bien: monto total sale de tu cuenta
-    _add_to(_g_prestamos, _f_ini_s, _monto_tot_s)
-    # 3. Cuotas mensuales desde fecha_inicio hasta fecha_fin
-    _cur_s = _f_ini_s
+    # 1. Desembolso: el banco deposita el préstamo en tu cuenta (ingreso)
+    _add_to(_ing_prestamos, _f_desembolso, _monto_pre_s)
+    # 2. Pago del bien completo desde la cuenta seleccionada
+    _add_to(_g_prestamos, _f_compra, _monto_tot_s)
+    # 3. Cuotas mensuales: cada mes en el día indicado, desde primera hasta fin
+    _cur_s = _f_primera.replace(day=min(_dia_cuota_s, 28))
     while _cur_s <= _f_fin_s:
         _add_to(_g_prestamos, _cur_s, _cuota_s)
-        _cur_s = _cur_s + pd.DateOffset(months=1)
+        try:
+            _cur_s = (_cur_s + pd.DateOffset(months=1)).replace(day=min(_dia_cuota_s, 28))
+        except Exception:
+            _cur_s = _cur_s + pd.DateOffset(months=1)
 
 saldo = (
     ahorro_inicial
