@@ -1431,6 +1431,16 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
         with _fq4:
             _p_fecha_ultima_cuota = st.date_input("📅 Última cuota", value=hoy_peru, key="prestamo_fecha_fin")
 
+        st.markdown("**💥 Pago de cierre anticipado** *(opcional)*")
+        _fc1, _fc2 = st.columns(2)
+        with _fc1:
+            _p_monto_cierre = st.number_input(
+                "💰 Monto de cierre (S/)", min_value=0.0, step=1000.0,
+                help="Pago único que cancela el préstamo. Después de esta fecha no se generan más cuotas."
+            )
+        with _fc2:
+            _p_fecha_cierre = st.date_input("📅 Fecha de pago de cierre", value=hoy_peru, key="prestamo_fecha_cierre")
+
         if st.form_submit_button("💾 Guardar simulación", use_container_width=True, type="primary"):
             if _p_nombre.strip() and _p_monto_pre > 0 and _p_cuota > 0:
                 if _p_medio_pago.startswith("Tarjeta: "):
@@ -1459,6 +1469,8 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
                     "dia_cuota":             int(_p_dia_cuota),
                     "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
                     "descripcion":           _p_desc.strip(),
+                    "monto_cierre":          float(_p_monto_cierre) if _p_monto_cierre > 0 else 0.0,
+                    "fecha_cierre":          _p_fecha_cierre.isoformat() if _p_monto_cierre > 0 else None,
                     "activo":                True,
                 })
                 guardar("simulaciones_prestamo")
@@ -1493,6 +1505,11 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
                 )
                 if _sim.get("descripcion"):
                     _sc1.caption(f"📝 {_sim['descripcion']}")
+                if _sim.get("monto_cierre", 0) > 0:
+                    _sc1.caption(
+                        f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
+                        f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
+                    )
                 # Calcular cuotas totales y monto pagado/restante
                 _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
                 _f_ini = pd.to_datetime(_f_ini_ref)
@@ -1843,14 +1860,23 @@ for _sim in st.session_state.get("simulaciones_prestamo", []):
     _add_to(_get_or_create(_g_prestamos_cta, _cta_bien), _f_compra, _monto_tot_s)
 
     # 3. Cuotas mensuales → gasto desde cuenta/tarjeta seleccionada
-    _cta_cuota_id = _medio_cuota if _tipo_cuota == "cuenta" else "principal"
+    _cta_cuota_id  = _medio_cuota if _tipo_cuota == "cuenta" else "principal"
+    _monto_cierre  = float(_sim.get("monto_cierre", 0) or 0)
+    _fecha_cierre_s = pd.to_datetime(_sim["fecha_cierre"]) if _sim.get("fecha_cierre") and _monto_cierre > 0 else None
+    # Límite real: la cuota más temprana entre fecha_fin y fecha_cierre
+    _f_limite = min(_f_fin_s, _fecha_cierre_s) if _fecha_cierre_s else _f_fin_s
+
     _cur_s = _f_primera.replace(day=min(_dia_cuota_s, 28))
-    while _cur_s <= _f_fin_s:
+    while _cur_s <= _f_limite:
         _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _cur_s, _cuota_s)
         try:
             _cur_s = (_cur_s + pd.DateOffset(months=1)).replace(day=min(_dia_cuota_s, 28))
         except Exception:
             _cur_s = _cur_s + pd.DateOffset(months=1)
+
+    # Pago de cierre anticipado (si existe) en la misma cuenta de cuotas
+    if _fecha_cierre_s and _monto_cierre > 0:
+        _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _fecha_cierre_s, _monto_cierre)
 
 # Totales para cuenta principal
 _ing_prestamos_principal = _ing_prestamos_cta.get("principal", pd.Series(0.0, index=fechas))
