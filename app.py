@@ -2145,9 +2145,6 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
         _sf_cuota   = float(_sim_f["cuota"])
         _sf_cierre  = pd.to_datetime(_sim_f["fecha_cierre"]) if _sim_f.get("fecha_cierre") and _sim_f.get("monto_cierre", 0) > 0 else None
         _sf_limite  = min(_sf_fin, _sf_cierre) if _sf_cierre else _sf_fin
-        # Pago de cierre también aparece como fijo ese mes
-        if _sf_cierre and float(_sim_f.get("monto_cierre", 0)) > 0:
-            gastos_fijos_expandido.append({"fecha": _sf_cierre, "monto": float(_sim_f["monto_cierre"])})
         _cur_f = _sf_primera.replace(day=min(_sf_dia, 28))
         while _cur_f <= _sf_limite:
             gastos_fijos_expandido.append({"fecha": _cur_f, "monto": _sf_cuota})
