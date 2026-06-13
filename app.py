@@ -1953,19 +1953,31 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     with ctrl_col3:
         mostrar_secundarias = st.toggle("Mostrar cuentas secundarias", value=True, key="tog_sec")
 
-    # ── Sliders de rango Y ─────────────────────────────────────
-    # Y1: máximo = 5x el saldo máximo observado, mínimo 200k, redondeado a 50k
-    _max_saldo_data = max(int(serie_cuenta_principal.max()), int(serie_ahorro_total.max()), 50000)
-    _max_saldo = max(((_max_saldo_data * 5) // 50000 + 1) * 50000, 500000)
-    _sl_col1, _sl_col2 = st.columns([1, 1])
+    # ── Rango Y: auto-calculado + inputs numéricos ───────────────
+    # Máximo por defecto = múltiplo de 10k por encima del máximo en el horizonte visible
+    _mask_3m = (fechas >= fechas.min()) & (fechas <= min(fechas.min() + pd.DateOffset(months=horizonte_meses), fechas.max()))
+    _max_en_horizonte = max(
+        int(serie_ahorro_total[_mask_3m].max()) if _mask_3m.any() else 0,
+        int(serie_cuenta_principal[_mask_3m].max()) if _mask_3m.any() else 0,
+        10000
+    )
+    # Redondear al siguiente múltiplo de 10k
+    _y_max_auto = ((_max_en_horizonte // 10000) + 1) * 10000
+
+    _sl_col1, _sl_col2 = st.columns(2)
     with _sl_col1:
-        rango_y1 = st.slider(
-            "Rango eje Y — Saldo (S/)",
-            min_value=0, max_value=_max_saldo,
-            value=(0, min(int(_max_saldo_data * 1.4 // 10000 + 1) * 10000, _max_saldo)),
-            step=10000, format="%,d",
-            key="slider_y1"
+        _y_min = st.number_input(
+            "Eje Y — mínimo (S/)",
+            min_value=0, value=0, step=5000,
+            key="y1_min"
         )
+    with _sl_col2:
+        _y_max = st.number_input(
+            "Eje Y — máximo (S/)",
+            min_value=1000, value=_y_max_auto, step=10000,
+            key="y1_max"
+        )
+    rango_y1 = (_y_min, max(_y_max, _y_min + 10000))
 
 
     fecha_x_inicio = fechas.min()
