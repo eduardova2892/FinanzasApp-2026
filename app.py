@@ -1791,15 +1791,15 @@ for _r in st.session_state.get("gastos_reembolsables", []):
             if _fe is not None:
                 _g_remb.loc[_fe] -= _monto_pen_r   # resta negativa = suma
 
-# ── Simulaciones de préstamo activas ──────────────────────────
-_g_prestamos = pd.Series(0.0, index=fechas)
-_ing_prestamos = pd.Series(0.0, index=fechas)
+# ── Simulaciones de préstamo activas (por cuenta) ─────────────
+# Cada operación se registra en la cuenta correcta:
+#   _ing_prestamos_cta[cta_id]  → ingreso del préstamo en esa cuenta
+#   _g_prestamos_cta[cta_id]    → pago del bien + cuotas desde esa cuenta
 
 def _add_to(series, fecha, monto):
     f = pd.Timestamp(fecha)
     if len(series.index) == 0:
         return
-    # Skip dates outside the simulation range
     if f < series.index[0] or f > series.index[-1]:
         return
     if f in series.index:
@@ -1807,6 +1807,14 @@ def _add_to(series, fecha, monto):
     else:
         _idx = int((series.index.astype("int64") - f.value).abs().argmin())
         series.iloc[_idx] += monto
+
+def _get_or_create(dct, key):
+    if key not in dct:
+        dct[key] = pd.Series(0.0, index=fechas)
+    return dct[key]
+
+_ing_prestamos_cta = {}  # cta_id -> Series
+_g_prestamos_cta   = {}  # cta_id -> Series
 
 for _sim in st.session_state.get("simulaciones_prestamo", []):
     if not _sim.get("activo", True):
@@ -1820,29 +1828,44 @@ for _sim in st.session_state.get("simulaciones_prestamo", []):
     _monto_tot_s  = float(_sim.get("monto_total", _monto_pre_s))
     _cuota_s      = float(_sim["cuota"])
 
-    # 1. Desembolso: el banco deposita el préstamo en tu cuenta (ingreso)
-    _add_to(_ing_prestamos, _f_desembolso, _monto_pre_s)
-    # 2. Pago del bien completo desde la cuenta seleccionada
-    _add_to(_g_prestamos, _f_compra, _monto_tot_s)
-    # 3. Cuotas mensuales: cada mes en el día indicado, desde primera hasta fin
+    # Cuenta que RECIBE el préstamo
+    _cta_desembolso = _sim.get("cta_desembolso_id", "principal") or "principal"
+    # Cuenta que PAGA el bien
+    _cta_bien = _sim.get("cta_pago_bien_id", "principal") or "principal"
+    # Cuenta/tarjeta que PAGA las cuotas
+    _medio_cuota = _sim.get("medio_id", "principal") or "principal"
+    _tipo_cuota  = _sim.get("medio_tipo", "cuenta")
+
+    # 1. Desembolso → ingreso en la cuenta seleccionada
+    _add_to(_get_or_create(_ing_prestamos_cta, _cta_desembolso), _f_desembolso, _monto_pre_s)
+
+    # 2. Pago del bien → gasto desde la cuenta seleccionada
+    _add_to(_get_or_create(_g_prestamos_cta, _cta_bien), _f_compra, _monto_tot_s)
+
+    # 3. Cuotas mensuales → gasto desde cuenta/tarjeta seleccionada
+    _cta_cuota_id = _medio_cuota if _tipo_cuota == "cuenta" else "principal"
     _cur_s = _f_primera.replace(day=min(_dia_cuota_s, 28))
     while _cur_s <= _f_fin_s:
-        _add_to(_g_prestamos, _cur_s, _cuota_s)
+        _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _cur_s, _cuota_s)
         try:
             _cur_s = (_cur_s + pd.DateOffset(months=1)).replace(day=min(_dia_cuota_s, 28))
         except Exception:
             _cur_s = _cur_s + pd.DateOffset(months=1)
 
+# Totales para cuenta principal
+_ing_prestamos_principal = _ing_prestamos_cta.get("principal", pd.Series(0.0, index=fechas))
+_g_prestamos_principal   = _g_prestamos_cta.get("principal",   pd.Series(0.0, index=fechas))
+
 saldo = (
     ahorro_inicial
     + ing_rec.cumsum()
     + ing_punt.cumsum()
-    + _ing_prestamos.cumsum()
+    + _ing_prestamos_principal.cumsum()
     - g_diarios_principal.cumsum()
     - g_fijos.cumsum()
     - egresos_tarjeta.cumsum()
     - _g_remb.cumsum()
-    - _g_prestamos.cumsum()
+    - _g_prestamos_principal.cumsum()
 )
 
 
@@ -1921,6 +1944,12 @@ for cuenta in st.session_state["cuentas_ahorro"]:
     # Reembolsos recibidos en esta cuenta secundaria
     if cuenta["id"] in ing_punt_sec:
         serie_sec = serie_sec + ing_punt_sec[cuenta["id"]].cumsum()
+
+    # Préstamos: desembolso recibido y pagos del bien/cuotas desde esta cuenta
+    if cuenta["id"] in _ing_prestamos_cta:
+        serie_sec = serie_sec + _ing_prestamos_cta[cuenta["id"]].cumsum()
+    if cuenta["id"] in _g_prestamos_cta:
+        serie_sec = serie_sec - _g_prestamos_cta[cuenta["id"]].cumsum()
     # Interés diario por TEA
     tea = float(cuenta.get("tea", 0.0))
     aplica_interes_diario = bool(cuenta.get("aplica_interes_diario", False))
