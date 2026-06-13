@@ -1494,7 +1494,8 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
                 if _sim.get("descripcion"):
                     _sc1.caption(f"📝 {_sim['descripcion']}")
                 # Calcular cuotas totales y monto pagado/restante
-                _f_ini = pd.to_datetime(_sim["fecha_inicio"])
+                _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
+                _f_ini = pd.to_datetime(_f_ini_ref)
                 _f_fin = pd.to_datetime(_sim["fecha_fin"])
                 _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
                 _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
