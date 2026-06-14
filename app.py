@@ -2245,13 +2245,21 @@ with st.expander("📊 4. Gráficos y resultados", expanded=True):
     # ── Controles del gráfico ──────────────────────────────────
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
     with ctrl_col1:
+        _opciones_h = [3, 6, 9, 12, 18, 24, 36, 48, 60]
+        _labels_h   = {3:"3 meses", 6:"6 meses", 9:"9 meses", 12:"1 año",
+                       18:"1.5 años", 24:"2 años", 36:"3 años", 48:"4 años", 60:"5 años"}
         horizonte_meses = st.selectbox(
             "Horizonte",
-            [3, 6, 9, 12],
+            _opciones_h,
             index=0,
-            format_func=lambda x: f"{x} meses",
+            format_func=lambda x: _labels_h[x],
             key="horizonte_evol"
         )
+        # Warn if horizon exceeds simulation range
+        _h_max_date = fechas.min() + pd.DateOffset(months=horizonte_meses)
+        if _h_max_date > fechas.max():
+            st.caption(f"⚠️ Tu simulación llega hasta {fechas.max().strftime('%d/%m/%Y')}. "
+                       f"Extiende la **Fecha fin** en Configuración para ver más.")
     with ctrl_col2:
         mostrar_ahorro_total = st.toggle("Mostrar ahorro total", value=True, key="tog_total")
     with ctrl_col3:
