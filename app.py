@@ -7,7 +7,29 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import date, timedelta
+from pathlib import Path
 import uuid
+
+def leer_tipo_cambio_usd_pen(path="data/exchange_rate_usd_pen.csv"):
+    """Lee el tipo de cambio USD/PEN generado por el DAG de Airflow."""
+    p = Path(path)
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_csv(p)
+        if df.empty or "usd_pen" not in df.columns:
+            return None
+        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+        df = df.dropna(subset=["fecha"]).sort_values("fecha")
+        latest = df.iloc[-1]
+        return {
+            "fecha":           latest["fecha"].date(),
+            "usd_pen":         float(latest["usd_pen"]),
+            "fuente":          str(latest.get("fuente", "No especificada")),
+            "updated_at_lima": str(latest.get("updated_at_lima", "")),
+        }
+    except Exception:
+        return None
 
 # ==================================================
 # CONFIGURACIÓN GENERAL
@@ -306,11 +328,21 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
             value=float(conf.get("ahorro_inicial", 0.0))
         )
     with col_cp3:
+        _tc_airflow = leer_tipo_cambio_usd_pen()
+        if _tc_airflow:
+            st.metric(
+                "💱 TC en tiempo real (Airflow)",
+                f"S/ {_tc_airflow['usd_pen']:.4f}",
+                help=f"Fuente: {_tc_airflow['fuente']} | {_tc_airflow['updated_at_lima']}"
+            )
+            _tc_val_default = _tc_airflow["usd_pen"]
+        else:
+            _tc_val_default = float(conf.get("tipo_cambio_default", 3.85))
         tipo_cambio_default = st.number_input(
-            "TC USD → PEN (defecto)",
+            "TC USD → PEN (defecto/manual)",
             min_value=1.0, step=0.01,
-            value=float(conf.get("tipo_cambio_default", 3.85)),
-            help="Tipo de cambio que se usa si no se registra uno específico para el mes"
+            value=round(_tc_val_default, 4),
+            help="Se auto-rellena desde Airflow si hay datos. Puedes ajustarlo manualmente."
         )
 
     st.session_state["configuracion"] = {
@@ -1739,7 +1771,12 @@ for _p in st.session_state.get("pagos_tarjeta", []):
     if _key_old not in _tc_lookup:
         _tc_lookup[_key_old] = float(_p.get("tipo_de_cambio", 3.85))
 
-_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+# Tipo de cambio default: Airflow tiene prioridad, luego configuración manual
+_tc_airflow_runtime = leer_tipo_cambio_usd_pen()
+if _tc_airflow_runtime:
+    _tc_default = _tc_airflow_runtime["usd_pen"]
+else:
+    _tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
 
 # egresos por cuenta: dict cuenta_id -> Series
 egresos_tarjeta_por_cuenta = {}
