@@ -157,6 +157,72 @@ def obtener_tipo_cambio_default_airflow(fuente_preferida=None):
 
     return fuentes_tc[fuente_default]
 
+
+def leer_precio_actual_voo_airflow():
+    """
+    Lee el último precio actual de VOO si ya existe un CSV generado por Airflow.
+    Esta función queda lista para el Paso 2. Si el archivo todavía no existe,
+    la sección de inversiones permite ingresar el precio actual manualmente.
+    """
+    posibles_archivos = [
+        Path("data/market_prices_voo.csv"),
+        Path("data/market_price_voo.csv"),
+        Path("data/portfolio_valuation_voo.csv"),
+    ]
+
+    for p in posibles_archivos:
+        if not p.exists():
+            continue
+
+        try:
+            df = pd.read_csv(p)
+            if df.empty:
+                continue
+
+            df.columns = [str(c).strip().lower() for c in df.columns]
+
+            if "ticker" in df.columns:
+                df["ticker"] = df["ticker"].astype(str).str.upper().str.strip()
+                df = df[df["ticker"] == "VOO"].copy()
+
+            if df.empty:
+                continue
+
+            if "fecha" in df.columns:
+                df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+                df = df.sort_values("fecha")
+
+            latest = df.iloc[-1]
+
+            precio = None
+            for col in ["precio_actual_usd", "close", "last", "precio_usd"]:
+                if col in df.columns:
+                    precio = _parse_float_tc(latest.get(col))
+                    if precio is not None:
+                        break
+
+            if precio is None or precio <= 0:
+                continue
+
+            fecha_val = None
+            if "fecha" in df.columns and not pd.isna(latest.get("fecha")):
+                fecha_val = latest["fecha"].date()
+
+            return {
+                "ticker": "VOO",
+                "precio_actual_usd": float(precio),
+                "fecha": fecha_val,
+                "fuente_precio": str(latest.get("fuente_precio", latest.get("fuente", "Airflow"))),
+                "updated_at_lima": str(latest.get("updated_at_lima", "")),
+                "archivo": str(p),
+            }
+
+        except Exception:
+            continue
+
+    return None
+
+
 # ==================================================
 # CONFIGURACIÓN GENERAL
 # ==================================================
@@ -298,6 +364,7 @@ defaults = {
 "tipos_cambio": [],
 "gastos_reembolsables": [],
 "simulaciones_prestamo": [],
+"inversiones_ibkr": [],
 }
 
 for k, v in defaults.items():
@@ -320,6 +387,7 @@ claves = [
     "tipos_cambio",
     "gastos_reembolsables",
     "simulaciones_prestamo",
+    "inversiones_ibkr",
 ]
 for clave in claves:
     cargar(clave)
@@ -1764,6 +1832,251 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
                         st.rerun()
     else:
         st.info("No hay simulaciones de préstamo guardadas.")
+
+
+# ==================================================
+# 3.5 INVERSIONES IBKR
+# ==================================================
+with st.expander("📈 3.5 Inversiones IBKR", expanded=False):
+    st.caption(
+        "Registra tus compras de VOO en IBKR. La app guarda fecha, cantidad y monto invertido; "
+        "con eso calcula costo promedio, valor actual y ganancia/pérdida."
+    )
+
+    _tc_inv = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
+
+    with st.form("form_inversion_ibkr_voo", clear_on_submit=True):
+        st.markdown("#### ➕ Registrar compra de VOO")
+
+        _iv1, _iv2 = st.columns(2)
+        with _iv1:
+            _inv_fecha = st.date_input(
+                "📅 Fecha de compra",
+                value=hoy_peru,
+                key="fecha_compra_voo_ibkr"
+            )
+            _inv_ticker = st.selectbox(
+                "Ticker",
+                ["VOO"],
+                key="ticker_compra_ibkr"
+            )
+            _inv_broker = st.selectbox(
+                "Broker",
+                ["IBKR"],
+                key="broker_compra_ibkr"
+            )
+
+        with _iv2:
+            _inv_cantidad = st.number_input(
+                "Cantidad de acciones",
+                min_value=0.0,
+                step=0.0001,
+                format="%.4f",
+                key="cantidad_compra_voo_ibkr"
+            )
+            _inv_monto_usd = st.number_input(
+                "Monto invertido total (USD)",
+                min_value=0.0,
+                step=10.0,
+                format="%.2f",
+                key="monto_compra_voo_ibkr"
+            )
+
+        if st.form_submit_button("➕ Registrar compra VOO", use_container_width=True, type="primary"):
+            if _inv_cantidad <= 0 or _inv_monto_usd <= 0:
+                st.warning("Debes ingresar una cantidad de acciones y un monto invertido mayor a cero.")
+            else:
+                _precio_promedio = _inv_monto_usd / _inv_cantidad
+
+                st.session_state["inversiones_ibkr"].append({
+                    "id": str(uuid.uuid4()),
+                    "fecha_compra": _inv_fecha.isoformat(),
+                    "ticker": _inv_ticker,
+                    "nombre": "Vanguard S&P 500 ETF",
+                    "broker": _inv_broker,
+                    "cantidad": float(_inv_cantidad),
+                    "monto_invertido_usd": float(_inv_monto_usd),
+                    "precio_promedio_compra_usd": float(_precio_promedio),
+                    "moneda": "USD",
+                })
+
+                guardar("inversiones_ibkr")
+                st.success("✅ Compra de VOO registrada correctamente.")
+                st.rerun()
+
+    _df_inv = pd.DataFrame(st.session_state.get("inversiones_ibkr", []))
+
+    if not _df_inv.empty:
+        # Normalizar columnas para registros antiguos o filas editadas.
+        for _col, _default in {
+            "id": "",
+            "fecha_compra": hoy_peru.isoformat(),
+            "ticker": "VOO",
+            "nombre": "Vanguard S&P 500 ETF",
+            "broker": "IBKR",
+            "cantidad": 0.0,
+            "monto_invertido_usd": 0.0,
+            "precio_promedio_compra_usd": 0.0,
+            "moneda": "USD",
+        }.items():
+            if _col not in _df_inv.columns:
+                _df_inv[_col] = _default
+
+        _df_inv["id"] = _df_inv["id"].apply(
+            lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+        )
+        _df_inv["fecha_compra"] = pd.to_datetime(_df_inv["fecha_compra"], errors="coerce").dt.date
+        _df_inv["ticker"] = _df_inv["ticker"].fillna("VOO").astype(str).str.upper().str.strip()
+        _df_inv["nombre"] = _df_inv["nombre"].fillna("Vanguard S&P 500 ETF").astype(str)
+        _df_inv["broker"] = _df_inv["broker"].fillna("IBKR").astype(str)
+        _df_inv["moneda"] = _df_inv["moneda"].fillna("USD").astype(str)
+        _df_inv["cantidad"] = pd.to_numeric(_df_inv["cantidad"], errors="coerce").fillna(0.0)
+        _df_inv["monto_invertido_usd"] = pd.to_numeric(_df_inv["monto_invertido_usd"], errors="coerce").fillna(0.0)
+
+        _df_inv["precio_promedio_compra_usd"] = _df_inv.apply(
+            lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
+            axis=1
+        )
+
+        _df_inv = _df_inv.sort_values("fecha_compra", ascending=False).reset_index(drop=True)
+
+        st.markdown("#### 📋 Compras registradas")
+        st.caption("Puedes editar cantidad o monto; el precio promedio se recalcula automáticamente al guardar.")
+        _df_inv_show = _df_inv.copy()
+        _df_inv_show["Eliminar"] = False
+
+        _ed_inv = st.data_editor(
+            _df_inv_show,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            height=min(38 * len(_df_inv_show) + 46, 320),
+            column_config={
+                "id": None,
+                "fecha_compra": st.column_config.DateColumn("📅 Fecha compra", required=True, width="small"),
+                "ticker": st.column_config.SelectboxColumn("Ticker", options=["VOO"], required=True, width="small"),
+                "nombre": st.column_config.TextColumn("Nombre", disabled=True, width="medium"),
+                "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], required=True, width="small"),
+                "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
+                "monto_invertido_usd": st.column_config.NumberColumn("Invertido USD", min_value=0.0, step=10.0, format="US$ %.2f", width="small"),
+                "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio promedio USD", disabled=True, format="US$ %.2f", width="small"),
+                "moneda": st.column_config.TextColumn("Moneda", disabled=True, width="small"),
+                "Eliminar": st.column_config.CheckboxColumn("🗑"),
+            },
+            key="editor_inversiones_ibkr"
+        )
+
+        if st.button("💾 Guardar cambios — Inversiones IBKR", type="primary"):
+            _df_save = _ed_inv.copy()
+            _df_save = _df_save[_df_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+
+            if not _df_save.empty:
+                _df_save["id"] = _df_save["id"].apply(
+                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                )
+                _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
+                _df_save["ticker"] = _df_save["ticker"].fillna("VOO").astype(str).str.upper().str.strip()
+                _df_save["nombre"] = "Vanguard S&P 500 ETF"
+                _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
+                _df_save["moneda"] = "USD"
+                _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
+                _df_save["monto_invertido_usd"] = pd.to_numeric(
+                    _df_save["monto_invertido_usd"], errors="coerce"
+                ).fillna(0.0)
+                _df_save["precio_promedio_compra_usd"] = _df_save.apply(
+                    lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
+                    axis=1
+                )
+
+                _df_save = _df_save.dropna(subset=["fecha_compra"])
+                _df_save = _df_save[
+                    (_df_save["cantidad"] > 0) &
+                    (_df_save["monto_invertido_usd"] > 0)
+                ].copy()
+
+                st.session_state["inversiones_ibkr"] = _df_save.sort_values(
+                    "fecha_compra", ascending=False
+                ).to_dict("records")
+            else:
+                st.session_state["inversiones_ibkr"] = []
+
+            guardar("inversiones_ibkr")
+            st.success("✅ Inversiones actualizadas.")
+            st.rerun()
+
+        _df_voo = _df_inv[_df_inv["ticker"] == "VOO"].copy()
+
+        if not _df_voo.empty:
+            _cantidad_total = float(_df_voo["cantidad"].sum())
+            _invertido_total_usd = float(_df_voo["monto_invertido_usd"].sum())
+            _precio_promedio_total = (
+                _invertido_total_usd / _cantidad_total
+                if _cantidad_total > 0
+                else 0.0
+            )
+
+            st.markdown("#### 📊 Resumen VOO")
+
+            _precio_airflow = leer_precio_actual_voo_airflow()
+            _precio_actual_default = (
+                float(_precio_airflow["precio_actual_usd"])
+                if _precio_airflow is not None
+                else 0.0
+            )
+
+            _r1, _r2, _r3, _r4 = st.columns(4)
+            _r1.metric("Cantidad total", f"{_cantidad_total:,.4f}")
+            _r2.metric("Invertido total", f"US$ {_invertido_total_usd:,.2f}")
+            _r3.metric("Precio promedio", f"US$ {_precio_promedio_total:,.2f}")
+            _r4.metric("Invertido en soles", f"S/ {_invertido_total_usd * _tc_inv:,.0f}")
+
+            if _precio_airflow is not None:
+                st.caption(
+                    f"Precio actual sugerido desde Airflow: US$ {_precio_actual_default:,.2f} "
+                    f"| Fuente: {_precio_airflow['fuente_precio']} "
+                    f"| Fecha: {_precio_airflow['fecha']} "
+                    f"| Archivo: {_precio_airflow['archivo']}"
+                )
+            else:
+                st.info(
+                    "Todavía no existe un CSV de precio actual de VOO generado por Airflow. "
+                    "Por ahora puedes ingresar un precio manual para ver la ganancia estimada."
+                )
+
+            _precio_actual_voo = st.number_input(
+                "Precio actual VOO (USD) para estimar ganancia",
+                min_value=0.0,
+                value=float(_precio_actual_default),
+                step=1.0,
+                format="%.2f",
+                key="precio_actual_voo_manual"
+            )
+
+            if _precio_actual_voo > 0 and _cantidad_total > 0:
+                _valor_actual_usd = _cantidad_total * _precio_actual_voo
+                _ganancia_usd = _valor_actual_usd - _invertido_total_usd
+                _rendimiento_pct = (
+                    (_ganancia_usd / _invertido_total_usd) * 100
+                    if _invertido_total_usd > 0
+                    else 0.0
+                )
+                _valor_actual_pen = _valor_actual_usd * _tc_inv
+                _ganancia_pen = _ganancia_usd * _tc_inv
+
+                _m1, _m2, _m3, _m4 = st.columns(4)
+                _m1.metric("Valor actual USD", f"US$ {_valor_actual_usd:,.2f}")
+                _m2.metric("Ganancia/Pérdida USD", f"US$ {_ganancia_usd:,.2f}")
+                _m3.metric("Rendimiento", f"{_rendimiento_pct:,.2f}%")
+                _m4.metric("Valor actual PEN", f"S/ {_valor_actual_pen:,.0f}")
+
+                st.caption(
+                    f"Ganancia/Pérdida estimada en soles: S/ {_ganancia_pen:,.0f} "
+                    f"usando TC {_tc_inv:.4f}."
+                )
+
+    else:
+        st.info("Aún no hay compras de VOO registradas en IBKR.")
+
 
 # ==================================================
 # 4. CÁLCULOS BASE
