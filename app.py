@@ -9,7 +9,6 @@ from plotly.subplots import make_subplots
 from datetime import date, timedelta
 from pathlib import Path
 import uuid
-import requests
 
 def _parse_float_tc(value):
     """Convierte valores numéricos de tipo de cambio aunque vengan como texto con coma decimal."""
@@ -402,210 +401,6 @@ def obtener_source_symbol_ibkr(ticker, catalogo_df=None):
     return ticker
 
 
-def inferir_tipo_instrumento_ibkr(ticker, nombre=""):
-    """Inferencia ligera para tickers nuevos. No afecta cálculos; solo ordena el catálogo."""
-    ticker = str(ticker or "").upper().strip()
-    nombre_u = str(nombre or "").upper()
-    etfs_comunes = {
-        "VOO", "QQQ", "QQQM", "SPY", "IVV", "VTI", "SCHD", "GLD",
-        "SLV", "DIA", "IWM", "COPX", "XLK", "XLF", "XLE", "XLV"
-    }
-
-    if ticker in etfs_comunes or "ETF" in nombre_u or "TRUST" in nombre_u or "FUND" in nombre_u:
-        return "ETF"
-
-    if ticker.endswith("Y") and len(ticker) >= 5:
-        return "ADR"
-
-    return "Accion"
-
-
-def sincronizar_catalogo_desde_compras_ibkr(compras, catalogo_df=None):
-    """
-    Asegura automáticamente que todo ticker comprado exista en data/ibkr_instruments.csv.
-    Así una compra nueva queda lista para que Airflow la tome en la siguiente corrida,
-    sin editar manualmente el catálogo.
-    """
-    if compras is None:
-        return cargar_catalogo_ibkr(), []
-
-    df_compras = pd.DataFrame(compras)
-    if df_compras.empty or "ticker" not in df_compras.columns:
-        return cargar_catalogo_ibkr(), []
-
-    if catalogo_df is None or catalogo_df.empty:
-        catalogo_df = cargar_catalogo_ibkr()
-
-    catalogo_df = normalizar_catalogo_ibkr(catalogo_df)
-    tickers_catalogo = set(catalogo_df["ticker"].astype(str).str.upper().str.strip())
-    agregados = []
-
-    df_compras["ticker"] = df_compras["ticker"].fillna("").astype(str).str.upper().str.strip()
-    df_compras = df_compras[df_compras["ticker"] != ""].copy()
-
-    for ticker in sorted(df_compras["ticker"].unique()):
-        if ticker in tickers_catalogo:
-            continue
-
-        fila = df_compras[df_compras["ticker"] == ticker].iloc[-1]
-        nombre = str(fila.get("nombre", "")).strip()
-        if nombre in ["", "None", "nan"]:
-            nombre = ticker
-
-        tipo = inferir_tipo_instrumento_ibkr(ticker, nombre)
-        moneda = str(fila.get("moneda", "USD") or "USD").upper().strip()
-
-        catalogo_df = upsert_instrumento_ibkr(
-            ticker=ticker,
-            nombre=nombre,
-            tipo=tipo,
-            moneda=moneda,
-            source_symbol=ticker,
-            fuente_precio="Yahoo Finance",
-            activo=True,
-        )
-        tickers_catalogo.add(ticker)
-        agregados.append(ticker)
-
-    return cargar_catalogo_ibkr(), agregados
-
-
-@st.cache_data(ttl=900, show_spinner=False)
-def consultar_precio_yahoo_ibkr(source_symbol):
-    """Consulta Yahoo Finance directamente desde Streamlit como fallback cuando Airflow aún no tiene el ticker."""
-    source_symbol = str(source_symbol or "").strip()
-    if not source_symbol:
-        return None
-
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{source_symbol}"
-        response = requests.get(
-            url,
-            params={"range": "5d", "interval": "1d"},
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0"},
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        result = data.get("chart", {}).get("result", [])
-        if not result:
-            return None
-
-        result0 = result[0]
-        meta = result0.get("meta", {})
-        indicators = result0.get("indicators", {})
-        quotes = indicators.get("quote", [])
-
-        precio = _parse_float_tc(meta.get("regularMarketPrice"))
-        if precio is None and quotes:
-            closes = quotes[0].get("close", [])
-            closes_validos = [c for c in closes if c is not None]
-            if closes_validos:
-                precio = _parse_float_tc(closes_validos[-1])
-
-        if precio is None or precio <= 0:
-            return None
-
-        market_time = meta.get("regularMarketTime")
-        if market_time:
-            dt_lima = pd.to_datetime(int(market_time), unit="s", utc=True).tz_convert("America/Lima")
-        else:
-            timestamps = result0.get("timestamp", [])
-            if timestamps:
-                dt_lima = pd.to_datetime(int(timestamps[-1]), unit="s", utc=True).tz_convert("America/Lima")
-            else:
-                dt_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
-
-        return {
-            "precio_actual_usd": float(precio),
-            "fecha_precio": dt_lima.date().isoformat(),
-            "hora_precio": dt_lima.strftime("%H:%M:%S"),
-            "moneda_precio": meta.get("currency", "USD"),
-            "exchange": meta.get("exchangeName", ""),
-        }
-
-    except Exception:
-        return None
-
-
-def completar_precios_faltantes_con_yahoo(df_precios, tickers_comprados, catalogo_df):
-    """
-    Si Airflow todavía no trajo un ticker nuevo, la app intenta consultar Yahoo Finance
-    en vivo y usa ese precio como fallback visual. Airflow sigue siendo la fuente primaria.
-    """
-    if tickers_comprados is None:
-        return df_precios, []
-
-    tickers = sorted({str(t or "").upper().strip() for t in tickers_comprados if str(t or "").strip()})
-    if not tickers:
-        return df_precios, []
-
-    if df_precios is None or df_precios.empty:
-        df_base = pd.DataFrame()
-        tickers_con_precio = set()
-    else:
-        df_base = df_precios.copy()
-        df_base["ticker"] = df_base["ticker"].astype(str).str.upper().str.strip()
-        tickers_con_precio = set(df_base["ticker"].dropna().astype(str))
-
-    if catalogo_df is None or catalogo_df.empty:
-        catalogo_df = cargar_catalogo_ibkr()
-
-    catalogo_df = normalizar_catalogo_ibkr(catalogo_df)
-    filas_fallback = []
-    tickers_fallback = []
-    now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
-
-    for ticker in tickers:
-        if ticker in tickers_con_precio:
-            continue
-
-        match = catalogo_df[catalogo_df["ticker"].astype(str).str.upper().str.strip() == ticker]
-        if match.empty:
-            nombre = ticker
-            tipo = inferir_tipo_instrumento_ibkr(ticker, nombre)
-            moneda = "USD"
-            source_symbol = ticker
-        else:
-            row = match.iloc[0]
-            nombre = str(row.get("nombre", ticker)).strip() or ticker
-            tipo = str(row.get("tipo", inferir_tipo_instrumento_ibkr(ticker, nombre))).strip()
-            moneda = str(row.get("moneda", "USD")).upper().strip()
-            source_symbol = str(row.get("source_symbol", ticker)).strip() or ticker
-
-        info = consultar_precio_yahoo_ibkr(source_symbol)
-        if info is None:
-            continue
-
-        filas_fallback.append({
-            "fecha": pd.Timestamp.now(tz=ZoneInfo("America/Lima")).date().isoformat(),
-            "ticker": ticker,
-            "nombre": nombre,
-            "tipo": tipo,
-            "moneda": moneda,
-            "source_symbol": source_symbol,
-            "precio_actual_usd": info["precio_actual_usd"],
-            "fecha_precio": info["fecha_precio"],
-            "hora_precio": info["hora_precio"],
-            "moneda_precio": info["moneda_precio"],
-            "exchange": info["exchange"],
-            "fuente_precio": "Yahoo Finance (fallback app)",
-            "updated_at_lima": now_lima,
-            "archivo": "consulta directa desde app.py",
-        })
-        tickers_fallback.append(ticker)
-
-    if filas_fallback:
-        df_fallback = pd.DataFrame(filas_fallback)
-        if df_base.empty:
-            df_base = df_fallback
-        else:
-            df_base = pd.concat([df_base, df_fallback], ignore_index=True)
-
-    return df_base, tickers_fallback
-
-
 
 # ==================================================
 # CONFIGURACIÓN GENERAL
@@ -749,7 +544,6 @@ defaults = {
 "gastos_reembolsables": [],
 "simulaciones_prestamo": [],
 "inversiones_ibkr": [],
-"ibkr_cash_movimientos": [],
 }
 
 for k, v in defaults.items():
@@ -773,7 +567,6 @@ claves = [
     "gastos_reembolsables",
     "simulaciones_prestamo",
     "inversiones_ibkr",
-    "ibkr_cash_movimientos",
 ]
 for clave in claves:
     cargar(clave)
@@ -2050,936 +1843,682 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
 
 # ==================================================
-# 3.4 FUNCIONES AVANZADAS
+# 3.4 SIMULACIÓN DE PRÉSTAMOS
 # ==================================================
-with st.expander("🧩 3.4 Funciones avanzadas", expanded=False):
-    st.caption("Módulos complementarios: simulación de préstamos y seguimiento del portafolio IBKR.")
+with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
+    st.caption("Simula el impacto de un préstamo en tus ahorros. Puedes guardar la simulación y activar/desactivar su efecto en los gráficos.")
 
-    # ==================================================
-    # 3.4 SIMULACIÓN DE PRÉSTAMOS
-    # ==================================================
-    with st.expander("🏦 Simulación de préstamos", expanded=False):
-        st.caption("Simula el impacto de un préstamo en tus ahorros. Puedes guardar la simulación y activar/desactivar su efecto en los gráficos.")
+    # ── Mapas de cuentas y tarjetas ──────────────────────────────
+    _p_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+    _p_ctas = {_p_ncp: "principal"}
+    for _pc in st.session_state["cuentas_ahorro"]:
+        _p_ctas[_pc["nombre"]] = _pc["id"]
+    _p_tarjs = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+    _p_medios = list(_p_ctas.keys()) + [f"Tarjeta: {n}" for n in _p_tarjs.keys()]
 
-        # ── Mapas de cuentas y tarjetas ──────────────────────────────
-        _p_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-        _p_ctas = {_p_ncp: "principal"}
-        for _pc in st.session_state["cuentas_ahorro"]:
-            _p_ctas[_pc["nombre"]] = _pc["id"]
-        _p_tarjs = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
-        _p_medios = list(_p_ctas.keys()) + [f"Tarjeta: {n}" for n in _p_tarjs.keys()]
+    # ── Formulario nueva simulación ───────────────────────────────
+    with st.form("form_prestamo", clear_on_submit=True):
+        st.markdown("#### ➕ Nueva simulación")
 
-        # ── Formulario nueva simulación ───────────────────────────────
-        with st.form("form_prestamo", clear_on_submit=True):
-            st.markdown("#### ➕ Nueva simulación")
+        st.markdown("**🏦 Préstamo**")
+        _fp1, _fp2 = st.columns(2)
+        with _fp1:
+            _p_nombre    = st.text_input("📝 Nombre", placeholder="ej: Préstamo vehículo")
+            _p_monto_pre = st.number_input("💰 Monto del préstamo (S/)", min_value=0.0, step=1000.0)
+            _p_cta_desembolso = st.selectbox(
+                "🏦 Cuenta que recibe el préstamo",
+                list(_p_ctas.keys()), key="prestamo_cta_desembolso"
+            )
+        with _fp2:
+            _p_fecha_desembolso = st.date_input("📅 Fecha de desembolso", value=hoy_peru, key="prestamo_fecha_desembolso")
+            _p_desc = st.text_area("📝 Notas", placeholder="Condiciones, banco, tasa, etc.", height=80)
 
-            st.markdown("**🏦 Préstamo**")
-            _fp1, _fp2 = st.columns(2)
-            with _fp1:
-                _p_nombre    = st.text_input("📝 Nombre", placeholder="ej: Préstamo vehículo")
-                _p_monto_pre = st.number_input("💰 Monto del préstamo (S/)", min_value=0.0, step=1000.0)
-                _p_cta_desembolso = st.selectbox(
-                    "🏦 Cuenta que recibe el préstamo",
-                    list(_p_ctas.keys()), key="prestamo_cta_desembolso"
-                )
-            with _fp2:
-                _p_fecha_desembolso = st.date_input("📅 Fecha de desembolso", value=hoy_peru, key="prestamo_fecha_desembolso")
-                _p_desc = st.text_area("📝 Notas", placeholder="Condiciones, banco, tasa, etc.", height=80)
+        st.markdown("**🛒 Compra del bien**")
+        _fg1, _fg2 = st.columns(2)
+        with _fg1:
+            _p_monto_tot = st.number_input(
+                "🏷️ Costo total del bien (S/)", min_value=0.0, step=1000.0,
+                help="Si es mayor al préstamo, la diferencia sale de la cuenta seleccionada"
+            )
+            _p_cta_pago_bien = st.selectbox(
+                "💳 Cuenta que paga el bien",
+                list(_p_ctas.keys()), key="prestamo_cta_pago_bien"
+            )
+        with _fg2:
+            _p_fecha_compra = st.date_input("📅 Fecha de compra del bien", value=hoy_peru, key="prestamo_fecha_compra")
 
-            st.markdown("**🛒 Compra del bien**")
-            _fg1, _fg2 = st.columns(2)
-            with _fg1:
-                _p_monto_tot = st.number_input(
-                    "🏷️ Costo total del bien (S/)", min_value=0.0, step=1000.0,
-                    help="Si es mayor al préstamo, la diferencia sale de la cuenta seleccionada"
-                )
-                _p_cta_pago_bien = st.selectbox(
-                    "💳 Cuenta que paga el bien",
-                    list(_p_ctas.keys()), key="prestamo_cta_pago_bien"
-                )
-            with _fg2:
-                _p_fecha_compra = st.date_input("📅 Fecha de compra del bien", value=hoy_peru, key="prestamo_fecha_compra")
+        st.markdown("**📆 Cuotas mensuales**")
+        _fq1, _fq2, _fq3, _fq4 = st.columns(4)
+        with _fq1:
+            _p_cuota = st.number_input("💰 Cuota mensual (S/)", min_value=0.0, step=100.0)
+        with _fq2:
+            _p_medio_pago = st.selectbox("💳 Cuenta/tarjeta de cuotas", _p_medios, key="prestamo_medio")
+        with _fq3:
+            _p_fecha_primera_cuota = st.date_input("📅 Primera cuota", value=hoy_peru, key="prestamo_fecha_primera")
+            _p_dia_cuota = st.number_input("📆 Día del mes", min_value=1, max_value=31, value=5, key="prestamo_dia")
+        with _fq4:
+            _p_fecha_ultima_cuota = st.date_input("📅 Última cuota", value=hoy_peru, key="prestamo_fecha_fin")
 
-            st.markdown("**📆 Cuotas mensuales**")
-            _fq1, _fq2, _fq3, _fq4 = st.columns(4)
-            with _fq1:
-                _p_cuota = st.number_input("💰 Cuota mensual (S/)", min_value=0.0, step=100.0)
-            with _fq2:
-                _p_medio_pago = st.selectbox("💳 Cuenta/tarjeta de cuotas", _p_medios, key="prestamo_medio")
-            with _fq3:
-                _p_fecha_primera_cuota = st.date_input("📅 Primera cuota", value=hoy_peru, key="prestamo_fecha_primera")
-                _p_dia_cuota = st.number_input("📆 Día del mes", min_value=1, max_value=31, value=5, key="prestamo_dia")
-            with _fq4:
-                _p_fecha_ultima_cuota = st.date_input("📅 Última cuota", value=hoy_peru, key="prestamo_fecha_fin")
+        st.markdown("**💥 Pago de cierre anticipado** *(opcional)*")
+        _fc1, _fc2 = st.columns(2)
+        with _fc1:
+            _p_monto_cierre = st.number_input(
+                "💰 Monto de cierre (S/)", min_value=0.0, step=1000.0,
+                help="Pago único que cancela el préstamo. Después de esta fecha no se generan más cuotas."
+            )
+        with _fc2:
+            _p_fecha_cierre = st.date_input("📅 Fecha de pago de cierre", value=hoy_peru, key="prestamo_fecha_cierre")
 
-            st.markdown("**💥 Pago de cierre anticipado** *(opcional)*")
-            _fc1, _fc2 = st.columns(2)
-            with _fc1:
-                _p_monto_cierre = st.number_input(
-                    "💰 Monto de cierre (S/)", min_value=0.0, step=1000.0,
-                    help="Pago único que cancela el préstamo. Después de esta fecha no se generan más cuotas."
-                )
-            with _fc2:
-                _p_fecha_cierre = st.date_input("📅 Fecha de pago de cierre", value=hoy_peru, key="prestamo_fecha_cierre")
-
-            if st.form_submit_button("💾 Guardar simulación", use_container_width=True, type="primary"):
-                if _p_nombre.strip() and _p_monto_pre > 0 and _p_cuota > 0:
-                    if _p_medio_pago.startswith("Tarjeta: "):
-                        _tarj_name  = _p_medio_pago.replace("Tarjeta: ", "")
-                        _medio_id   = _p_tarjs.get(_tarj_name, "")
-                        _medio_tipo = "tarjeta"
-                    else:
-                        _medio_id   = _p_ctas.get(_p_medio_pago, "principal")
-                        _medio_tipo = "cuenta"
-                    st.session_state["simulaciones_prestamo"].append({
-                        "id":                    str(uuid.uuid4()),
-                        "nombre":                _p_nombre.strip(),
-                        "monto_prestamo":        float(_p_monto_pre),
-                        "monto_total":           float(_p_monto_tot) if _p_monto_tot > 0 else float(_p_monto_pre),
-                        "cta_desembolso":        _p_cta_desembolso,
-                        "cta_desembolso_id":     _p_ctas.get(_p_cta_desembolso, "principal"),
-                        "fecha_desembolso":      _p_fecha_desembolso.isoformat(),
-                        "cta_pago_bien":         _p_cta_pago_bien,
-                        "cta_pago_bien_id":      _p_ctas.get(_p_cta_pago_bien, "principal"),
-                        "fecha_compra":          _p_fecha_compra.isoformat(),
-                        "cuota":                 float(_p_cuota),
-                        "medio_pago":            _p_medio_pago,
-                        "medio_id":              _medio_id,
-                        "medio_tipo":            _medio_tipo,
-                        "fecha_primera_cuota":   _p_fecha_primera_cuota.isoformat(),
-                        "dia_cuota":             int(_p_dia_cuota),
-                        "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
-                        "descripcion":           _p_desc.strip(),
-                        "monto_cierre":          float(_p_monto_cierre) if _p_monto_cierre > 0 else 0.0,
-                        "fecha_cierre":          _p_fecha_cierre.isoformat() if _p_monto_cierre > 0 else None,
-                        "activo":                True,
-                    })
-                    guardar("simulaciones_prestamo")
-                    st.success("✅ Simulación guardada.")
-                    st.rerun()
+        if st.form_submit_button("💾 Guardar simulación", use_container_width=True, type="primary"):
+            if _p_nombre.strip() and _p_monto_pre > 0 and _p_cuota > 0:
+                if _p_medio_pago.startswith("Tarjeta: "):
+                    _tarj_name  = _p_medio_pago.replace("Tarjeta: ", "")
+                    _medio_id   = _p_tarjs.get(_tarj_name, "")
+                    _medio_tipo = "tarjeta"
                 else:
-                    st.warning("Completa nombre, monto del préstamo y cuota.")
+                    _medio_id   = _p_ctas.get(_p_medio_pago, "principal")
+                    _medio_tipo = "cuenta"
+                st.session_state["simulaciones_prestamo"].append({
+                    "id":                    str(uuid.uuid4()),
+                    "nombre":                _p_nombre.strip(),
+                    "monto_prestamo":        float(_p_monto_pre),
+                    "monto_total":           float(_p_monto_tot) if _p_monto_tot > 0 else float(_p_monto_pre),
+                    "cta_desembolso":        _p_cta_desembolso,
+                    "cta_desembolso_id":     _p_ctas.get(_p_cta_desembolso, "principal"),
+                    "fecha_desembolso":      _p_fecha_desembolso.isoformat(),
+                    "cta_pago_bien":         _p_cta_pago_bien,
+                    "cta_pago_bien_id":      _p_ctas.get(_p_cta_pago_bien, "principal"),
+                    "fecha_compra":          _p_fecha_compra.isoformat(),
+                    "cuota":                 float(_p_cuota),
+                    "medio_pago":            _p_medio_pago,
+                    "medio_id":              _medio_id,
+                    "medio_tipo":            _medio_tipo,
+                    "fecha_primera_cuota":   _p_fecha_primera_cuota.isoformat(),
+                    "dia_cuota":             int(_p_dia_cuota),
+                    "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
+                    "descripcion":           _p_desc.strip(),
+                    "monto_cierre":          float(_p_monto_cierre) if _p_monto_cierre > 0 else 0.0,
+                    "fecha_cierre":          _p_fecha_cierre.isoformat() if _p_monto_cierre > 0 else None,
+                    "activo":                True,
+                })
+                guardar("simulaciones_prestamo")
+                st.success("✅ Simulación guardada.")
+                st.rerun()
+            else:
+                st.warning("Completa nombre, monto del préstamo y cuota.")
 
-        # ── Lista de simulaciones guardadas ───────────────────────────
-        _sims = st.session_state.get("simulaciones_prestamo", [])
-        if _sims:
-            st.markdown("#### 📋 Simulaciones guardadas")
-            for _sim in _sims:
-                _s_activo = _sim.get("activo", True)
-                with st.container(border=True):
-                    _sc1, _sc2, _sc3, _sc4 = st.columns([3, 2, 1, 1])
-                    _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
-                    _sc1.markdown(f"**{_sim['nombre']}**")
+    # ── Lista de simulaciones guardadas ───────────────────────────
+    _sims = st.session_state.get("simulaciones_prestamo", [])
+    if _sims:
+        st.markdown("#### 📋 Simulaciones guardadas")
+        for _sim in _sims:
+            _s_activo = _sim.get("activo", True)
+            with st.container(border=True):
+                _sc1, _sc2, _sc3, _sc4 = st.columns([3, 2, 1, 1])
+                _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
+                _sc1.markdown(f"**{_sim['nombre']}**")
+                _sc1.caption(
+                    f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
+                    f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
+                )
+                _sc1.caption(
+                    f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
+                    f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
+                    f"De tus ahorros: S/ {_gasto_propio:,.0f}"
+                )
+                _sc1.caption(
+                    f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
+                    f"{_sim['medio_pago']}  ·  "
+                    f"{_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} → {_sim['fecha_fin']}"
+                )
+                if _sim.get("descripcion"):
+                    _sc1.caption(f"📝 {_sim['descripcion']}")
+                if _sim.get("monto_cierre", 0) > 0:
                     _sc1.caption(
-                        f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
-                        f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
+                        f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
+                        f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
                     )
-                    _sc1.caption(
-                        f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
-                        f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
-                        f"De tus ahorros: S/ {_gasto_propio:,.0f}"
+                # Calcular cuotas totales y monto pagado/restante
+                _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
+                _f_ini = pd.to_datetime(_f_ini_ref)
+                _f_fin = pd.to_datetime(_sim["fecha_fin"])
+                _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
+                _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
+                _pagado      = min(_meses_pag, _meses_total) * float(_sim["cuota"])
+                _pendiente   = max(0, _meses_total - _meses_pag) * float(_sim["cuota"])
+                _sc2.metric("Total cuotas", f"S/ {_meses_total * _sim['cuota']:,.0f}")
+                _sc2.caption(f"Pagado: S/ {_pagado:,.0f}  |  Pendiente: S/ {_pendiente:,.0f}")
+                with _sc3:
+                    _tog_key = f"tog_sim_{_sim['id']}"
+                    _nuevo_estado = st.toggle(
+                        "Simular",
+                        value=_s_activo,
+                        key=_tog_key,
+                        help="Activa para ver el impacto en los gráficos de ahorros"
                     )
-                    _sc1.caption(
-                        f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
-                        f"{_sim['medio_pago']}  ·  "
-                        f"{_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} → {_sim['fecha_fin']}"
-                    )
-                    if _sim.get("descripcion"):
-                        _sc1.caption(f"📝 {_sim['descripcion']}")
-                    if _sim.get("monto_cierre", 0) > 0:
-                        _sc1.caption(
-                            f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
-                            f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
-                        )
-                    # Calcular cuotas totales y monto pagado/restante
-                    _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
-                    _f_ini = pd.to_datetime(_f_ini_ref)
-                    _f_fin = pd.to_datetime(_sim["fecha_fin"])
-                    _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
-                    _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
-                    _pagado      = min(_meses_pag, _meses_total) * float(_sim["cuota"])
-                    _pendiente   = max(0, _meses_total - _meses_pag) * float(_sim["cuota"])
-                    _sc2.metric("Total cuotas", f"S/ {_meses_total * _sim['cuota']:,.0f}")
-                    _sc2.caption(f"Pagado: S/ {_pagado:,.0f}  |  Pendiente: S/ {_pendiente:,.0f}")
-                    with _sc3:
-                        _tog_key = f"tog_sim_{_sim['id']}"
-                        _nuevo_estado = st.toggle(
-                            "Simular",
-                            value=_s_activo,
-                            key=_tog_key,
-                            help="Activa para ver el impacto en los gráficos de ahorros"
-                        )
-                        if _nuevo_estado != _s_activo:
-                            _sim["activo"] = _nuevo_estado
-                            guardar("simulaciones_prestamo")
-                            st.rerun()
-                    with _sc4:
-                        st.write("")
-                        if st.button("🗑️", key=f"del_sim_{_sim['id']}", help="Eliminar simulación"):
-                            st.session_state["simulaciones_prestamo"] = [
-                                s for s in st.session_state["simulaciones_prestamo"]
-                                if s["id"] != _sim["id"]
-                            ]
-                            guardar("simulaciones_prestamo")
-                            st.rerun()
-        else:
-            st.info("No hay simulaciones de préstamo guardadas.")
+                    if _nuevo_estado != _s_activo:
+                        _sim["activo"] = _nuevo_estado
+                        guardar("simulaciones_prestamo")
+                        st.rerun()
+                with _sc4:
+                    st.write("")
+                    if st.button("🗑️", key=f"del_sim_{_sim['id']}", help="Eliminar simulación"):
+                        st.session_state["simulaciones_prestamo"] = [
+                            s for s in st.session_state["simulaciones_prestamo"]
+                            if s["id"] != _sim["id"]
+                        ]
+                        guardar("simulaciones_prestamo")
+                        st.rerun()
+    else:
+        st.info("No hay simulaciones de préstamo guardadas.")
 
 
 
-    # ==================================================
-    # 3.5 PORTAFOLIO IBKR
-    # ==================================================
-    with st.expander("📈 Portafolio IBKR", expanded=False):
+# ==================================================
+# 3.5 PORTAFOLIO IBKR
+# ==================================================
+with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
+    st.caption(
+        "Registra compras de acciones o ETFs en IBKR. La app guarda tus compras en Supabase, "
+        "mantiene un catálogo dinámico de instrumentos y usa los precios actualizados por Airflow."
+    )
+
+    _tc_inv = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
+    _df_catalogo_ibkr = cargar_catalogo_ibkr()
+    _df_precios_ibkr = cargar_precios_ibkr_airflow()
+
+    # ──────────────────────────────────────────────
+    # Catálogo dinámico de instrumentos
+    # ──────────────────────────────────────────────
+    with st.expander("🧭 Catálogo de instrumentos IBKR / Airflow", expanded=False):
         st.caption(
-            "Registra compras de acciones o ETFs en IBKR. Si compras un ticker nuevo, "
-            "la app lo agrega automáticamente al catálogo y puede consultar Yahoo Finance como respaldo hasta que Airflow lo actualice."
+            "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. "
+            "Para un nuevo activo, usa normalmente el mismo ticker como source_symbol. "
+            "Si Yahoo Finance usa un símbolo especial, colócalo en source_symbol."
         )
 
-        _tc_inv = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
-        _df_catalogo_ibkr = cargar_catalogo_ibkr()
-        _df_precios_ibkr = cargar_precios_ibkr_airflow()
-
-        def _normalizar_cash_ibkr():
-            _df_cash = pd.DataFrame(st.session_state.get("ibkr_cash_movimientos", []))
-
-            if _df_cash.empty:
-                return pd.DataFrame(columns=["id", "fecha", "tipo_movimiento", "descripcion", "monto_usd"])
-
-            for _col, _default in {
-                "id": "",
-                "fecha": hoy_peru.isoformat(),
-                "tipo_movimiento": "Depósito",
-                "descripcion": "",
-                "monto_usd": 0.0,
-            }.items():
-                if _col not in _df_cash.columns:
-                    _df_cash[_col] = _default
-
-            _df_cash["id"] = _df_cash["id"].apply(
-                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-            )
-            _df_cash["fecha"] = pd.to_datetime(_df_cash["fecha"], errors="coerce").dt.date
-            _df_cash["tipo_movimiento"] = _df_cash["tipo_movimiento"].fillna("Depósito").astype(str)
-            _df_cash["descripcion"] = _df_cash["descripcion"].fillna("").astype(str)
-            _df_cash["monto_usd"] = pd.to_numeric(_df_cash["monto_usd"], errors="coerce").fillna(0.0)
-            _df_cash = _df_cash.dropna(subset=["fecha"]).sort_values("fecha", ascending=False).reset_index(drop=True)
-
-            return _df_cash
-
-        _df_cash_ibkr = _normalizar_cash_ibkr()
-        _total_cash_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
-
-        # ──────────────────────────────────────────────
-        # Cash disponible en IBKR
-        # ──────────────────────────────────────────────
-        with st.expander("💵 Cash IBKR / fondos sin invertir", expanded=False):
-            st.caption(
-                "Registra el cash disponible en IBKR que todavía no está invertido en acciones o ETFs. "
-                "Se suma al valor total del portafolio, pero no genera ganancia/pérdida de mercado."
-            )
-
-            with st.form("form_cash_ibkr", clear_on_submit=True):
-                _cash_c1, _cash_c2, _cash_c3 = st.columns(3)
-
-                with _cash_c1:
-                    _cash_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_cash_ibkr")
-                    _cash_tipo = st.selectbox(
-                        "Tipo de movimiento",
-                        ["Depósito", "Retiro / uso de cash"],
-                        key="tipo_cash_ibkr"
-                    )
-
-                with _cash_c2:
-                    _cash_monto = st.number_input(
-                        "Monto USD",
-                        min_value=0.0,
-                        step=10.0,
-                        format="%.2f",
-                        key="monto_cash_ibkr"
-                    )
-
-                with _cash_c3:
-                    _cash_desc = st.text_input(
-                        "Descripción",
-                        placeholder="Ej.: Depósito IBKR, cash pendiente de invertir",
-                        key="descripcion_cash_ibkr"
-                    )
-
-                if st.form_submit_button("➕ Registrar movimiento de cash", use_container_width=True, type="primary"):
-                    if _cash_monto <= 0:
-                        st.warning("Ingresa un monto mayor a cero.")
-                    else:
-                        _cash_monto_signed = float(_cash_monto)
-                        if _cash_tipo == "Retiro / uso de cash":
-                            _cash_monto_signed = -_cash_monto_signed
-
-                        st.session_state["ibkr_cash_movimientos"].append({
-                            "id": str(uuid.uuid4()),
-                            "fecha": _cash_fecha.isoformat(),
-                            "tipo_movimiento": _cash_tipo,
-                            "descripcion": _cash_desc,
-                            "monto_usd": _cash_monto_signed,
-                        })
-                        guardar("ibkr_cash_movimientos")
-                        st.success("✅ Movimiento de cash IBKR registrado.")
-                        st.rerun()
-
-            _df_cash_ibkr = _normalizar_cash_ibkr()
-            _total_cash_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
-            st.metric("Cash disponible IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-
-            if not _df_cash_ibkr.empty:
-                _df_cash_show = _df_cash_ibkr.copy()
-                _df_cash_show["Eliminar"] = False
-
-                _ed_cash = st.data_editor(
-                    _df_cash_show,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    height=min(38 * len(_df_cash_show) + 46, 280),
-                    column_config={
-                        "id": None,
-                        "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
-                        "tipo_movimiento": st.column_config.SelectboxColumn(
-                            "Tipo", options=["Depósito", "Retiro / uso de cash", "Ajuste"], width="medium"
-                        ),
-                        "descripcion": st.column_config.TextColumn("Descripción", width="large"),
-                        "monto_usd": st.column_config.NumberColumn(
-                            "Monto neto USD", step=10.0, format="US$ %.2f", width="small",
-                            help="Depósitos positivos. Retiros o uso de cash negativos."
-                        ),
-                        "Eliminar": st.column_config.CheckboxColumn("🗑"),
-                    },
-                    key="editor_cash_ibkr"
-                )
-
-                if st.button("💾 Guardar cash IBKR", type="primary"):
-                    _df_cash_save = _ed_cash.copy()
-                    _df_cash_save = _df_cash_save[_df_cash_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-
-                    if not _df_cash_save.empty:
-                        _df_cash_save["id"] = _df_cash_save["id"].apply(
-                            lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-                        )
-                        _df_cash_save["fecha"] = pd.to_datetime(
-                            _df_cash_save["fecha"], errors="coerce"
-                        ).dt.strftime("%Y-%m-%d")
-                        _df_cash_save["tipo_movimiento"] = _df_cash_save["tipo_movimiento"].fillna("Ajuste").astype(str)
-                        _df_cash_save["descripcion"] = _df_cash_save["descripcion"].fillna("").astype(str)
-                        _df_cash_save["monto_usd"] = pd.to_numeric(
-                            _df_cash_save["monto_usd"], errors="coerce"
-                        ).fillna(0.0)
-                        _df_cash_save = _df_cash_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                        st.session_state["ibkr_cash_movimientos"] = _df_cash_save.to_dict("records")
-                    else:
-                        st.session_state["ibkr_cash_movimientos"] = []
-
-                    guardar("ibkr_cash_movimientos")
-                    st.success("✅ Cash IBKR actualizado.")
-                    st.rerun()
-            else:
-                st.info("No hay cash IBKR registrado.")
-
-        # ──────────────────────────────────────────────
-        # Catálogo dinámico de instrumentos
-        # ──────────────────────────────────────────────
-        with st.expander("🧭 Catálogo de instrumentos IBKR / Airflow", expanded=False):
-            st.caption(
-                "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. Normalmente se actualiza solo cuando registras una compra nueva. "
-                "Edita source_symbol solo si Yahoo Finance usa un símbolo especial."
-            )
-
-            _df_catalogo_show = _df_catalogo_ibkr.copy()
-            _ed_catalogo = st.data_editor(
-                _df_catalogo_show,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                height=min(38 * max(len(_df_catalogo_show), 1) + 46, 320),
-                column_config={
-                    "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
-                    "nombre": st.column_config.TextColumn("Nombre", width="large"),
-                    "tipo": st.column_config.SelectboxColumn(
-                        "Tipo",
-                        options=["ETF", "Accion", "ADR", "Fondo", "Otro"],
-                        width="small",
-                    ),
-                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
-                    "source_symbol": st.column_config.TextColumn(
-                        "Source symbol",
-                        width="small",
-                        help="Símbolo usado por Yahoo Finance. Ej.: VOO, SCCO, GLD, CCOEY, 7203.T, ticker.L."
-                    ),
-                    "fuente_precio": st.column_config.SelectboxColumn(
-                        "Fuente precio",
-                        options=["Yahoo Finance"],
-                        width="medium",
-                    ),
-                    "activo": st.column_config.CheckboxColumn(
-                        "Activo",
-                        help="Si está activo, Airflow intentará actualizar su precio."
-                    ),
-                },
-                key="editor_catalogo_ibkr"
-            )
-
-            if st.button("💾 Guardar catálogo IBKR", type="primary"):
-                try:
-                    _df_catalogo_guardado = guardar_catalogo_ibkr(_ed_catalogo)
-                    st.success("✅ Catálogo guardado. En la próxima corrida, Airflow leerá estos tickers.")
-                    st.rerun()
-                except Exception as _e:
-                    st.error(f"No se pudo guardar el catálogo: {_e}")
-
-        # ──────────────────────────────────────────────
-        # Registro de nueva compra
-        # ──────────────────────────────────────────────
-        with st.form("form_inversion_ibkr_portfolio", clear_on_submit=True):
-            st.markdown("#### ➕ Registrar compra IBKR")
-
-            _iv1, _iv2, _iv3 = st.columns(3)
-
-            with _iv1:
-                _inv_fecha = st.date_input(
-                    "📅 Fecha de compra",
-                    value=hoy_peru,
-                    key="fecha_compra_ibkr_portfolio"
-                )
-                _inv_ticker_raw = st.text_input(
-                    "Ticker",
-                    placeholder="Ej.: VOO, SCCO, GLD, CCOEY, MSFT",
-                    key="ticker_compra_ibkr_portfolio"
-                )
-                _inv_broker = st.selectbox(
-                    "Broker",
-                    ["IBKR"],
-                    key="broker_compra_ibkr_portfolio"
-                )
-
-            with _iv2:
-                _inv_nombre_raw = st.text_input(
-                    "Nombre del activo",
-                    placeholder="Ej.: Vanguard S&P 500 ETF",
-                    key="nombre_compra_ibkr_portfolio"
-                )
-                _inv_tipo = st.selectbox(
+        _df_catalogo_show = _df_catalogo_ibkr.copy()
+        _ed_catalogo = st.data_editor(
+            _df_catalogo_show,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            height=min(38 * max(len(_df_catalogo_show), 1) + 46, 320),
+            column_config={
+                "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
+                "nombre": st.column_config.TextColumn("Nombre", width="large"),
+                "tipo": st.column_config.SelectboxColumn(
                     "Tipo",
-                    ["ETF", "Accion", "ADR", "Fondo", "Otro"],
-                    key="tipo_compra_ibkr_portfolio"
-                )
-                _inv_source_symbol_raw = st.text_input(
-                    "Source symbol Yahoo",
-                    placeholder="Déjalo vacío si es igual al ticker",
-                    key="source_symbol_compra_ibkr_portfolio"
-                )
+                    options=["ETF", "Accion", "ADR", "Fondo", "Otro"],
+                    width="small",
+                ),
+                "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
+                "source_symbol": st.column_config.TextColumn(
+                    "Source symbol",
+                    width="small",
+                    help="Símbolo usado por Yahoo Finance. Ej.: VOO, SCCO, GLD, CCOEY, 7203.T, ticker.L."
+                ),
+                "fuente_precio": st.column_config.SelectboxColumn(
+                    "Fuente precio",
+                    options=["Yahoo Finance"],
+                    width="medium",
+                ),
+                "activo": st.column_config.CheckboxColumn(
+                    "Activo",
+                    help="Si está activo, Airflow intentará actualizar su precio."
+                ),
+            },
+            key="editor_catalogo_ibkr"
+        )
 
-            with _iv3:
-                _inv_cantidad = st.number_input(
-                    "Cantidad de acciones/participaciones",
-                    min_value=0.0,
-                    step=0.0001,
-                    format="%.4f",
-                    key="cantidad_compra_ibkr_portfolio"
-                )
-                _inv_monto_usd = st.number_input(
-                    "Monto invertido total (USD)",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f",
-                    key="monto_compra_ibkr_portfolio"
-                )
-                _inv_moneda = st.selectbox(
-                    "Moneda",
-                    ["USD"],
-                    key="moneda_compra_ibkr_portfolio"
-                )
+        if st.button("💾 Guardar catálogo IBKR", type="primary"):
+            try:
+                _df_catalogo_guardado = guardar_catalogo_ibkr(_ed_catalogo)
+                st.success("✅ Catálogo guardado. En la próxima corrida, Airflow leerá estos tickers.")
+                st.rerun()
+            except Exception as _e:
+                st.error(f"No se pudo guardar el catálogo: {_e}")
 
-            if st.form_submit_button("➕ Registrar compra IBKR", use_container_width=True, type="primary"):
-                _inv_ticker = str(_inv_ticker_raw or "").upper().strip()
-                _inv_nombre = str(_inv_nombre_raw or "").strip()
-                _inv_source_symbol = str(_inv_source_symbol_raw or "").strip()
+    # ──────────────────────────────────────────────
+    # Registro de nueva compra
+    # ──────────────────────────────────────────────
+    with st.form("form_inversion_ibkr_portfolio", clear_on_submit=True):
+        st.markdown("#### ➕ Registrar compra IBKR")
 
-                if not _inv_ticker:
-                    st.warning("Debes ingresar un ticker.")
-                elif _inv_cantidad <= 0 or _inv_monto_usd <= 0:
-                    st.warning("Debes ingresar una cantidad y un monto invertido mayor a cero.")
-                else:
-                    _nombre_catalogo = obtener_nombre_instrumento_ibkr(_inv_ticker, _df_catalogo_ibkr)
-                    _symbol_catalogo = obtener_source_symbol_ibkr(_inv_ticker, _df_catalogo_ibkr)
+        _iv1, _iv2, _iv3 = st.columns(3)
 
-                    if not _inv_nombre:
-                        _inv_nombre = _nombre_catalogo if _nombre_catalogo != _inv_ticker else _inv_ticker
+        with _iv1:
+            _inv_fecha = st.date_input(
+                "📅 Fecha de compra",
+                value=hoy_peru,
+                key="fecha_compra_ibkr_portfolio"
+            )
+            _inv_ticker_raw = st.text_input(
+                "Ticker",
+                placeholder="Ej.: VOO, SCCO, GLD, CCOEY, MSFT",
+                key="ticker_compra_ibkr_portfolio"
+            )
+            _inv_broker = st.selectbox(
+                "Broker",
+                ["IBKR"],
+                key="broker_compra_ibkr_portfolio"
+            )
 
-                    if not _inv_source_symbol:
-                        _inv_source_symbol = _symbol_catalogo if _symbol_catalogo else _inv_ticker
+        with _iv2:
+            _inv_nombre_raw = st.text_input(
+                "Nombre del activo",
+                placeholder="Ej.: Vanguard S&P 500 ETF",
+                key="nombre_compra_ibkr_portfolio"
+            )
+            _inv_tipo = st.selectbox(
+                "Tipo",
+                ["ETF", "Accion", "ADR", "Fondo", "Otro"],
+                key="tipo_compra_ibkr_portfolio"
+            )
+            _inv_source_symbol_raw = st.text_input(
+                "Source symbol Yahoo",
+                placeholder="Déjalo vacío si es igual al ticker",
+                key="source_symbol_compra_ibkr_portfolio"
+            )
 
-                    try:
-                        upsert_instrumento_ibkr(
-                            ticker=_inv_ticker,
-                            nombre=_inv_nombre,
-                            tipo=_inv_tipo,
-                            moneda=_inv_moneda,
-                            source_symbol=_inv_source_symbol,
-                            fuente_precio="Yahoo Finance",
-                            activo=True,
-                        )
-                    except Exception as _e:
-                        st.warning(
-                            "La compra se registrará, pero no se pudo actualizar el catálogo CSV "
-                            f"para Airflow: {_e}"
-                        )
+        with _iv3:
+            _inv_cantidad = st.number_input(
+                "Cantidad de acciones/participaciones",
+                min_value=0.0,
+                step=0.0001,
+                format="%.4f",
+                key="cantidad_compra_ibkr_portfolio"
+            )
+            _inv_monto_usd = st.number_input(
+                "Monto invertido total (USD)",
+                min_value=0.0,
+                step=10.0,
+                format="%.2f",
+                key="monto_compra_ibkr_portfolio"
+            )
+            _inv_moneda = st.selectbox(
+                "Moneda",
+                ["USD"],
+                key="moneda_compra_ibkr_portfolio"
+            )
 
-                    _precio_promedio = _inv_monto_usd / _inv_cantidad
+        if st.form_submit_button("➕ Registrar compra IBKR", use_container_width=True, type="primary"):
+            _inv_ticker = str(_inv_ticker_raw or "").upper().strip()
+            _inv_nombre = str(_inv_nombre_raw or "").strip()
+            _inv_source_symbol = str(_inv_source_symbol_raw or "").strip()
 
-                    st.session_state["inversiones_ibkr"].append({
-                        "id": str(uuid.uuid4()),
-                        "fecha_compra": _inv_fecha.isoformat(),
-                        "ticker": _inv_ticker,
-                        "nombre": _inv_nombre,
-                        "broker": _inv_broker,
-                        "cantidad": float(_inv_cantidad),
-                        "monto_invertido_usd": float(_inv_monto_usd),
-                        "precio_promedio_compra_usd": float(_precio_promedio),
-                        "moneda": _inv_moneda,
-                    })
+            if not _inv_ticker:
+                st.warning("Debes ingresar un ticker.")
+            elif _inv_cantidad <= 0 or _inv_monto_usd <= 0:
+                st.warning("Debes ingresar una cantidad y un monto invertido mayor a cero.")
+            else:
+                _nombre_catalogo = obtener_nombre_instrumento_ibkr(_inv_ticker, _df_catalogo_ibkr)
+                _symbol_catalogo = obtener_source_symbol_ibkr(_inv_ticker, _df_catalogo_ibkr)
 
-                    guardar("inversiones_ibkr")
-                    st.success(
-                        f"✅ Compra registrada. {_inv_ticker} quedó agregado al catálogo si era nuevo. "
-                        "La app intentará mostrar precio vía Yahoo; ejecuta ./run_daily_finance_dags.sh para consolidarlo por Airflow."
+                if not _inv_nombre:
+                    _inv_nombre = _nombre_catalogo if _nombre_catalogo != _inv_ticker else _inv_ticker
+
+                if not _inv_source_symbol:
+                    _inv_source_symbol = _symbol_catalogo if _symbol_catalogo else _inv_ticker
+
+                try:
+                    upsert_instrumento_ibkr(
+                        ticker=_inv_ticker,
+                        nombre=_inv_nombre,
+                        tipo=_inv_tipo,
+                        moneda=_inv_moneda,
+                        source_symbol=_inv_source_symbol,
+                        fuente_precio="Yahoo Finance",
+                        activo=True,
                     )
-                    st.rerun()
-
-        # ──────────────────────────────────────────────
-        # Compras registradas
-        # ──────────────────────────────────────────────
-        _df_inv = pd.DataFrame(st.session_state.get("inversiones_ibkr", []))
-
-        if not _df_inv.empty:
-            # Normalizar columnas para registros antiguos o filas editadas.
-            for _col, _default in {
-                "id": "",
-                "fecha_compra": hoy_peru.isoformat(),
-                "ticker": "VOO",
-                "nombre": "",
-                "broker": "IBKR",
-                "cantidad": 0.0,
-                "monto_invertido_usd": 0.0,
-                "precio_promedio_compra_usd": 0.0,
-                "moneda": "USD",
-            }.items():
-                if _col not in _df_inv.columns:
-                    _df_inv[_col] = _default
-
-            _df_inv["id"] = _df_inv["id"].apply(
-                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-            )
-            _df_inv["fecha_compra"] = pd.to_datetime(_df_inv["fecha_compra"], errors="coerce").dt.date
-            _df_inv["ticker"] = _df_inv["ticker"].fillna("VOO").astype(str).str.upper().str.strip()
-            _df_inv["nombre"] = _df_inv.apply(
-                lambda r: str(r["nombre"]).strip()
-                if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
-                else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
-                axis=1
-            )
-            _df_inv["broker"] = _df_inv["broker"].fillna("IBKR").astype(str)
-            _df_inv["moneda"] = _df_inv["moneda"].fillna("USD").astype(str)
-            _df_inv["cantidad"] = pd.to_numeric(_df_inv["cantidad"], errors="coerce").fillna(0.0)
-            _df_inv["monto_invertido_usd"] = pd.to_numeric(_df_inv["monto_invertido_usd"], errors="coerce").fillna(0.0)
-
-            _df_inv["precio_promedio_compra_usd"] = _df_inv.apply(
-                lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
-                axis=1
-            )
-
-            _df_inv = _df_inv.sort_values("fecha_compra", ascending=False).reset_index(drop=True)
-
-            st.markdown("#### 📋 Compras registradas")
-            st.caption(
-                "Puedes editar ticker, cantidad o monto. El precio promedio se recalcula al guardar. "
-                "Si agregas un ticker nuevo, la app lo agrega automáticamente al catálogo."
-            )
-
-            _df_inv_show = _df_inv.copy()
-            _df_inv_show["Eliminar"] = False
-
-            _ed_inv = st.data_editor(
-                _df_inv_show,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                height=min(38 * len(_df_inv_show) + 46, 360),
-                column_config={
-                    "id": None,
-                    "fecha_compra": st.column_config.DateColumn("📅 Fecha compra", required=True, width="small"),
-                    "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
-                    "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                    "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], required=True, width="small"),
-                    "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
-                    "monto_invertido_usd": st.column_config.NumberColumn("Invertido USD", min_value=0.0, step=10.0, format="US$ %.2f", width="small"),
-                    "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio promedio USD", disabled=True, format="US$ %.2f", width="small"),
-                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
-                    "Eliminar": st.column_config.CheckboxColumn("🗑"),
-                },
-                key="editor_inversiones_ibkr"
-            )
-
-            if st.button("💾 Guardar cambios — Portafolio IBKR", type="primary"):
-                _df_save = _ed_inv.copy()
-                _df_save = _df_save[_df_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-
-                if not _df_save.empty:
-                    _df_save["id"] = _df_save["id"].apply(
-                        lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-                    )
-                    _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    _df_save["ticker"] = _df_save["ticker"].fillna("").astype(str).str.upper().str.strip()
-                    _df_save["nombre"] = _df_save.apply(
-                        lambda r: str(r["nombre"]).strip()
-                        if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
-                        else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
-                        axis=1
-                    )
-                    _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
-                    _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
-                    _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
-                    _df_save["monto_invertido_usd"] = pd.to_numeric(
-                        _df_save["monto_invertido_usd"], errors="coerce"
-                    ).fillna(0.0)
-                    _df_save["precio_promedio_compra_usd"] = _df_save.apply(
-                        lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
-                        axis=1
+                except Exception as _e:
+                    st.warning(
+                        "La compra se registrará, pero no se pudo actualizar el catálogo CSV "
+                        f"para Airflow: {_e}"
                     )
 
-                    _df_save = _df_save.dropna(subset=["fecha_compra"])
-                    _df_save = _df_save[
-                        (_df_save["ticker"] != "") &
-                        (_df_save["cantidad"] > 0) &
-                        (_df_save["monto_invertido_usd"] > 0)
-                    ].copy()
+                _precio_promedio = _inv_monto_usd / _inv_cantidad
 
-                    # Asegurar que todo ticker comprado exista en el catálogo, sin sobreescribir
-                    # tipo/source_symbol si ya estaban correctamente definidos.
-                    for _, _row_inv in _df_save.iterrows():
-                        try:
-                            _ticker_tmp = str(_row_inv["ticker"]).upper().strip()
-                            _cat_match = _df_catalogo_ibkr[
-                                _df_catalogo_ibkr["ticker"].astype(str).str.upper().str.strip() == _ticker_tmp
-                            ]
-
-                            if not _cat_match.empty:
-                                _tipo_tmp = str(_cat_match.iloc[0].get("tipo", "Accion"))
-                                _source_tmp = str(_cat_match.iloc[0].get("source_symbol", _ticker_tmp)).strip() or _ticker_tmp
-                                _fuente_tmp = str(_cat_match.iloc[0].get("fuente_precio", "Yahoo Finance"))
-                            else:
-                                _tipo_tmp = "Accion"
-                                _source_tmp = _ticker_tmp
-                                _fuente_tmp = "Yahoo Finance"
-
-                            upsert_instrumento_ibkr(
-                                ticker=_ticker_tmp,
-                                nombre=_row_inv["nombre"],
-                                tipo=_tipo_tmp,
-                                moneda=_row_inv["moneda"],
-                                source_symbol=_source_tmp,
-                                fuente_precio=_fuente_tmp,
-                                activo=True,
-                            )
-                        except Exception:
-                            pass
-
-                    st.session_state["inversiones_ibkr"] = _df_save.sort_values(
-                        "fecha_compra", ascending=False
-                    ).to_dict("records")
-                else:
-                    st.session_state["inversiones_ibkr"] = []
+                st.session_state["inversiones_ibkr"].append({
+                    "id": str(uuid.uuid4()),
+                    "fecha_compra": _inv_fecha.isoformat(),
+                    "ticker": _inv_ticker,
+                    "nombre": _inv_nombre,
+                    "broker": _inv_broker,
+                    "cantidad": float(_inv_cantidad),
+                    "monto_invertido_usd": float(_inv_monto_usd),
+                    "precio_promedio_compra_usd": float(_precio_promedio),
+                    "moneda": _inv_moneda,
+                })
 
                 guardar("inversiones_ibkr")
-                st.success("✅ Portafolio IBKR actualizado.")
+                st.success(
+                    "✅ Compra registrada. Si es un ticker nuevo, ejecuta luego "
+                    "./run_daily_finance_dags.sh para que Airflow traiga su precio."
+                )
                 st.rerun()
 
-            # ──────────────────────────────────────────────
-            # Resumen por ticker y valorización
-            # ──────────────────────────────────────────────
-            st.markdown("#### 📊 Resumen del portafolio")
+    # ──────────────────────────────────────────────
+    # Compras registradas
+    # ──────────────────────────────────────────────
+    _df_inv = pd.DataFrame(st.session_state.get("inversiones_ibkr", []))
 
-            _df_pos = (
-                _df_inv.groupby("ticker", as_index=False)
-                .agg(
-                    nombre=("nombre", "last"),
-                    cantidad_total=("cantidad", "sum"),
-                    invertido_total_usd=("monto_invertido_usd", "sum"),
+    if not _df_inv.empty:
+        # Normalizar columnas para registros antiguos o filas editadas.
+        for _col, _default in {
+            "id": "",
+            "fecha_compra": hoy_peru.isoformat(),
+            "ticker": "VOO",
+            "nombre": "",
+            "broker": "IBKR",
+            "cantidad": 0.0,
+            "monto_invertido_usd": 0.0,
+            "precio_promedio_compra_usd": 0.0,
+            "moneda": "USD",
+        }.items():
+            if _col not in _df_inv.columns:
+                _df_inv[_col] = _default
+
+        _df_inv["id"] = _df_inv["id"].apply(
+            lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+        )
+        _df_inv["fecha_compra"] = pd.to_datetime(_df_inv["fecha_compra"], errors="coerce").dt.date
+        _df_inv["ticker"] = _df_inv["ticker"].fillna("VOO").astype(str).str.upper().str.strip()
+        _df_inv["nombre"] = _df_inv.apply(
+            lambda r: str(r["nombre"]).strip()
+            if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
+            else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
+            axis=1
+        )
+        _df_inv["broker"] = _df_inv["broker"].fillna("IBKR").astype(str)
+        _df_inv["moneda"] = _df_inv["moneda"].fillna("USD").astype(str)
+        _df_inv["cantidad"] = pd.to_numeric(_df_inv["cantidad"], errors="coerce").fillna(0.0)
+        _df_inv["monto_invertido_usd"] = pd.to_numeric(_df_inv["monto_invertido_usd"], errors="coerce").fillna(0.0)
+
+        _df_inv["precio_promedio_compra_usd"] = _df_inv.apply(
+            lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
+            axis=1
+        )
+
+        _df_inv = _df_inv.sort_values("fecha_compra", ascending=False).reset_index(drop=True)
+
+        st.markdown("#### 📋 Compras registradas")
+        st.caption(
+            "Puedes editar ticker, cantidad o monto. El precio promedio se recalcula al guardar. "
+            "Si agregas un ticker nuevo desde la tabla, recuerda actualizar también el catálogo."
+        )
+
+        _df_inv_show = _df_inv.copy()
+        _df_inv_show["Eliminar"] = False
+
+        _ed_inv = st.data_editor(
+            _df_inv_show,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            height=min(38 * len(_df_inv_show) + 46, 360),
+            column_config={
+                "id": None,
+                "fecha_compra": st.column_config.DateColumn("📅 Fecha compra", required=True, width="small"),
+                "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
+                "nombre": st.column_config.TextColumn("Nombre", width="medium"),
+                "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], required=True, width="small"),
+                "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
+                "monto_invertido_usd": st.column_config.NumberColumn("Invertido USD", min_value=0.0, step=10.0, format="US$ %.2f", width="small"),
+                "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio promedio USD", disabled=True, format="US$ %.2f", width="small"),
+                "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
+                "Eliminar": st.column_config.CheckboxColumn("🗑"),
+            },
+            key="editor_inversiones_ibkr"
+        )
+
+        if st.button("💾 Guardar cambios — Portafolio IBKR", type="primary"):
+            _df_save = _ed_inv.copy()
+            _df_save = _df_save[_df_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+
+            if not _df_save.empty:
+                _df_save["id"] = _df_save["id"].apply(
+                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
                 )
-            )
-            _df_pos["precio_promedio_compra_usd"] = _df_pos.apply(
-                lambda r: (r["invertido_total_usd"] / r["cantidad_total"]) if r["cantidad_total"] > 0 else 0.0,
-                axis=1
-            )
-
-            # Autodetección: todo ticker comprado se agrega al catálogo sin intervención manual.
-            try:
-                _df_catalogo_ibkr, _tickers_auto_catalogo = sincronizar_catalogo_desde_compras_ibkr(
-                    st.session_state.get("inversiones_ibkr", []),
-                    _df_catalogo_ibkr,
+                _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
+                _df_save["ticker"] = _df_save["ticker"].fillna("").astype(str).str.upper().str.strip()
+                _df_save["nombre"] = _df_save.apply(
+                    lambda r: str(r["nombre"]).strip()
+                    if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
+                    else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
+                    axis=1
                 )
-                if _tickers_auto_catalogo:
-                    st.info(
-                        "Tickers agregados automáticamente al catálogo IBKR: "
-                        + ", ".join(_tickers_auto_catalogo)
-                        + ". Airflow los tomará en la siguiente corrida."
-                    )
-            except Exception as _e:
-                st.warning(f"No se pudo sincronizar automáticamente el catálogo IBKR: {_e}")
-
-            # Fallback visual: si Airflow aún no tiene precio de un ticker nuevo,
-            # la app consulta Yahoo Finance en vivo para mostrar valorización inmediata.
-            _df_precios_ibkr, _tickers_fallback_yahoo = completar_precios_faltantes_con_yahoo(
-                _df_precios_ibkr,
-                _df_pos["ticker"].tolist(),
-                _df_catalogo_ibkr,
-            )
-
-            if _tickers_fallback_yahoo:
-                st.info(
-                    "Precios consultados directamente desde Yahoo Finance mientras Airflow se actualiza: "
-                    + ", ".join(_tickers_fallback_yahoo)
-                    + ". Para consolidarlos en CSV, ejecuta ./run_daily_finance_dags.sh."
+                _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
+                _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
+                _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
+                _df_save["monto_invertido_usd"] = pd.to_numeric(
+                    _df_save["monto_invertido_usd"], errors="coerce"
+                ).fillna(0.0)
+                _df_save["precio_promedio_compra_usd"] = _df_save.apply(
+                    lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
+                    axis=1
                 )
 
-            if not _df_precios_ibkr.empty:
-                _price_cols = [
-                    c for c in [
-                        "ticker",
-                        "precio_actual_usd",
-                        "fecha_precio",
-                        "hora_precio",
-                        "fuente_precio",
-                        "exchange",
-                        "updated_at_lima",
-                        "archivo",
-                    ]
-                    if c in _df_precios_ibkr.columns
-                ]
-                _df_resumen = _df_pos.merge(_df_precios_ibkr[_price_cols], on="ticker", how="left")
+                _df_save = _df_save.dropna(subset=["fecha_compra"])
+                _df_save = _df_save[
+                    (_df_save["ticker"] != "") &
+                    (_df_save["cantidad"] > 0) &
+                    (_df_save["monto_invertido_usd"] > 0)
+                ].copy()
+
+                # Asegurar que todo ticker comprado exista en el catálogo, sin sobreescribir
+                # tipo/source_symbol si ya estaban correctamente definidos.
+                for _, _row_inv in _df_save.iterrows():
+                    try:
+                        _ticker_tmp = str(_row_inv["ticker"]).upper().strip()
+                        _cat_match = _df_catalogo_ibkr[
+                            _df_catalogo_ibkr["ticker"].astype(str).str.upper().str.strip() == _ticker_tmp
+                        ]
+
+                        if not _cat_match.empty:
+                            _tipo_tmp = str(_cat_match.iloc[0].get("tipo", "Accion"))
+                            _source_tmp = str(_cat_match.iloc[0].get("source_symbol", _ticker_tmp)).strip() or _ticker_tmp
+                            _fuente_tmp = str(_cat_match.iloc[0].get("fuente_precio", "Yahoo Finance"))
+                        else:
+                            _tipo_tmp = "Accion"
+                            _source_tmp = _ticker_tmp
+                            _fuente_tmp = "Yahoo Finance"
+
+                        upsert_instrumento_ibkr(
+                            ticker=_ticker_tmp,
+                            nombre=_row_inv["nombre"],
+                            tipo=_tipo_tmp,
+                            moneda=_row_inv["moneda"],
+                            source_symbol=_source_tmp,
+                            fuente_precio=_fuente_tmp,
+                            activo=True,
+                        )
+                    except Exception:
+                        pass
+
+                st.session_state["inversiones_ibkr"] = _df_save.sort_values(
+                    "fecha_compra", ascending=False
+                ).to_dict("records")
             else:
-                _df_resumen = _df_pos.copy()
-                _df_resumen["precio_actual_usd"] = pd.NA
-                _df_resumen["fecha_precio"] = ""
-                _df_resumen["hora_precio"] = ""
-                _df_resumen["fuente_precio"] = ""
-                _df_resumen["exchange"] = ""
-                _df_resumen["updated_at_lima"] = ""
-                _df_resumen["archivo"] = ""
+                st.session_state["inversiones_ibkr"] = []
 
-            _df_resumen["precio_actual_usd"] = pd.to_numeric(
-                _df_resumen["precio_actual_usd"], errors="coerce"
+            guardar("inversiones_ibkr")
+            st.success("✅ Portafolio IBKR actualizado.")
+            st.rerun()
+
+        # ──────────────────────────────────────────────
+        # Resumen por ticker y valorización
+        # ──────────────────────────────────────────────
+        st.markdown("#### 📊 Resumen del portafolio")
+
+        _df_pos = (
+            _df_inv.groupby("ticker", as_index=False)
+            .agg(
+                nombre=("nombre", "last"),
+                cantidad_total=("cantidad", "sum"),
+                invertido_total_usd=("monto_invertido_usd", "sum"),
             )
-            _df_resumen["tiene_precio"] = _df_resumen["precio_actual_usd"].notna() & (_df_resumen["precio_actual_usd"] > 0)
-            _df_resumen["valor_actual_usd"] = _df_resumen["cantidad_total"] * _df_resumen["precio_actual_usd"].fillna(0.0)
-            _df_resumen["ganancia_usd"] = (
-                _df_resumen["valor_actual_usd"] - _df_resumen["invertido_total_usd"]
-            ).where(_df_resumen["tiene_precio"], 0.0)
-            _df_resumen["rendimiento_pct"] = _df_resumen.apply(
-                lambda r: (r["ganancia_usd"] / r["invertido_total_usd"] * 100)
-                if r["tiene_precio"] and r["invertido_total_usd"] > 0
-                else 0.0,
-                axis=1
+        )
+        _df_pos["precio_promedio_compra_usd"] = _df_pos.apply(
+            lambda r: (r["invertido_total_usd"] / r["cantidad_total"]) if r["cantidad_total"] > 0 else 0.0,
+            axis=1
+        )
+
+        if not _df_precios_ibkr.empty:
+            _price_cols = [
+                c for c in [
+                    "ticker",
+                    "precio_actual_usd",
+                    "fecha_precio",
+                    "hora_precio",
+                    "fuente_precio",
+                    "exchange",
+                    "updated_at_lima",
+                    "archivo",
+                ]
+                if c in _df_precios_ibkr.columns
+            ]
+            _df_resumen = _df_pos.merge(_df_precios_ibkr[_price_cols], on="ticker", how="left")
+        else:
+            _df_resumen = _df_pos.copy()
+            _df_resumen["precio_actual_usd"] = pd.NA
+            _df_resumen["fecha_precio"] = ""
+            _df_resumen["hora_precio"] = ""
+            _df_resumen["fuente_precio"] = ""
+            _df_resumen["exchange"] = ""
+            _df_resumen["updated_at_lima"] = ""
+            _df_resumen["archivo"] = ""
+
+        _df_resumen["precio_actual_usd"] = pd.to_numeric(
+            _df_resumen["precio_actual_usd"], errors="coerce"
+        )
+        _df_resumen["tiene_precio"] = _df_resumen["precio_actual_usd"].notna() & (_df_resumen["precio_actual_usd"] > 0)
+        _df_resumen["valor_actual_usd"] = _df_resumen["cantidad_total"] * _df_resumen["precio_actual_usd"].fillna(0.0)
+        _df_resumen["ganancia_usd"] = (
+            _df_resumen["valor_actual_usd"] - _df_resumen["invertido_total_usd"]
+        ).where(_df_resumen["tiene_precio"], 0.0)
+        _df_resumen["rendimiento_pct"] = _df_resumen.apply(
+            lambda r: (r["ganancia_usd"] / r["invertido_total_usd"] * 100)
+            if r["tiene_precio"] and r["invertido_total_usd"] > 0
+            else 0.0,
+            axis=1
+        )
+        _df_resumen["valor_actual_pen"] = _df_resumen["valor_actual_usd"] * _tc_inv
+        _df_resumen["ganancia_pen"] = _df_resumen["ganancia_usd"] * _tc_inv
+        _df_resumen["estado_precio"] = _df_resumen["tiene_precio"].apply(
+            lambda x: "OK Airflow" if x else "Sin precio Airflow"
+        )
+
+        _total_invertido_usd = float(_df_resumen["invertido_total_usd"].sum())
+        _total_invertido_con_precio_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "invertido_total_usd"].sum())
+        _total_valor_actual_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "valor_actual_usd"].sum())
+        _total_ganancia_usd = _total_valor_actual_usd - _total_invertido_con_precio_usd
+        _total_rendimiento_pct = (
+            _total_ganancia_usd / _total_invertido_con_precio_usd * 100
+            if _total_invertido_con_precio_usd > 0
+            else 0.0
+        )
+
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        _m1.metric("Invertido total", f"US$ {_total_invertido_usd:,.2f}")
+        _m2.metric("Valor actual", f"US$ {_total_valor_actual_usd:,.2f}")
+        _m3.metric("Ganancia/Pérdida", f"US$ {_total_ganancia_usd:,.2f}")
+        _m4.metric("Rendimiento", f"{_total_rendimiento_pct:,.2f}%")
+
+        st.caption(
+            f"Valor actual estimado en soles: S/ {_total_valor_actual_usd * _tc_inv:,.0f} | "
+            f"Ganancia/Pérdida estimada: S/ {_total_ganancia_usd * _tc_inv:,.0f} | "
+            f"TC usado: {_tc_inv:.4f}"
+        )
+
+        if _df_precios_ibkr.empty:
+            st.info(
+                "No se encontró data/market_prices_portfolio.csv. "
+                "Ejecuta ./run_daily_finance_dags.sh para actualizar precios desde Airflow."
             )
-            _df_resumen["valor_actual_pen"] = _df_resumen["valor_actual_usd"] * _tc_inv
-            _df_resumen["ganancia_pen"] = _df_resumen["ganancia_usd"] * _tc_inv
-            def _estado_precio_ibkr(row):
-                if not row.get("tiene_precio", False):
-                    return "Sin precio"
-                fuente = str(row.get("fuente_precio", ""))
-                if "fallback" in fuente.lower() or "app" in fuente.lower():
-                    return "OK Yahoo app"
-                return "OK Airflow"
-
-            _df_resumen["estado_precio"] = _df_resumen.apply(_estado_precio_ibkr, axis=1)
-
-            _total_invertido_usd = float(_df_resumen["invertido_total_usd"].sum())
-            _total_invertido_con_precio_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "invertido_total_usd"].sum())
-            _total_valor_activos_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "valor_actual_usd"].sum())
-            _total_cash_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
-            _total_valor_actual_usd = _total_valor_activos_usd + _total_cash_ibkr_usd
-            _total_ganancia_usd = _total_valor_activos_usd - _total_invertido_con_precio_usd
-            _total_rendimiento_pct = (
-                _total_ganancia_usd / _total_invertido_con_precio_usd * 100
-                if _total_invertido_con_precio_usd > 0
-                else 0.0
-            )
-
-            _m1, _m2, _m3, _m4, _m5 = st.columns(5)
-            _m1.metric("Invertido activos", f"US$ {_total_invertido_usd:,.2f}")
-            _m2.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-            _m3.metric("Valor total IBKR", f"US$ {_total_valor_actual_usd:,.2f}")
-            _m4.metric("Ganancia/Pérdida activos", f"US$ {_total_ganancia_usd:,.2f}")
-            _m5.metric("Rend. activos", f"{_total_rendimiento_pct:,.2f}%")
+        else:
+            _ultima_actualizacion = ""
+            if "updated_at_lima" in _df_precios_ibkr.columns:
+                _vals = _df_precios_ibkr["updated_at_lima"].dropna().astype(str)
+                if not _vals.empty:
+                    _ultima_actualizacion = _vals.iloc[-1]
 
             st.caption(
-                f"Valor total IBKR estimado en soles: S/ {_total_valor_actual_usd * _tc_inv:,.0f} | "
-                f"Cash: S/ {_total_cash_ibkr_usd * _tc_inv:,.0f} | "
-                f"Ganancia/Pérdida de activos: S/ {_total_ganancia_usd * _tc_inv:,.0f} | "
-                f"TC usado: {_tc_inv:.4f}"
+                "Precios desde Airflow: data/market_prices_portfolio.csv"
+                + (f" | Última actualización: {_ultima_actualizacion}" if _ultima_actualizacion else "")
             )
 
-            if _df_precios_ibkr.empty:
-                st.info(
-                    "No se encontró data/market_prices_portfolio.csv ni precios fallback. "
-                    "Ejecuta ./run_daily_finance_dags.sh para actualizar precios desde Airflow."
-                )
-            else:
-                _ultima_actualizacion = ""
-                if "updated_at_lima" in _df_precios_ibkr.columns:
-                    _vals = _df_precios_ibkr["updated_at_lima"].dropna().astype(str)
-                    if not _vals.empty:
-                        _ultima_actualizacion = _vals.iloc[-1]
-
-                _fuentes_usadas = []
-                if "fuente_precio" in _df_precios_ibkr.columns:
-                    _fuentes_usadas = sorted(_df_precios_ibkr["fuente_precio"].dropna().astype(str).unique().tolist())
-
-                st.caption(
-                    "Precios desde Airflow y/o fallback Yahoo: data/market_prices_portfolio.csv"
-                    + (f" | Fuentes: {', '.join(_fuentes_usadas)}" if _fuentes_usadas else "")
-                    + (f" | Última actualización: {_ultima_actualizacion}" if _ultima_actualizacion else "")
-                )
-
-            _faltantes = _df_resumen.loc[~_df_resumen["tiene_precio"], "ticker"].tolist()
-            if _faltantes:
-                st.warning(
-                    "Hay tickers sin precio disponible: "
-                    + ", ".join(_faltantes)
-                    + ". Si Yahoo Finance usa un símbolo distinto, edita source_symbol en el catálogo."
-                )
-
-            _df_tabla = _df_resumen.copy()
-            if _total_cash_ibkr_usd != 0:
-                _cash_row = {
-                    "ticker": "CASH",
-                    "nombre": "Cash disponible IBKR",
-                    "cantidad_total": _total_cash_ibkr_usd,
-                    "invertido_total_usd": _total_cash_ibkr_usd,
-                    "precio_promedio_compra_usd": 1.0,
-                    "precio_actual_usd": 1.0,
-                    "valor_actual_usd": _total_cash_ibkr_usd,
-                    "ganancia_usd": 0.0,
-                    "rendimiento_pct": 0.0,
-                    "valor_actual_pen": _total_cash_ibkr_usd * _tc_inv,
-                    "ganancia_pen": 0.0,
-                    "fecha_precio": "",
-                    "hora_precio": "",
-                    "exchange": "IBKR",
-                    "fuente_precio": "Cash",
-                    "updated_at_lima": "",
-                    "archivo": "",
-                    "tiene_precio": True,
-                    "estado_precio": "Cash",
-                }
-                _df_tabla = pd.concat([_df_tabla, pd.DataFrame([_cash_row])], ignore_index=True)
-
-            _df_tabla = _df_tabla.sort_values("valor_actual_usd", ascending=False)
-
-            st.dataframe(
-                _df_tabla,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "ticker": st.column_config.TextColumn("Ticker", width="small"),
-                    "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                    "cantidad_total": st.column_config.NumberColumn("Cantidad", format="%.4f", width="small"),
-                    "invertido_total_usd": st.column_config.NumberColumn("Invertido USD", format="US$ %.2f", width="small"),
-                    "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom. compra", format="US$ %.2f", width="small"),
-                    "precio_actual_usd": st.column_config.NumberColumn("Precio actual", format="US$ %.2f", width="small"),
-                    "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f", width="small"),
-                    "ganancia_usd": st.column_config.NumberColumn("Ganancia USD", format="US$ %.2f", width="small"),
-                    "rendimiento_pct": st.column_config.NumberColumn("Rend. %", format="%.2f%%", width="small"),
-                    "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f", width="small"),
-                    "ganancia_pen": st.column_config.NumberColumn("Ganancia PEN", format="S/ %.0f", width="small"),
-                    "fecha_precio": st.column_config.TextColumn("Fecha precio", width="small"),
-                    "hora_precio": st.column_config.TextColumn("Hora precio", width="small"),
-                    "exchange": st.column_config.TextColumn("Exchange", width="small"),
-                    "fuente_precio": st.column_config.TextColumn("Fuente", width="small"),
-                    "updated_at_lima": st.column_config.TextColumn("Actualizado", width="medium"),
-                    "archivo": None,
-                    "tiene_precio": None,
-                    "estado_precio": st.column_config.TextColumn("Estado", width="medium"),
-                }
+        _faltantes = _df_resumen.loc[~_df_resumen["tiene_precio"], "ticker"].tolist()
+        if _faltantes:
+            st.warning(
+                "Hay tickers sin precio actualizado por Airflow: "
+                + ", ".join(_faltantes)
+                + ". Revisa que existan en el catálogo y ejecuta ./run_daily_finance_dags.sh."
             )
 
-            # ──────────────────────────────────────────────
-            # Gráficas simples
-            # ──────────────────────────────────────────────
-            _df_graf = _df_resumen[_df_resumen["tiene_precio"]].copy()
+        _df_tabla = _df_resumen.copy()
+        _df_tabla = _df_tabla.sort_values("invertido_total_usd", ascending=False)
 
-            if not _df_graf.empty:
-                st.markdown("#### 📈 Gráficas rápidas")
+        st.dataframe(
+            _df_tabla,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "ticker": st.column_config.TextColumn("Ticker", width="small"),
+                "nombre": st.column_config.TextColumn("Nombre", width="medium"),
+                "cantidad_total": st.column_config.NumberColumn("Cantidad", format="%.4f", width="small"),
+                "invertido_total_usd": st.column_config.NumberColumn("Invertido USD", format="US$ %.2f", width="small"),
+                "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom. compra", format="US$ %.2f", width="small"),
+                "precio_actual_usd": st.column_config.NumberColumn("Precio actual", format="US$ %.2f", width="small"),
+                "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f", width="small"),
+                "ganancia_usd": st.column_config.NumberColumn("Ganancia USD", format="US$ %.2f", width="small"),
+                "rendimiento_pct": st.column_config.NumberColumn("Rend. %", format="%.2f%%", width="small"),
+                "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f", width="small"),
+                "ganancia_pen": st.column_config.NumberColumn("Ganancia PEN", format="S/ %.0f", width="small"),
+                "fecha_precio": st.column_config.TextColumn("Fecha precio", width="small"),
+                "hora_precio": st.column_config.TextColumn("Hora precio", width="small"),
+                "exchange": st.column_config.TextColumn("Exchange", width="small"),
+                "fuente_precio": st.column_config.TextColumn("Fuente", width="small"),
+                "updated_at_lima": st.column_config.TextColumn("Actualizado", width="medium"),
+                "archivo": None,
+                "tiene_precio": None,
+                "estado_precio": st.column_config.TextColumn("Estado", width="medium"),
+            }
+        )
 
-                _fig_gain = px.bar(
-                    _df_graf.sort_values("ganancia_usd", ascending=False),
-                    x="ticker",
-                    y="ganancia_usd",
-                    text="ganancia_usd",
-                    title="Ganancia / Pérdida por ticker (USD)",
-                    labels={"ticker": "Ticker", "ganancia_usd": "Ganancia/Pérdida USD"},
+        # ──────────────────────────────────────────────
+        # Gráficas simples
+        # ──────────────────────────────────────────────
+        _df_graf = _df_resumen[_df_resumen["tiene_precio"]].copy()
+
+        if not _df_graf.empty:
+            st.markdown("#### 📈 Gráficas rápidas")
+
+            _fig_gain = px.bar(
+                _df_graf.sort_values("ganancia_usd", ascending=False),
+                x="ticker",
+                y="ganancia_usd",
+                text="ganancia_usd",
+                title="Ganancia / Pérdida por ticker (USD)",
+                labels={"ticker": "Ticker", "ganancia_usd": "Ganancia/Pérdida USD"},
+            )
+            _fig_gain.update_traces(texttemplate="US$ %{text:,.2f}", textposition="outside")
+            _fig_gain.update_layout(yaxis_tickprefix="US$ ", uniformtext_minsize=8, uniformtext_mode="hide")
+            st.plotly_chart(_fig_gain, use_container_width=True)
+
+            _df_dist = _df_graf[_df_graf["valor_actual_usd"] > 0].copy()
+            if not _df_dist.empty:
+                _fig_dist = px.pie(
+                    _df_dist,
+                    names="ticker",
+                    values="valor_actual_usd",
+                    hole=0.45,
+                    title="Distribución del portafolio por valor actual",
                 )
-                _fig_gain.update_traces(texttemplate="US$ %{text:,.2f}", textposition="outside")
-                _fig_gain.update_layout(yaxis_tickprefix="US$ ", uniformtext_minsize=8, uniformtext_mode="hide")
-                st.plotly_chart(_fig_gain, use_container_width=True)
+                st.plotly_chart(_fig_dist, use_container_width=True)
 
-                _df_dist = _df_graf[_df_graf["valor_actual_usd"] > 0].copy()
-                if _total_cash_ibkr_usd > 0:
-                    _df_dist = pd.concat([
-                        _df_dist,
-                        pd.DataFrame([{
-                            "ticker": "CASH",
-                            "valor_actual_usd": _total_cash_ibkr_usd,
-                        }])
-                    ], ignore_index=True)
-
-                if not _df_dist.empty:
-                    _fig_dist = px.pie(
-                        _df_dist,
-                        names="ticker",
-                        values="valor_actual_usd",
-                        hole=0.45,
-                        title="Distribución del portafolio por valor actual",
-                    )
-                    st.plotly_chart(_fig_dist, use_container_width=True)
-
-        else:
-            if _total_cash_ibkr_usd != 0:
-                st.markdown("#### 📊 Resumen del portafolio")
-                _valor_total_cash_pen = _total_cash_ibkr_usd * _tc_inv
-                _c1, _c2 = st.columns(2)
-                _c1.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-                _c2.metric("Valor total IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-                st.caption(
-                    f"Valor total estimado en soles: S/ {_valor_total_cash_pen:,.0f} | "
-                    f"TC usado: {_tc_inv:.4f}"
-                )
-                st.dataframe(
-                    pd.DataFrame([{
-                        "ticker": "CASH",
-                        "nombre": "Cash disponible IBKR",
-                        "valor_actual_usd": _total_cash_ibkr_usd,
-                        "valor_actual_pen": _valor_total_cash_pen,
-                    }]),
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "ticker": st.column_config.TextColumn("Ticker", width="small"),
-                        "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                        "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f"),
-                        "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f"),
-                    }
-                )
-            else:
-                st.info("Aún no hay compras ni cash registrados en IBKR. Registra tu primera compra o movimiento de cash arriba.")
-
-
+    else:
+        st.info("Aún no hay compras registradas en IBKR. Registra tu primera compra arriba.")
 
 
 
