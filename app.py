@@ -9,6 +9,7 @@ from plotly.subplots import make_subplots
 from datetime import date, timedelta
 from pathlib import Path
 import uuid
+import requests
 
 def _parse_float_tc(value):
     """Convierte valores numéricos de tipo de cambio aunque vengan como texto con coma decimal."""
@@ -399,6 +400,210 @@ def obtener_source_symbol_ibkr(ticker, catalogo_df=None):
             return symbol if symbol else ticker
 
     return ticker
+
+
+def inferir_tipo_instrumento_ibkr(ticker, nombre=""):
+    """Inferencia ligera para tickers nuevos. No afecta cálculos; solo ordena el catálogo."""
+    ticker = str(ticker or "").upper().strip()
+    nombre_u = str(nombre or "").upper()
+    etfs_comunes = {
+        "VOO", "QQQ", "QQQM", "SPY", "IVV", "VTI", "SCHD", "GLD",
+        "SLV", "DIA", "IWM", "COPX", "XLK", "XLF", "XLE", "XLV"
+    }
+
+    if ticker in etfs_comunes or "ETF" in nombre_u or "TRUST" in nombre_u or "FUND" in nombre_u:
+        return "ETF"
+
+    if ticker.endswith("Y") and len(ticker) >= 5:
+        return "ADR"
+
+    return "Accion"
+
+
+def sincronizar_catalogo_desde_compras_ibkr(compras, catalogo_df=None):
+    """
+    Asegura automáticamente que todo ticker comprado exista en data/ibkr_instruments.csv.
+    Así una compra nueva queda lista para que Airflow la tome en la siguiente corrida,
+    sin editar manualmente el catálogo.
+    """
+    if compras is None:
+        return cargar_catalogo_ibkr(), []
+
+    df_compras = pd.DataFrame(compras)
+    if df_compras.empty or "ticker" not in df_compras.columns:
+        return cargar_catalogo_ibkr(), []
+
+    if catalogo_df is None or catalogo_df.empty:
+        catalogo_df = cargar_catalogo_ibkr()
+
+    catalogo_df = normalizar_catalogo_ibkr(catalogo_df)
+    tickers_catalogo = set(catalogo_df["ticker"].astype(str).str.upper().str.strip())
+    agregados = []
+
+    df_compras["ticker"] = df_compras["ticker"].fillna("").astype(str).str.upper().str.strip()
+    df_compras = df_compras[df_compras["ticker"] != ""].copy()
+
+    for ticker in sorted(df_compras["ticker"].unique()):
+        if ticker in tickers_catalogo:
+            continue
+
+        fila = df_compras[df_compras["ticker"] == ticker].iloc[-1]
+        nombre = str(fila.get("nombre", "")).strip()
+        if nombre in ["", "None", "nan"]:
+            nombre = ticker
+
+        tipo = inferir_tipo_instrumento_ibkr(ticker, nombre)
+        moneda = str(fila.get("moneda", "USD") or "USD").upper().strip()
+
+        catalogo_df = upsert_instrumento_ibkr(
+            ticker=ticker,
+            nombre=nombre,
+            tipo=tipo,
+            moneda=moneda,
+            source_symbol=ticker,
+            fuente_precio="Yahoo Finance",
+            activo=True,
+        )
+        tickers_catalogo.add(ticker)
+        agregados.append(ticker)
+
+    return cargar_catalogo_ibkr(), agregados
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def consultar_precio_yahoo_ibkr(source_symbol):
+    """Consulta Yahoo Finance directamente desde Streamlit como fallback cuando Airflow aún no tiene el ticker."""
+    source_symbol = str(source_symbol or "").strip()
+    if not source_symbol:
+        return None
+
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{source_symbol}"
+        response = requests.get(
+            url,
+            params={"range": "5d", "interval": "1d"},
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        result = data.get("chart", {}).get("result", [])
+        if not result:
+            return None
+
+        result0 = result[0]
+        meta = result0.get("meta", {})
+        indicators = result0.get("indicators", {})
+        quotes = indicators.get("quote", [])
+
+        precio = _parse_float_tc(meta.get("regularMarketPrice"))
+        if precio is None and quotes:
+            closes = quotes[0].get("close", [])
+            closes_validos = [c for c in closes if c is not None]
+            if closes_validos:
+                precio = _parse_float_tc(closes_validos[-1])
+
+        if precio is None or precio <= 0:
+            return None
+
+        market_time = meta.get("regularMarketTime")
+        if market_time:
+            dt_lima = pd.to_datetime(int(market_time), unit="s", utc=True).tz_convert("America/Lima")
+        else:
+            timestamps = result0.get("timestamp", [])
+            if timestamps:
+                dt_lima = pd.to_datetime(int(timestamps[-1]), unit="s", utc=True).tz_convert("America/Lima")
+            else:
+                dt_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
+
+        return {
+            "precio_actual_usd": float(precio),
+            "fecha_precio": dt_lima.date().isoformat(),
+            "hora_precio": dt_lima.strftime("%H:%M:%S"),
+            "moneda_precio": meta.get("currency", "USD"),
+            "exchange": meta.get("exchangeName", ""),
+        }
+
+    except Exception:
+        return None
+
+
+def completar_precios_faltantes_con_yahoo(df_precios, tickers_comprados, catalogo_df):
+    """
+    Si Airflow todavía no trajo un ticker nuevo, la app intenta consultar Yahoo Finance
+    en vivo y usa ese precio como fallback visual. Airflow sigue siendo la fuente primaria.
+    """
+    if tickers_comprados is None:
+        return df_precios, []
+
+    tickers = sorted({str(t or "").upper().strip() for t in tickers_comprados if str(t or "").strip()})
+    if not tickers:
+        return df_precios, []
+
+    if df_precios is None or df_precios.empty:
+        df_base = pd.DataFrame()
+        tickers_con_precio = set()
+    else:
+        df_base = df_precios.copy()
+        df_base["ticker"] = df_base["ticker"].astype(str).str.upper().str.strip()
+        tickers_con_precio = set(df_base["ticker"].dropna().astype(str))
+
+    if catalogo_df is None or catalogo_df.empty:
+        catalogo_df = cargar_catalogo_ibkr()
+
+    catalogo_df = normalizar_catalogo_ibkr(catalogo_df)
+    filas_fallback = []
+    tickers_fallback = []
+    now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
+
+    for ticker in tickers:
+        if ticker in tickers_con_precio:
+            continue
+
+        match = catalogo_df[catalogo_df["ticker"].astype(str).str.upper().str.strip() == ticker]
+        if match.empty:
+            nombre = ticker
+            tipo = inferir_tipo_instrumento_ibkr(ticker, nombre)
+            moneda = "USD"
+            source_symbol = ticker
+        else:
+            row = match.iloc[0]
+            nombre = str(row.get("nombre", ticker)).strip() or ticker
+            tipo = str(row.get("tipo", inferir_tipo_instrumento_ibkr(ticker, nombre))).strip()
+            moneda = str(row.get("moneda", "USD")).upper().strip()
+            source_symbol = str(row.get("source_symbol", ticker)).strip() or ticker
+
+        info = consultar_precio_yahoo_ibkr(source_symbol)
+        if info is None:
+            continue
+
+        filas_fallback.append({
+            "fecha": pd.Timestamp.now(tz=ZoneInfo("America/Lima")).date().isoformat(),
+            "ticker": ticker,
+            "nombre": nombre,
+            "tipo": tipo,
+            "moneda": moneda,
+            "source_symbol": source_symbol,
+            "precio_actual_usd": info["precio_actual_usd"],
+            "fecha_precio": info["fecha_precio"],
+            "hora_precio": info["hora_precio"],
+            "moneda_precio": info["moneda_precio"],
+            "exchange": info["exchange"],
+            "fuente_precio": "Yahoo Finance (fallback app)",
+            "updated_at_lima": now_lima,
+            "archivo": "consulta directa desde app.py",
+        })
+        tickers_fallback.append(ticker)
+
+    if filas_fallback:
+        df_fallback = pd.DataFrame(filas_fallback)
+        if df_base.empty:
+            df_base = df_fallback
+        else:
+            df_base = pd.concat([df_base, df_fallback], ignore_index=True)
+
+    return df_base, tickers_fallback
 
 
 
@@ -2019,8 +2224,8 @@ with st.expander("🏦 3.4 Simulación de préstamos", expanded=False):
 # ==================================================
 with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
     st.caption(
-        "Registra compras de acciones o ETFs en IBKR. La app guarda tus compras en Supabase, "
-        "mantiene un catálogo dinámico de instrumentos y usa los precios actualizados por Airflow."
+        "Registra compras de acciones o ETFs en IBKR. Si compras un ticker nuevo, "
+        "la app lo agrega automáticamente al catálogo y puede consultar Yahoo Finance como respaldo hasta que Airflow lo actualice."
     )
 
     _tc_inv = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
@@ -2032,9 +2237,8 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
     # ──────────────────────────────────────────────
     with st.expander("🧭 Catálogo de instrumentos IBKR / Airflow", expanded=False):
         st.caption(
-            "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. "
-            "Para un nuevo activo, usa normalmente el mismo ticker como source_symbol. "
-            "Si Yahoo Finance usa un símbolo especial, colócalo en source_symbol."
+            "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. Normalmente se actualiza solo cuando registras una compra nueva. "
+            "Edita source_symbol solo si Yahoo Finance usa un símbolo especial."
         )
 
         _df_catalogo_show = _df_catalogo_ibkr.copy()
@@ -2193,8 +2397,8 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
 
                 guardar("inversiones_ibkr")
                 st.success(
-                    "✅ Compra registrada. Si es un ticker nuevo, ejecuta luego "
-                    "./run_daily_finance_dags.sh para que Airflow traiga su precio."
+                    f"✅ Compra registrada. {_inv_ticker} quedó agregado al catálogo si era nuevo. "
+                    "La app intentará mostrar precio vía Yahoo; ejecuta ./run_daily_finance_dags.sh para consolidarlo por Airflow."
                 )
                 st.rerun()
 
@@ -2245,7 +2449,7 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
         st.markdown("#### 📋 Compras registradas")
         st.caption(
             "Puedes editar ticker, cantidad o monto. El precio promedio se recalcula al guardar. "
-            "Si agregas un ticker nuevo desde la tabla, recuerda actualizar también el catálogo."
+            "Si agregas un ticker nuevo, la app lo agrega automáticamente al catálogo."
         )
 
         _df_inv_show = _df_inv.copy()
@@ -2364,6 +2568,36 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
             axis=1
         )
 
+        # Autodetección: todo ticker comprado se agrega al catálogo sin intervención manual.
+        try:
+            _df_catalogo_ibkr, _tickers_auto_catalogo = sincronizar_catalogo_desde_compras_ibkr(
+                st.session_state.get("inversiones_ibkr", []),
+                _df_catalogo_ibkr,
+            )
+            if _tickers_auto_catalogo:
+                st.info(
+                    "Tickers agregados automáticamente al catálogo IBKR: "
+                    + ", ".join(_tickers_auto_catalogo)
+                    + ". Airflow los tomará en la siguiente corrida."
+                )
+        except Exception as _e:
+            st.warning(f"No se pudo sincronizar automáticamente el catálogo IBKR: {_e}")
+
+        # Fallback visual: si Airflow aún no tiene precio de un ticker nuevo,
+        # la app consulta Yahoo Finance en vivo para mostrar valorización inmediata.
+        _df_precios_ibkr, _tickers_fallback_yahoo = completar_precios_faltantes_con_yahoo(
+            _df_precios_ibkr,
+            _df_pos["ticker"].tolist(),
+            _df_catalogo_ibkr,
+        )
+
+        if _tickers_fallback_yahoo:
+            st.info(
+                "Precios consultados directamente desde Yahoo Finance mientras Airflow se actualiza: "
+                + ", ".join(_tickers_fallback_yahoo)
+                + ". Para consolidarlos en CSV, ejecuta ./run_daily_finance_dags.sh."
+            )
+
         if not _df_precios_ibkr.empty:
             _price_cols = [
                 c for c in [
@@ -2405,9 +2639,15 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
         )
         _df_resumen["valor_actual_pen"] = _df_resumen["valor_actual_usd"] * _tc_inv
         _df_resumen["ganancia_pen"] = _df_resumen["ganancia_usd"] * _tc_inv
-        _df_resumen["estado_precio"] = _df_resumen["tiene_precio"].apply(
-            lambda x: "OK Airflow" if x else "Sin precio Airflow"
-        )
+        def _estado_precio_ibkr(row):
+            if not row.get("tiene_precio", False):
+                return "Sin precio"
+            fuente = str(row.get("fuente_precio", ""))
+            if "fallback" in fuente.lower() or "app" in fuente.lower():
+                return "OK Yahoo app"
+            return "OK Airflow"
+
+        _df_resumen["estado_precio"] = _df_resumen.apply(_estado_precio_ibkr, axis=1)
 
         _total_invertido_usd = float(_df_resumen["invertido_total_usd"].sum())
         _total_invertido_con_precio_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "invertido_total_usd"].sum())
@@ -2433,7 +2673,7 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
 
         if _df_precios_ibkr.empty:
             st.info(
-                "No se encontró data/market_prices_portfolio.csv. "
+                "No se encontró data/market_prices_portfolio.csv ni precios fallback. "
                 "Ejecuta ./run_daily_finance_dags.sh para actualizar precios desde Airflow."
             )
         else:
@@ -2443,17 +2683,22 @@ with st.expander("📈 3.5 Portafolio IBKR", expanded=False):
                 if not _vals.empty:
                     _ultima_actualizacion = _vals.iloc[-1]
 
+            _fuentes_usadas = []
+            if "fuente_precio" in _df_precios_ibkr.columns:
+                _fuentes_usadas = sorted(_df_precios_ibkr["fuente_precio"].dropna().astype(str).unique().tolist())
+
             st.caption(
-                "Precios desde Airflow: data/market_prices_portfolio.csv"
+                "Precios desde Airflow y/o fallback Yahoo: data/market_prices_portfolio.csv"
+                + (f" | Fuentes: {', '.join(_fuentes_usadas)}" if _fuentes_usadas else "")
                 + (f" | Última actualización: {_ultima_actualizacion}" if _ultima_actualizacion else "")
             )
 
         _faltantes = _df_resumen.loc[~_df_resumen["tiene_precio"], "ticker"].tolist()
         if _faltantes:
             st.warning(
-                "Hay tickers sin precio actualizado por Airflow: "
+                "Hay tickers sin precio disponible: "
                 + ", ".join(_faltantes)
-                + ". Revisa que existan en el catálogo y ejecuta ./run_daily_finance_dags.sh."
+                + ". Si Yahoo Finance usa un símbolo distinto, edita source_symbol en el catálogo."
             )
 
         _df_tabla = _df_resumen.copy()
