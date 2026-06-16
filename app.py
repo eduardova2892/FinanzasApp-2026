@@ -10,26 +10,152 @@ from datetime import date, timedelta
 from pathlib import Path
 import uuid
 
-def leer_tipo_cambio_usd_pen(path="data/exchange_rate_usd_pen.csv"):
-    """Lee el tipo de cambio USD/PEN generado por el DAG de Airflow."""
+def _parse_float_tc(value):
+    """Convierte valores numéricos de tipo de cambio aunque vengan como texto con coma decimal."""
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        return float(str(value).strip().replace(",", "."))
+    except Exception:
+        return None
+
+
+def leer_ultimo_tipo_cambio(path, nombre_fuente):
+    """
+    Lee el último tipo de cambio desde un CSV generado por Airflow.
+
+    Soporta archivos con estas estructuras:
+    - usd_pen
+    - tipo_cambio
+    - promedio
+    - compra y venta
+    """
     p = Path(path)
     if not p.exists():
         return None
+
     try:
         df = pd.read_csv(p)
-        if df.empty or "usd_pen" not in df.columns:
+
+        if df.empty:
             return None
-        df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-        df = df.dropna(subset=["fecha"]).sort_values("fecha")
+
+        df.columns = [str(c).strip().lower() for c in df.columns]
+
+        if "fecha" in df.columns:
+            df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+            df = df.dropna(subset=["fecha"]).sort_values("fecha")
+
+        if df.empty:
+            return None
+
         latest = df.iloc[-1]
+        tc = None
+
+        if "usd_pen" in df.columns:
+            tc = _parse_float_tc(latest.get("usd_pen"))
+
+        elif "tipo_cambio" in df.columns:
+            tc = _parse_float_tc(latest.get("tipo_cambio"))
+
+        elif "promedio" in df.columns:
+            tc = _parse_float_tc(latest.get("promedio"))
+
+        elif "compra" in df.columns and "venta" in df.columns:
+            compra = _parse_float_tc(latest.get("compra"))
+            venta = _parse_float_tc(latest.get("venta"))
+
+            if compra is not None and venta is not None:
+                tc = (compra + venta) / 2
+
+        if tc is None:
+            return None
+
+        fecha_val = None
+        if "fecha" in df.columns and not pd.isna(latest.get("fecha")):
+            fecha_val = latest["fecha"].date()
+
         return {
-            "fecha":           latest["fecha"].date(),
-            "usd_pen":         float(latest["usd_pen"]),
-            "fuente":          str(latest.get("fuente", "No especificada")),
+            "fecha": fecha_val,
+            "usd_pen": float(tc),
+            "fuente": nombre_fuente,
+            "fuente_csv": str(latest.get("fuente", nombre_fuente)),
+            "fecha_fuente": str(latest.get("fecha_fuente", "")),
             "updated_at_lima": str(latest.get("updated_at_lima", "")),
+            "archivo": str(p),
         }
+
     except Exception:
         return None
+
+
+def leer_tipo_cambio_usd_pen(path="data/exchange_rate_usd_pen.csv"):
+    """
+    Función de compatibilidad para código antiguo.
+    Lee el archivo de tipo de cambio internacional.
+    """
+    return leer_ultimo_tipo_cambio(path, "API internacional")
+
+
+def cargar_tipos_cambio_airflow():
+    """Carga todos los tipos de cambio disponibles generados por Airflow."""
+    archivos_tc = {
+        "BCRP": "data/exchange_rate_bcrp.csv",
+        "BCP": "data/exchange_rate_bcp.csv",
+        "API internacional": "data/exchange_rate_usd_pen.csv",
+    }
+
+    fuentes = {}
+
+    for nombre, ruta in archivos_tc.items():
+        info = leer_ultimo_tipo_cambio(ruta, nombre)
+        if info is not None:
+            fuentes[nombre] = info
+
+    return fuentes
+
+
+def seleccionar_fuente_default_tc(fuentes_tc, preferida=None):
+    """
+    Selecciona una fuente por defecto.
+    Si existe una fuente previamente elegida y está disponible, la mantiene.
+    Si no, toma la fuente más reciente; ante empate prioriza BCRP, luego BCP y luego API internacional.
+    """
+    if not fuentes_tc:
+        return None
+
+    if preferida in fuentes_tc:
+        return preferida
+
+    prioridad = {
+        "BCRP": 1,
+        "BCP": 2,
+        "API internacional": 3,
+    }
+
+    fecha_min = pd.Timestamp.min.date()
+
+    ordenadas = sorted(
+        fuentes_tc.items(),
+        key=lambda x: (
+            x[1]["fecha"] if x[1].get("fecha") is not None else fecha_min,
+            -prioridad.get(x[0], 99),
+        ),
+        reverse=True,
+    )
+
+    return ordenadas[0][0]
+
+
+def obtener_tipo_cambio_default_airflow(fuente_preferida=None):
+    """Devuelve la información de TC seleccionada por defecto desde los CSVs de Airflow."""
+    fuentes_tc = cargar_tipos_cambio_airflow()
+    fuente_default = seleccionar_fuente_default_tc(fuentes_tc, fuente_preferida)
+
+    if fuente_default is None:
+        return None
+
+    return fuentes_tc[fuente_default]
 
 # ==================================================
 # CONFIGURACIÓN GENERAL
@@ -328,20 +454,47 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
             value=float(conf.get("ahorro_inicial", 0.0))
         )
     with col_cp3:
-        _tc_airflow = leer_tipo_cambio_usd_pen()
-        if _tc_airflow:
+        _fuentes_tc_airflow = cargar_tipos_cambio_airflow()
+
+        if _fuentes_tc_airflow:
+            _fuente_default_tc = seleccionar_fuente_default_tc(
+                _fuentes_tc_airflow,
+                conf.get("fuente_tipo_cambio_default")
+            )
+            _opciones_tc = list(_fuentes_tc_airflow.keys())
+            _fuente_tc_cfg = st.selectbox(
+                "Fuente TC Airflow",
+                _opciones_tc,
+                index=_opciones_tc.index(_fuente_default_tc),
+                key="fuente_tipo_cambio_default_cfg",
+                help="Selecciona qué archivo generado por Airflow usará la app como TC por defecto."
+            )
+
+            _tc_airflow = _fuentes_tc_airflow[_fuente_tc_cfg]
             st.metric(
-                "💱 TC en tiempo real (Airflow)",
+                f"💱 TC USD → PEN ({_fuente_tc_cfg})",
                 f"S/ {_tc_airflow['usd_pen']:.4f}",
-                help=f"Fuente: {_tc_airflow['fuente']} | {_tc_airflow['updated_at_lima']}"
+                help=(
+                    f"Archivo: {_tc_airflow['archivo']} | "
+                    f"Fuente CSV: {_tc_airflow['fuente_csv']} | "
+                    f"Fecha: {_tc_airflow['fecha']} | "
+                    f"Actualizado: {_tc_airflow['updated_at_lima']}"
+                )
             )
             _tc_val_default = _tc_airflow["usd_pen"]
+            _tc_widget_key = f"tipo_cambio_default_input_{_fuente_tc_cfg}_{_tc_airflow['fecha']}"
         else:
+            _fuente_tc_cfg = "Manual"
             _tc_val_default = float(conf.get("tipo_cambio_default", 3.85))
+            _tc_widget_key = "tipo_cambio_default_input_manual"
+            st.warning("No se encontraron CSVs de tipo de cambio generados por Airflow.")
+
         tipo_cambio_default = st.number_input(
             "TC USD → PEN (defecto/manual)",
             min_value=1.0, step=0.01,
-            value=round(_tc_val_default, 4),
+            value=round(float(_tc_val_default), 4),
+            format="%.4f",
+            key=_tc_widget_key,
             help="Se auto-rellena desde Airflow si hay datos. Puedes ajustarlo manualmente."
         )
 
@@ -350,7 +503,8 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
         "fecha_fin_sim": fecha_fin_sim.isoformat(),
         "ahorro_inicial": ahorro_inicial,
         "nombre_cuenta_principal": nombre_cuenta_principal,
-        "tipo_cambio_default": tipo_cambio_default
+        "tipo_cambio_default": tipo_cambio_default,
+        "fuente_tipo_cambio_default": _fuente_tc_cfg
     }
     guardar("configuracion")
 
@@ -579,6 +733,10 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
             st.info("Sin tipos de cambio registrados. Se usará el valor por defecto.")
     else:
         st.info("Primero agrega una tarjeta de crédito.")
+
+# TC global de trabajo para cálculos que ocurren antes del bloque de simulación.
+# Sale de la configuración guardada arriba, que a su vez se auto-rellena desde Airflow.
+_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
 
 # ==================================================
 # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
@@ -1771,12 +1929,9 @@ for _p in st.session_state.get("pagos_tarjeta", []):
     if _key_old not in _tc_lookup:
         _tc_lookup[_key_old] = float(_p.get("tipo_de_cambio", 3.85))
 
-# Tipo de cambio default: Airflow tiene prioridad, luego configuración manual
-_tc_airflow_runtime = leer_tipo_cambio_usd_pen()
-if _tc_airflow_runtime:
-    _tc_default = _tc_airflow_runtime["usd_pen"]
-else:
-    _tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+# Tipo de cambio default usado en simulaciones y conversiones USD/PEN.
+# Se usa el valor guardado en configuración, que puede venir de BCRP, BCP, API internacional o ajuste manual.
+_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
 
 # egresos por cuenta: dict cuenta_id -> Series
 egresos_tarjeta_por_cuenta = {}
