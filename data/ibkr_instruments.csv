@@ -1,0 +1,5 @@
+ticker,nombre,tipo,moneda,source_symbol,fuente_precio,activo
+VOO,Vanguard S&P 500 ETF,ETF,USD,VOO,Yahoo Finance,TRUE
+SCCO,Southern Copper Corporation,Accion,USD,SCCO,Yahoo Finance,TRUE
+GLD,SPDR Gold Shares,ETF,USD,GLD,Yahoo Finance,TRUE
+CCOEY,Capcom Co. Ltd. ADR,Accion,USD,CCOEY,Yahoo Finance,TRUE

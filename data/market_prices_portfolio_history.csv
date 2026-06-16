@@ -1,0 +1,5 @@
+fecha,ticker,nombre,tipo,moneda,source_symbol,precio_actual_usd,fecha_precio,hora_precio,moneda_precio,exchange,fuente_precio,updated_at_lima
+2026-06-16,CCOEY,Capcom Co. Ltd. ADR,Accion,USD,CCOEY,9.08,2026-06-16,14:59:55,USD,PNK,Yahoo Finance,2026-06-16 15:41:07
+2026-06-16,GLD,SPDR Gold Shares,ETF,USD,GLD,397.63,2026-06-16,15:00:00,USD,PCX,Yahoo Finance,2026-06-16 15:41:07
+2026-06-16,SCCO,Southern Copper Corporation,Accion,USD,SCCO,194.53,2026-06-16,15:00:02,USD,NYQ,Yahoo Finance,2026-06-16 15:41:07
+2026-06-16,VOO,Vanguard S&P 500 ETF,ETF,USD,VOO,689.75,2026-06-16,15:00:00,USD,PCX,Yahoo Finance,2026-06-16 15:41:07
