@@ -1,5 +1,6 @@
 ticker,nombre,tipo,moneda,source_symbol,fuente_precio,activo
-VOO,Vanguard S&P 500 ETF,ETF,USD,VOO,Yahoo Finance,TRUE
-SCCO,Southern Copper Corporation,Accion,USD,SCCO,Yahoo Finance,TRUE
-GLD,SPDR Gold Shares,ETF,USD,GLD,Yahoo Finance,TRUE
-CCOEY,Capcom Co. Ltd. ADR,Accion,USD,CCOEY,Yahoo Finance,TRUE
+VOO,Vanguard S&P 500 ETF,ETF,USD,VOO,Yahoo Finance,True
+SCCO,Southern Copper Corporation,Accion,USD,SCCO,Yahoo Finance,True
+GLD,SPDR Gold Shares,ETF,USD,GLD,Yahoo Finance,True
+CCOEY,Capcom Co. Ltd. ADR,Accion,USD,CCOEY,Yahoo Finance,True
+QQQ,Invesco QQQ Trust ETF,ETF,USD,QQQ,Yahoo Finance,True
