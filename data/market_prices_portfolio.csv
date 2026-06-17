@@ -1,6 +1,6 @@
 fecha,ticker,nombre,tipo,moneda,source_symbol,precio_actual_usd,fecha_precio,hora_precio,moneda_precio,exchange,fuente_precio,updated_at_lima
-2026-06-17,CCOEY,Capcom Co. Ltd. ADR,Accion,USD,CCOEY,9.19,2026-06-17,10:42:22,USD,PNK,Yahoo Finance,2026-06-17 10:57:57
-2026-06-17,GLD,SPDR Gold Shares,ETF,USD,GLD,400.2,2026-06-17,10:57:58,USD,PCX,Yahoo Finance,2026-06-17 10:57:57
-2026-06-17,QQQ,Invesco QQQ Trust ETF,ETF,USD,QQQ,733.37,2026-06-17,10:58:01,USD,NGM,Yahoo Finance,2026-06-17 10:57:57
-2026-06-17,SCCO,Southern Copper Corporation,Accion,USD,SCCO,201.405,2026-06-17,10:57:35,USD,NYQ,Yahoo Finance,2026-06-17 10:57:57
-2026-06-17,VOO,Vanguard S&P 500 ETF,ETF,USD,VOO,690.239,2026-06-17,10:57:41,USD,PCX,Yahoo Finance,2026-06-17 10:57:57
+2026-06-17,CCOEY,Capcom Co. Ltd. ADR,Accion,USD,CCOEY,9.21,2026-06-17,10:49:49,USD,PNK,Yahoo Finance,2026-06-17 11:23:39
+2026-06-17,GLD,SPDR Gold Shares,ETF,USD,GLD,400.53,2026-06-17,11:23:41,USD,PCX,Yahoo Finance,2026-06-17 11:23:39
+2026-06-17,QQQ,Invesco QQQ Trust ETF,ETF,USD,QQQ,733.68,2026-06-17,11:23:41,USD,NGM,Yahoo Finance,2026-06-17 11:23:39
+2026-06-17,SCCO,Southern Copper Corporation,Accion,USD,SCCO,201.605,2026-06-17,11:23:24,USD,NYQ,Yahoo Finance,2026-06-17 11:23:39
+2026-06-17,VOO,Vanguard S&P 500 ETF,ETF,USD,VOO,690.472,2026-06-17,11:23:36,USD,PCX,Yahoo Finance,2026-06-17 11:23:39
