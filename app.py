@@ -6,10 +6,228 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from pathlib import Path
 import uuid
 import requests
+import re
+import hashlib
+import unicodedata
+
+
+# ==================================================
+# HELPERS IMPORTACIÓN DE CORREOS BCP
+# ==================================================
+_MESES_ES_BCP = {
+    "enero": 1,
+    "febrero": 2,
+    "marzo": 3,
+    "abril": 4,
+    "mayo": 5,
+    "junio": 6,
+    "julio": 7,
+    "agosto": 8,
+    "septiembre": 9,
+    "setiembre": 9,
+    "octubre": 10,
+    "noviembre": 11,
+    "diciembre": 12,
+}
+
+
+def _normalizar_ascii_bcp(texto):
+    """Normaliza texto para búsquedas robustas sin perder el texto original."""
+    if texto is None:
+        return ""
+    txt = str(texto)
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    return txt
+
+
+def _limpiar_espacios_bcp(texto):
+    return re.sub(r"\s+", " ", str(texto or "")).strip()
+
+
+def _parse_monto_bcp(valor):
+    """Convierte montos tipo 33.78, 1,234.56 o 1.234,56 a float."""
+    if valor is None:
+        return None
+    s = str(valor).strip().replace(" ", "")
+    if not s:
+        return None
+    # Caso europeo/latam: 1.234,56
+    if "," in s and "." in s and s.rfind(",") > s.rfind("."):
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # Caso USA/BCP usual: 1,234.56 o 33.78
+        s = s.replace(",", "")
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _parse_fecha_hora_bcp(texto):
+    """Extrae fecha y hora del formato BCP: 14 de junio de 2026 - 06:05 PM."""
+    txt = _normalizar_ascii_bcp(texto).lower()
+    m = re.search(
+        r"(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})\s*[-–]\s*(\d{1,2}):(\d{2})\s*(am|pm)",
+        txt,
+        flags=re.IGNORECASE,
+    )
+    if not m:
+        return None, ""
+
+    dia = int(m.group(1))
+    mes_txt = m.group(2).strip().lower()
+    anio = int(m.group(3))
+    hora = int(m.group(4))
+    minuto = int(m.group(5))
+    ampm = m.group(6).lower()
+
+    mes = _MESES_ES_BCP.get(mes_txt)
+    if not mes:
+        return None, ""
+
+    if ampm == "pm" and hora != 12:
+        hora += 12
+    if ampm == "am" and hora == 12:
+        hora = 0
+
+    try:
+        dt = datetime(anio, mes, dia, hora, minuto)
+        return dt.date(), dt.strftime("%H:%M")
+    except Exception:
+        return None, ""
+
+
+def sugerir_categoria_bcp(empresa):
+    """Reglas iniciales de clasificación por comercio."""
+    e = _normalizar_ascii_bcp(empresa).upper()
+    reglas = [
+        (["RAPPI", "PEDIDOSYA", "RESTAUR", "POLLO", "CAFE", "CAFETER", "PIZZA", "BURGER", "KFC", "MCDON", "STARBUCKS"], "Alimentación"),
+        (["UBER", "CABIFY", "YANGO", "TAXI", "DIDI", "BEAT"], "Movilidad"),
+        (["WONG", "TOTTUS", "PLAZA VEA", "VIVANDA", "METRO", "MAKRO", "SUPERMERC"], "Supermercado"),
+        (["INKAFARMA", "MIFARMA", "FARMACIA", "CLINICA", "MEDIC", "SALUD"], "Salud"),
+        (["PET", "VET", "VETERIN"], "Mascotas"),
+        (["PLIN", "YAPE", "TRANSFER", "PAGO", "ENVIO"], "Otros"),
+        (["SHELL", "PRIMAX", "REPSOL", "GRIFO", "PECSA"], "Combustible"),
+        (["NETFLIX", "SPOTIFY", "STEAM", "PLAYSTATION", "APPLE", "GOOGLE", "AMAZON"], "Entretenimiento"),
+    ]
+    for keywords, categoria in reglas:
+        if any(k in e for k in keywords):
+            return categoria
+    return "Otros"
+
+
+def parsear_correo_bcp_consumo(texto):
+    """
+    Parser inicial para correos de consumo BCP de tarjeta de crédito o débito.
+    Retorna un dict listo para revisión/importación en Streamlit.
+    """
+    original = str(texto or "")
+    compacto = _limpiar_espacios_bcp(original)
+    compacto_ascii = _normalizar_ascii_bcp(compacto)
+
+    if "bcp" not in compacto_ascii.lower():
+        return None
+    if "realizaste un consumo" not in compacto_ascii.lower() and "consumo tarjeta" not in compacto_ascii.lower():
+        return None
+
+    # Línea principal: Realizaste un consumo de S/ 33.78 con tu Tarjeta de Crédito BCP en RAPPI SAC.
+    patron_principal = re.search(
+        r"Realizaste\s+un\s+consumo\s+de\s+(S/|US\$|USD|\$)\s*([\d\.,]+)\s+con\s+tu\s+Tarjeta\s+de\s+(Cr[eé]dito|D[eé]bito)\s+BCP\s+en\s+(.+?)(?:\.|\n|$)",
+        compacto,
+        flags=re.IGNORECASE,
+    )
+
+    moneda = "PEN"
+    monto = None
+    medio_pago = None
+    empresa = ""
+
+    if patron_principal:
+        simbolo = patron_principal.group(1).upper().replace(" ", "")
+        monto = _parse_monto_bcp(patron_principal.group(2))
+        medio_pago = "Credito" if "cr" in _normalizar_ascii_bcp(patron_principal.group(3)).lower() else "Debito"
+        empresa = patron_principal.group(4).strip(" .-\n\t")
+        if simbolo in ["US$", "USD", "$"]:
+            moneda = "USD"
+    else:
+        # Fallback para texto copiado de tabla: Total del consumo S/ 33.78 ... Operación realizada Consumo Tarjeta de Crédito ... Empresa RAPPI SAC
+        m_monto = re.search(r"Total\s+del\s+consumo\s+(S/|US\$|USD|\$)\s*([\d\.,]+)", compacto, flags=re.IGNORECASE)
+        if m_monto:
+            simbolo = m_monto.group(1).upper().replace(" ", "")
+            monto = _parse_monto_bcp(m_monto.group(2))
+            if simbolo in ["US$", "USD", "$"]:
+                moneda = "USD"
+
+        if re.search(r"Consumo\s+Tarjeta\s+de\s+Cr[eé]dito", compacto, flags=re.IGNORECASE):
+            medio_pago = "Credito"
+        elif re.search(r"Consumo\s+Tarjeta\s+de\s+D[eé]bito", compacto, flags=re.IGNORECASE):
+            medio_pago = "Debito"
+
+        m_emp = re.search(r"Empresa\s+(.+?)(?:\s+N[uú]mero\s+de\s+operaci[oó]n|$)", compacto, flags=re.IGNORECASE)
+        if m_emp:
+            empresa = m_emp.group(1).strip(" .-\n\t")
+
+    fecha_op, hora_op = _parse_fecha_hora_bcp(compacto)
+
+    tarjeta_ultimos4 = ""
+    m_tar = re.search(r"(?:\*{4,}|x{4,}|X{4,})(\d{4})", compacto)
+    if m_tar:
+        tarjeta_ultimos4 = m_tar.group(1)
+
+    numero_operacion = ""
+    m_op = re.search(r"N[uú]mero\s+de\s+operaci[oó]n\s+([A-Za-z0-9\-]+)", compacto, flags=re.IGNORECASE)
+    if m_op:
+        numero_operacion = m_op.group(1).strip()
+
+    if not monto or not medio_pago or not empresa:
+        return None
+
+    categoria = sugerir_categoria_bcp(empresa)
+
+    base_hash = "|".join([
+        "BCP",
+        medio_pago,
+        str(fecha_op or ""),
+        f"{monto:.2f}",
+        moneda,
+        empresa.upper(),
+        tarjeta_ultimos4,
+        numero_operacion,
+    ])
+    hash_importacion = hashlib.sha256(base_hash.encode("utf-8")).hexdigest()[:16]
+
+    return {
+        "banco": "BCP",
+        "medio_pago": medio_pago,
+        "fecha": fecha_op,
+        "hora": hora_op,
+        "monto": float(monto),
+        "moneda": moneda,
+        "empresa": empresa,
+        "categoria_sugerida": categoria,
+        "tarjeta_ultimos4": tarjeta_ultimos4,
+        "numero_operacion": numero_operacion,
+        "hash_importacion": hash_importacion,
+        "descripcion_sugerida": f"{empresa} | BCP {medio_pago}",
+    }
+
+
+def existe_importacion_bcp(hash_importacion, numero_operacion=""):
+    """Evita duplicados entre gastos débito y crédito ya importados desde correos."""
+    h = str(hash_importacion or "")
+    op = str(numero_operacion or "").strip()
+    for lista in [st.session_state.get("gastos_diarios", []), st.session_state.get("gastos_tarjeta", [])]:
+        for g in lista:
+            if h and str(g.get("hash_importacion", "")) == h:
+                return True
+            if op and str(g.get("numero_operacion", "")).strip() == op and str(g.get("banco", "")).upper() == "BCP":
+                return True
+    return False
 
 def _parse_float_tc(value):
     """Convierte valores numéricos de tipo de cambio aunque vengan como texto con coma decimal."""
@@ -1550,6 +1768,231 @@ with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False
 
 with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
+
+    # ==================================================
+    # 3.0 IMPORTACIÓN SEMIAUTOMÁTICA DE CORREOS BCP
+    # ==================================================
+    with st.expander("📩 3.0 Importar gastos desde correos BCP", expanded=False):
+        st.markdown("### 📩 Importar gasto desde correo BCP")
+        st.caption(
+            "Primera versión semi-automática: pega el texto del correo de consumo BCP, "
+            "la app extrae monto, fecha, comercio y si fue débito o crédito. Luego revisas y confirmas antes de guardar."
+        )
+
+        _txt_bcp = st.text_area(
+            "Pega aquí el texto del correo BCP",
+            height=220,
+            placeholder=(
+                "Ejemplo: Realizaste un consumo de S/ 33.78 con tu Tarjeta de Crédito BCP en RAPPI SAC..."
+            ),
+            key="bcp_email_text_area",
+        )
+
+        _col_parse_bcp, _col_clear_bcp = st.columns([2, 1])
+        with _col_parse_bcp:
+            if st.button("🔎 Analizar correo BCP", type="primary", use_container_width=True):
+                _parsed_bcp = parsear_correo_bcp_consumo(_txt_bcp)
+                if _parsed_bcp is None:
+                    st.session_state.pop("bcp_email_parsed", None)
+                    st.error("No pude detectar un consumo BCP válido. Revisa que hayas pegado el texto del correo completo.")
+                else:
+                    st.session_state["bcp_email_parsed"] = _parsed_bcp
+                    st.success("✅ Correo BCP interpretado. Revisa los campos antes de importar.")
+        with _col_clear_bcp:
+            if st.button("🧹 Limpiar", use_container_width=True):
+                st.session_state.pop("bcp_email_parsed", None)
+                st.rerun()
+
+        _parsed_bcp = st.session_state.get("bcp_email_parsed")
+        if _parsed_bcp:
+            _fecha_default_bcp = _parsed_bcp.get("fecha") or hoy_peru
+            _categoria_default_bcp = _parsed_bcp.get("categoria_sugerida", "Otros")
+            if _categoria_default_bcp not in st.session_state["categorias"]:
+                _categoria_default_bcp = "Otros" if "Otros" in st.session_state["categorias"] else sorted(st.session_state["categorias"])[0]
+
+            st.markdown("#### ✅ Gasto detectado")
+            _p1, _p2, _p3, _p4 = st.columns(4)
+            _p1.metric("Banco", _parsed_bcp.get("banco", "BCP"))
+            _p2.metric("Medio", _parsed_bcp.get("medio_pago", ""))
+            _p3.metric("Monto", f"{_parsed_bcp.get('moneda', 'PEN')} {_parsed_bcp.get('monto', 0):,.2f}")
+            _p4.metric("Empresa", _parsed_bcp.get("empresa", ""))
+
+            if existe_importacion_bcp(_parsed_bcp.get("hash_importacion"), _parsed_bcp.get("numero_operacion")):
+                st.warning("⚠️ Este correo parece ya importado. Si lo vuelves a guardar podrías duplicar el gasto.")
+
+            # Mapas para cuenta débito y tarjeta crédito
+            _nombre_cuenta_principal_bcp = st.session_state["configuracion"].get(
+                "nombre_cuenta_principal",
+                "Cuenta principal",
+            )
+            _cuentas_debito_bcp = {_nombre_cuenta_principal_bcp: "principal"}
+            for _c_bcp in st.session_state["cuentas_ahorro"]:
+                _cuentas_debito_bcp[_c_bcp["nombre"]] = _c_bcp["id"]
+            _cuentas_debito_nombres_bcp = list(_cuentas_debito_bcp.keys())
+            _cuenta_default_idx_bcp = 0
+            for _i, _n in enumerate(_cuentas_debito_nombres_bcp):
+                if "BCP" in str(_n).upper():
+                    _cuenta_default_idx_bcp = _i
+                    break
+
+            _tarjetas_bcp_map = {t["nombre"]: t["id"] for t in st.session_state.get("tarjetas", [])}
+            _tarjetas_bcp_nombres = list(_tarjetas_bcp_map.keys())
+            _tarjeta_default_idx_bcp = 0
+            for _i, _n in enumerate(_tarjetas_bcp_nombres):
+                _n_up = str(_n).upper()
+                if "BCP" in _n_up or str(_parsed_bcp.get("tarjeta_ultimos4", "")) in _n_up:
+                    _tarjeta_default_idx_bcp = _i
+                    break
+
+            with st.form("form_confirmar_importacion_bcp"):
+                _bcp_c1, _bcp_c2, _bcp_c3 = st.columns(3)
+                with _bcp_c1:
+                    _bcp_fecha = st.date_input("Fecha operación", value=_fecha_default_bcp, key="bcp_import_fecha")
+                    _bcp_medio = st.selectbox(
+                        "Medio de pago",
+                        ["Debito", "Credito"],
+                        index=0 if _parsed_bcp.get("medio_pago") == "Debito" else 1,
+                        key="bcp_import_medio",
+                    )
+                with _bcp_c2:
+                    _bcp_moneda = st.selectbox(
+                        "Moneda",
+                        ["PEN", "USD"],
+                        index=0 if _parsed_bcp.get("moneda", "PEN") == "PEN" else 1,
+                        key="bcp_import_moneda",
+                    )
+                    _bcp_monto = st.number_input(
+                        "Monto",
+                        min_value=0.0,
+                        value=float(_parsed_bcp.get("monto", 0.0)),
+                        step=0.1,
+                        key="bcp_import_monto",
+                    )
+                with _bcp_c3:
+                    _bcp_categoria = st.selectbox(
+                        "Categoría",
+                        sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Otros"],
+                        index=(sorted(st.session_state["categorias"]).index(_categoria_default_bcp) if st.session_state["categorias"] and _categoria_default_bcp in sorted(st.session_state["categorias"]) else 0),
+                        key="bcp_import_categoria",
+                    )
+                    _bcp_empresa = st.text_input("Empresa / comercio", value=_parsed_bcp.get("empresa", ""), key="bcp_import_empresa")
+
+                _bcp_d1, _bcp_d2, _bcp_d3 = st.columns(3)
+                with _bcp_d1:
+                    _bcp_hora = st.text_input("Hora", value=_parsed_bcp.get("hora", ""), key="bcp_import_hora")
+                with _bcp_d2:
+                    _bcp_ult4 = st.text_input("Últimos 4 tarjeta", value=_parsed_bcp.get("tarjeta_ultimos4", ""), key="bcp_import_ult4")
+                with _bcp_d3:
+                    _bcp_operacion = st.text_input("Nro. operación", value=_parsed_bcp.get("numero_operacion", ""), key="bcp_import_operacion")
+
+                if _bcp_medio == "Debito":
+                    _bcp_destino = st.selectbox(
+                        "Cuenta BCP a descontar",
+                        _cuentas_debito_nombres_bcp,
+                        index=_cuenta_default_idx_bcp,
+                        key="bcp_import_cuenta_debito",
+                    )
+                else:
+                    if _tarjetas_bcp_nombres:
+                        _bcp_destino = st.selectbox(
+                            "Tarjeta de crédito BCP",
+                            _tarjetas_bcp_nombres,
+                            index=_tarjeta_default_idx_bcp,
+                            key="bcp_import_tarjeta_credito",
+                        )
+                    else:
+                        _bcp_destino = None
+                        st.warning("No tienes tarjetas registradas. Crea una tarjeta primero para importar consumos de crédito.")
+
+                _bcp_confirmar = st.checkbox(
+                    "Confirmo que revisé el gasto y quiero importarlo",
+                    value=False,
+                    key="bcp_import_confirmar",
+                )
+
+                if st.form_submit_button("📥 Importar gasto BCP", type="primary", use_container_width=True):
+                    if not _bcp_confirmar:
+                        st.warning("Marca la confirmación antes de importar.")
+                        st.stop()
+                    if _bcp_monto <= 0:
+                        st.warning("El monto debe ser mayor a cero.")
+                        st.stop()
+                    if existe_importacion_bcp(_parsed_bcp.get("hash_importacion"), _bcp_operacion):
+                        st.error("Este gasto ya fue importado. No se guardó para evitar duplicados.")
+                        st.stop()
+                    if _bcp_categoria not in st.session_state["categorias"]:
+                        st.session_state["categorias"].append(_bcp_categoria)
+                        st.session_state["categorias"] = sorted(list(set(st.session_state["categorias"])))
+                        guardar("categorias")
+
+                    _hash_final_bcp = hashlib.sha256(
+                        "|".join([
+                            "BCP",
+                            _bcp_medio,
+                            _bcp_fecha.isoformat(),
+                            f"{_bcp_monto:.2f}",
+                            _bcp_moneda,
+                            _bcp_empresa.upper(),
+                            _bcp_ult4,
+                            _bcp_operacion,
+                        ]).encode("utf-8")
+                    ).hexdigest()[:16]
+
+                    if _bcp_medio == "Debito":
+                        _nuevo_debito_bcp = {
+                            "id": str(uuid.uuid4()),
+                            "fecha": _bcp_fecha.isoformat(),
+                            "cuenta_origen": _cuentas_debito_bcp.get(_bcp_destino, "principal"),
+                            "cuenta_origen_nombre": _bcp_destino,
+                            "categoria": _bcp_categoria,
+                            "descripcion": _bcp_empresa,
+                            "monto": float(_bcp_monto),
+                            "fuente": "Correo BCP",
+                            "banco": "BCP",
+                            "medio_pago": "Debito",
+                            "moneda": _bcp_moneda,
+                            "empresa": _bcp_empresa,
+                            "hora": _bcp_hora,
+                            "tarjeta_ultimos4": _bcp_ult4,
+                            "numero_operacion": _bcp_operacion,
+                            "hash_importacion": _hash_final_bcp,
+                        }
+                        st.session_state["gastos_diarios"].append(_nuevo_debito_bcp)
+                        guardar("gastos_diarios")
+                        st.success("✅ Gasto BCP débito importado correctamente.")
+                    else:
+                        if not _bcp_destino:
+                            st.error("Selecciona una tarjeta de crédito.")
+                            st.stop()
+                        _nuevo_credito_bcp = {
+                            "id": str(uuid.uuid4()),
+                            "fecha": _bcp_fecha.isoformat(),
+                            "tarjeta_id": _tarjetas_bcp_map[_bcp_destino],
+                            "tarjeta_nombre": _bcp_destino,
+                            "categoria": _bcp_categoria,
+                            "descripcion": _bcp_empresa,
+                            "moneda": _bcp_moneda,
+                            "monto": float(_bcp_monto),
+                            "fuente": "Correo BCP",
+                            "banco": "BCP",
+                            "medio_pago": "Credito",
+                            "empresa": _bcp_empresa,
+                            "hora": _bcp_hora,
+                            "tarjeta_ultimos4": _bcp_ult4,
+                            "numero_operacion": _bcp_operacion,
+                            "hash_importacion": _hash_final_bcp,
+                        }
+                        st.session_state["gastos_tarjeta"].append(_nuevo_credito_bcp)
+                        guardar("gastos_tarjeta")
+                        st.success("✅ Gasto BCP crédito importado correctamente.")
+
+                    st.session_state.pop("bcp_email_parsed", None)
+                    st.rerun()
+
+        st.info(
+            "Siguiente etapa: conectar Gmail API para que esta lectura ya no dependa de pegar el correo manualmente."
+        )
+
     # ==================================================
     # 3.1 GASTOS DIARIOS DÉBITO Y CRÉDITO
     # ==================================================
@@ -1853,6 +2296,14 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                         "descripcion":    st.column_config.TextColumn("📝 Descripción", width="large"),
                         "moneda":         st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
                         "monto":          st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=0.1, required=True, format="%,.1f", width="small"),
+                        "fuente":         None,
+                        "banco":          None,
+                        "medio_pago":     None,
+                        "empresa":        None,
+                        "hora":           None,
+                        "tarjeta_ultimos4": None,
+                        "numero_operacion": None,
+                        "hash_importacion": None,
                     },
                     key="editor_gastos_tarjeta"
                 )
