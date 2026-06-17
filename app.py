@@ -2205,217 +2205,15 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
 
 # ==================================================
-# 3.4 FUNCIONES AVANZADAS
+# ==================================================
+# 4. FUNCIONES AVANZADAS
 # ==================================================
 with st.expander("🧩 4. Funciones avanzadas", expanded=False):
-    st.caption("Módulos complementarios: transferencias a IBKR, simulación de préstamos y seguimiento del portafolio IBKR.")
+    st.caption("Módulos complementarios: simulación de préstamos y flujo completo de IBKR: cash, compras, valorización y seguimiento.")
 
+# 4.1 SIMULACIÓN DE PRÉSTAMOS
     # ==================================================
-    # 4.1 TRANSFERENCIAS A IBKR
-    # ==================================================
-    with st.expander("💱 Transferir fondos a IBKR", expanded=False):
-        st.caption(
-            "Retira dinero de una cuenta local, aplica una comisión y convierte el monto enviado a USD. "
-            "El resultado se suma automáticamente al cash IBKR y el total debitado se descuenta de la cuenta origen en los gráficos."
-        )
-
-        _tf_ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-        _tf_ctas = {_tf_ncp: "principal"}
-        for _tf_c in st.session_state.get("cuentas_ahorro", []):
-            _tf_nombre = str(_tf_c.get("nombre", "")).strip()
-            if _tf_nombre and "IBKR" not in _tf_nombre.upper():
-                _tf_ctas[_tf_nombre] = _tf_c.get("id")
-
-        _tf_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
-
-        with st.form("form_transferencia_a_ibkr", clear_on_submit=True):
-            st.markdown("#### ➕ Nueva transferencia a IBKR")
-            _tf1, _tf2, _tf3 = st.columns(3)
-
-            with _tf1:
-                _tf_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_transferencia_ibkr")
-                _tf_origen_nombre = st.selectbox(
-                    "Cuenta origen",
-                    list(_tf_ctas.keys()),
-                    key="cuenta_origen_transferencia_ibkr"
-                )
-
-            with _tf2:
-                _tf_monto_pen = st.number_input(
-                    "Monto enviado a IBKR (S/)",
-                    min_value=0.0,
-                    step=100.0,
-                    format="%.2f",
-                    key="monto_pen_transferencia_ibkr",
-                    help="Monto en soles que quieres convertir a dólares para tu cash IBKR."
-                )
-                _tf_tc = st.number_input(
-                    "TC USD → PEN usado",
-                    min_value=1.0,
-                    step=0.01,
-                    value=round(_tf_tc_default, 4),
-                    format="%.4f",
-                    key="tc_transferencia_ibkr"
-                )
-
-            with _tf3:
-                _tf_comision_monto = st.number_input(
-                    "Comisión",
-                    min_value=0.0,
-                    step=1.0,
-                    format="%.2f",
-                    key="comision_transferencia_ibkr"
-                )
-                _tf_comision_moneda = st.selectbox(
-                    "Moneda comisión",
-                    ["PEN", "USD"],
-                    key="moneda_comision_transferencia_ibkr"
-                )
-
-            _tf_desc = st.text_input(
-                "Descripción / referencia",
-                placeholder="Ej.: Transferencia BCP → IBKR, wire fee, depósito para invertir",
-                key="descripcion_transferencia_ibkr"
-            )
-
-            _tf_comision_pen = float(_tf_comision_monto) if _tf_comision_moneda == "PEN" else float(_tf_comision_monto) * float(_tf_tc)
-            _tf_total_debitado_pen = float(_tf_monto_pen) + float(_tf_comision_pen)
-            _tf_monto_usd = float(_tf_monto_pen) / float(_tf_tc) if _tf_tc > 0 else 0.0
-
-            st.info(
-                f"Vista previa: se descontará **S/ {_tf_total_debitado_pen:,.2f}** de {_tf_origen_nombre} "
-                f"y se agregará **US$ {_tf_monto_usd:,.2f}** al cash IBKR. "
-                f"Comisión equivalente: S/ {_tf_comision_pen:,.2f}."
-            )
-
-            if st.form_submit_button("➕ Registrar transferencia a IBKR", use_container_width=True, type="primary"):
-                if _tf_monto_pen <= 0:
-                    st.warning("Ingresa un monto enviado a IBKR mayor a cero.")
-                elif _tf_tc <= 0:
-                    st.warning("El tipo de cambio debe ser mayor a cero.")
-                else:
-                    st.session_state["ibkr_transferencias"].append({
-                        "id": str(uuid.uuid4()),
-                        "fecha": _tf_fecha.isoformat(),
-                        "cuenta_origen_id": _tf_ctas.get(_tf_origen_nombre, "principal"),
-                        "cuenta_origen_nombre": _tf_origen_nombre,
-                        "monto_pen": float(_tf_monto_pen),
-                        "tc_usd_pen": float(_tf_tc),
-                        "monto_usd": float(_tf_monto_usd),
-                        "comision_monto": float(_tf_comision_monto),
-                        "comision_moneda": _tf_comision_moneda,
-                        "comision_pen": float(_tf_comision_pen),
-                        "total_debitado_pen": float(_tf_total_debitado_pen),
-                        "descripcion": _tf_desc,
-                    })
-                    guardar("ibkr_transferencias")
-                    st.success("✅ Transferencia registrada. El monto USD ya se suma al cash IBKR y el total debitado se descuenta de la cuenta origen.")
-                    st.rerun()
-
-        _df_tf_ibkr = pd.DataFrame(st.session_state.get("ibkr_transferencias", []))
-        if not _df_tf_ibkr.empty:
-            for _col, _default in {
-                "id": "",
-                "fecha": hoy_peru.isoformat(),
-                "cuenta_origen_id": "principal",
-                "cuenta_origen_nombre": _tf_ncp,
-                "monto_pen": 0.0,
-                "tc_usd_pen": _tf_tc_default,
-                "monto_usd": 0.0,
-                "comision_monto": 0.0,
-                "comision_moneda": "PEN",
-                "comision_pen": 0.0,
-                "total_debitado_pen": 0.0,
-                "descripcion": "",
-            }.items():
-                if _col not in _df_tf_ibkr.columns:
-                    _df_tf_ibkr[_col] = _default
-
-            _df_tf_ibkr["id"] = _df_tf_ibkr["id"].apply(
-                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-            )
-            _df_tf_ibkr["fecha"] = pd.to_datetime(_df_tf_ibkr["fecha"], errors="coerce").dt.date
-            _df_tf_ibkr["monto_pen"] = pd.to_numeric(_df_tf_ibkr["monto_pen"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["tc_usd_pen"] = pd.to_numeric(_df_tf_ibkr["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
-            _df_tf_ibkr["monto_usd"] = pd.to_numeric(_df_tf_ibkr["monto_usd"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["comision_monto"] = pd.to_numeric(_df_tf_ibkr["comision_monto"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["comision_moneda"] = _df_tf_ibkr["comision_moneda"].fillna("PEN").astype(str).str.upper()
-            _df_tf_ibkr["comision_pen"] = pd.to_numeric(_df_tf_ibkr["comision_pen"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["total_debitado_pen"] = pd.to_numeric(_df_tf_ibkr["total_debitado_pen"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["descripcion"] = _df_tf_ibkr["descripcion"].fillna("").astype(str)
-            _df_tf_ibkr["Eliminar"] = False
-
-            _cash_tf_usd = float(_df_tf_ibkr["monto_usd"].sum())
-            _debito_tf_pen = float(_df_tf_ibkr["total_debitado_pen"].sum())
-            _metric_tf1, _metric_tf2, _metric_tf3 = st.columns(3)
-            _metric_tf1.metric("Cash generado por transferencias", f"US$ {_cash_tf_usd:,.2f}")
-            _metric_tf2.metric("Total debitado de cuentas", f"S/ {_debito_tf_pen:,.0f}")
-            _metric_tf3.metric("TC actual configuración", f"{_tf_tc_default:.4f}")
-
-            st.caption("Puedes editar una transferencia; al guardar se recalculan USD, comisión equivalente y total debitado.")
-            _ed_tf_ibkr = st.data_editor(
-                _df_tf_ibkr,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                height=min(38 * len(_df_tf_ibkr) + 46, 320),
-                column_config={
-                    "id": None,
-                    "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
-                    "cuenta_origen_id": None,
-                    "cuenta_origen_nombre": st.column_config.SelectboxColumn("Cuenta origen", options=list(_tf_ctas.keys()), width="medium"),
-                    "monto_pen": st.column_config.NumberColumn("Monto enviado S/", min_value=0.0, step=100.0, format="S/ %.2f", width="small"),
-                    "tc_usd_pen": st.column_config.NumberColumn("TC", min_value=1.0, step=0.01, format="%.4f", width="small"),
-                    "monto_usd": st.column_config.NumberColumn("Cash IBKR USD", format="US$ %.2f", width="small", disabled=True),
-                    "comision_monto": st.column_config.NumberColumn("Comisión", min_value=0.0, step=1.0, format="%.2f", width="small"),
-                    "comision_moneda": st.column_config.SelectboxColumn("Moneda comisión", options=["PEN", "USD"], width="small"),
-                    "comision_pen": st.column_config.NumberColumn("Comisión PEN", format="S/ %.2f", width="small", disabled=True),
-                    "total_debitado_pen": st.column_config.NumberColumn("Total debitado PEN", format="S/ %.2f", width="small", disabled=True),
-                    "descripcion": st.column_config.TextColumn("Descripción", width="large"),
-                    "Eliminar": st.column_config.CheckboxColumn("🗑"),
-                },
-                key="editor_transferencias_ibkr"
-            )
-
-            if st.button("💾 Guardar transferencias a IBKR", type="primary"):
-                _df_tf_save = _ed_tf_ibkr.copy()
-                _df_tf_save = _df_tf_save[_df_tf_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-
-                if not _df_tf_save.empty:
-                    _df_tf_save["id"] = _df_tf_save["id"].apply(
-                        lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-                    )
-                    _df_tf_save["fecha"] = pd.to_datetime(_df_tf_save["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    _df_tf_save["cuenta_origen_nombre"] = _df_tf_save["cuenta_origen_nombre"].fillna(_tf_ncp).astype(str)
-                    _df_tf_save["cuenta_origen_id"] = _df_tf_save["cuenta_origen_nombre"].map(lambda n: _tf_ctas.get(str(n), "principal"))
-                    _df_tf_save["monto_pen"] = pd.to_numeric(_df_tf_save["monto_pen"], errors="coerce").fillna(0.0)
-                    _df_tf_save["tc_usd_pen"] = pd.to_numeric(_df_tf_save["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
-                    _df_tf_save["tc_usd_pen"] = _df_tf_save["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
-                    _df_tf_save["comision_monto"] = pd.to_numeric(_df_tf_save["comision_monto"], errors="coerce").fillna(0.0)
-                    _df_tf_save["comision_moneda"] = _df_tf_save["comision_moneda"].fillna("PEN").astype(str).str.upper()
-                    _df_tf_save["comision_pen"] = _df_tf_save.apply(
-                        lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
-                        axis=1
-                    )
-                    _df_tf_save["monto_usd"] = _df_tf_save["monto_pen"] / _df_tf_save["tc_usd_pen"]
-                    _df_tf_save["total_debitado_pen"] = _df_tf_save["monto_pen"] + _df_tf_save["comision_pen"]
-                    _df_tf_save["descripcion"] = _df_tf_save["descripcion"].fillna("").astype(str)
-                    _df_tf_save = _df_tf_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                    st.session_state["ibkr_transferencias"] = _df_tf_save.to_dict("records")
-                else:
-                    st.session_state["ibkr_transferencias"] = []
-
-                guardar("ibkr_transferencias")
-                st.success("✅ Transferencias a IBKR actualizadas.")
-                st.rerun()
-        else:
-            st.info("No hay transferencias a IBKR registradas todavía.")
-
-
-    # ==================================================
-    # 4.2 SIMULACIÓN DE PRÉSTAMOS
-    # ==================================================
-    with st.expander("🏦 Simulación de préstamos", expanded=False):
+    with st.expander("🏦 4.1 Simulación de préstamos", expanded=False):
         st.caption("Simula el impacto de un préstamo en tus ahorros. Puedes guardar la simulación y activar/desactivar su efecto en los gráficos.")
 
         # ── Mapas de cuentas y tarjetas ──────────────────────────────
@@ -2585,11 +2383,11 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
 
 
     # ==================================================
-    # 4.3 PORTAFOLIO IBKR
+    # 4.2 PORTAFOLIO IBKR
     # ==================================================
-    with st.expander("📈 Portafolio IBKR", expanded=False):
+    with st.expander("📈 4.2 IBKR: cash e inversiones", expanded=False):
         st.caption(
-            "Registra compras de acciones o ETFs en IBKR. Si compras un ticker nuevo, "
+            "Primero agrega cash a IBKR desde una cuenta local; luego usa ese cash para comprar acciones o ETFs. Si compras un ticker nuevo, "
             "la app lo agrega automáticamente al catálogo y puede consultar Yahoo Finance como respaldo hasta que Airflow lo actualice."
         )
 
@@ -2630,12 +2428,413 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
         _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
 
         # ──────────────────────────────────────────────
-        # Cash disponible en IBKR
+        # Paso 1: Transferir fondos desde cuentas locales hacia IBKR
         # ──────────────────────────────────────────────
-        with st.expander("💵 Cash IBKR / fondos sin invertir", expanded=False):
+        st.markdown("#### 1️⃣ Agregar cash a IBKR desde una cuenta")
+        st.caption(
+            "Primero registra el dinero que sale de una cuenta local y llega como cash USD a IBKR. "
+            "Puedes ingresar el monto enviado en soles o dólares, y la comisión en soles o dólares."
+        )
+
+        _tf_ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        _tf_ctas = {_tf_ncp: "principal"}
+        for _tf_c in st.session_state.get("cuentas_ahorro", []):
+            _tf_nombre = str(_tf_c.get("nombre", "")).strip()
+            if _tf_nombre and "IBKR" not in _tf_nombre.upper():
+                _tf_ctas[_tf_nombre] = _tf_c.get("id")
+
+        _tf_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
+
+        with st.form("form_transferencia_a_ibkr", clear_on_submit=True):
+            st.markdown("##### ➕ Nueva transferencia / depósito a IBKR")
+            _tf1, _tf2, _tf3 = st.columns(3)
+
+            with _tf1:
+                _tf_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_transferencia_ibkr")
+                _tf_origen_nombre = st.selectbox(
+                    "Cuenta origen",
+                    list(_tf_ctas.keys()),
+                    key="cuenta_origen_transferencia_ibkr"
+                )
+
+            with _tf2:
+                _tf_moneda_monto = st.selectbox(
+                    "Moneda del monto enviado",
+                    ["PEN", "USD"],
+                    key="moneda_monto_transferencia_ibkr",
+                    help="Elige PEN si retiras soles de tu cuenta; elige USD si ya envías dólares."
+                )
+                _tf_monto_origen = st.number_input(
+                    "Monto enviado a IBKR",
+                    min_value=0.0,
+                    step=100.0,
+                    format="%.2f",
+                    key="monto_origen_transferencia_ibkr",
+                    help="Monto bruto que llegará a IBKR como cash, antes de registrar la comisión."
+                )
+                _tf_tc = st.number_input(
+                    "TC USD → PEN usado",
+                    min_value=1.0,
+                    step=0.01,
+                    value=round(_tf_tc_default, 4),
+                    format="%.4f",
+                    key="tc_transferencia_ibkr"
+                )
+
+            with _tf3:
+                _tf_comision_monto = st.number_input(
+                    "Comisión",
+                    min_value=0.0,
+                    step=1.0,
+                    format="%.2f",
+                    key="comision_transferencia_ibkr"
+                )
+                _tf_comision_moneda = st.selectbox(
+                    "Moneda comisión",
+                    ["PEN", "USD"],
+                    key="moneda_comision_transferencia_ibkr"
+                )
+
+            _tf_desc = st.text_input(
+                "Descripción / referencia",
+                placeholder="Ej.: Transferencia BCP → IBKR, wire fee, depósito para invertir",
+                key="descripcion_transferencia_ibkr"
+            )
+
+            if _tf_moneda_monto == "PEN":
+                _tf_monto_pen = float(_tf_monto_origen)
+                _tf_monto_usd = float(_tf_monto_origen) / float(_tf_tc) if _tf_tc > 0 else 0.0
+            else:
+                _tf_monto_usd = float(_tf_monto_origen)
+                _tf_monto_pen = float(_tf_monto_origen) * float(_tf_tc)
+
+            _tf_comision_pen = float(_tf_comision_monto) if _tf_comision_moneda == "PEN" else float(_tf_comision_monto) * float(_tf_tc)
+            _tf_total_debitado_pen = float(_tf_monto_pen) + float(_tf_comision_pen)
+
+            st.info(
+                f"Vista previa: se descontará **S/ {_tf_total_debitado_pen:,.2f}** de {_tf_origen_nombre} "
+                f"y se agregará **US$ {_tf_monto_usd:,.2f}** al cash IBKR. "
+                f"Comisión equivalente: S/ {_tf_comision_pen:,.2f}."
+            )
+
+            if st.form_submit_button("➕ Registrar cash en IBKR", use_container_width=True, type="primary"):
+                if _tf_monto_origen <= 0:
+                    st.warning("Ingresa un monto enviado a IBKR mayor a cero.")
+                elif _tf_tc <= 0:
+                    st.warning("El tipo de cambio debe ser mayor a cero.")
+                else:
+                    st.session_state["ibkr_transferencias"].append({
+                        "id": str(uuid.uuid4()),
+                        "fecha": _tf_fecha.isoformat(),
+                        "cuenta_origen_id": _tf_ctas.get(_tf_origen_nombre, "principal"),
+                        "cuenta_origen_nombre": _tf_origen_nombre,
+                        "monto_origen": float(_tf_monto_origen),
+                        "moneda_monto": _tf_moneda_monto,
+                        "monto_pen": float(_tf_monto_pen),
+                        "tc_usd_pen": float(_tf_tc),
+                        "monto_usd": float(_tf_monto_usd),
+                        "comision_monto": float(_tf_comision_monto),
+                        "comision_moneda": _tf_comision_moneda,
+                        "comision_pen": float(_tf_comision_pen),
+                        "total_debitado_pen": float(_tf_total_debitado_pen),
+                        "descripcion": _tf_desc,
+                    })
+                    guardar("ibkr_transferencias")
+                    st.success("✅ Cash registrado. El monto USD ya se suma al cash IBKR y el total debitado se descuenta de la cuenta origen.")
+                    st.rerun()
+
+        _df_tf_ibkr = pd.DataFrame(st.session_state.get("ibkr_transferencias", []))
+        if not _df_tf_ibkr.empty:
+            for _col, _default in {
+                "id": "",
+                "fecha": hoy_peru.isoformat(),
+                "cuenta_origen_id": "principal",
+                "cuenta_origen_nombre": _tf_ncp,
+                "monto_origen": 0.0,
+                "moneda_monto": "PEN",
+                "monto_pen": 0.0,
+                "tc_usd_pen": _tf_tc_default,
+                "monto_usd": 0.0,
+                "comision_monto": 0.0,
+                "comision_moneda": "PEN",
+                "comision_pen": 0.0,
+                "total_debitado_pen": 0.0,
+                "descripcion": "",
+            }.items():
+                if _col not in _df_tf_ibkr.columns:
+                    _df_tf_ibkr[_col] = _default
+
+            # Compatibilidad con transferencias antiguas registradas solo en PEN.
+            _df_tf_ibkr["monto_origen"] = pd.to_numeric(_df_tf_ibkr["monto_origen"], errors="coerce")
+            _df_tf_ibkr["monto_pen"] = pd.to_numeric(_df_tf_ibkr["monto_pen"], errors="coerce").fillna(0.0)
+            _df_tf_ibkr["monto_origen"] = _df_tf_ibkr["monto_origen"].fillna(_df_tf_ibkr["monto_pen"])
+            _mask_monto_origen_vacio = (_df_tf_ibkr["monto_origen"] <= 0) & (_df_tf_ibkr["monto_pen"] > 0)
+            _df_tf_ibkr.loc[_mask_monto_origen_vacio, "monto_origen"] = _df_tf_ibkr.loc[_mask_monto_origen_vacio, "monto_pen"]
+            _df_tf_ibkr["moneda_monto"] = _df_tf_ibkr["moneda_monto"].fillna("PEN").astype(str).str.upper()
+            _df_tf_ibkr.loc[~_df_tf_ibkr["moneda_monto"].isin(["PEN", "USD"]), "moneda_monto"] = "PEN"
+
+            _df_tf_ibkr["id"] = _df_tf_ibkr["id"].apply(
+                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+            )
+            _df_tf_ibkr["fecha"] = pd.to_datetime(_df_tf_ibkr["fecha"], errors="coerce").dt.date
+            _df_tf_ibkr["tc_usd_pen"] = pd.to_numeric(_df_tf_ibkr["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
+            _df_tf_ibkr["tc_usd_pen"] = _df_tf_ibkr["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
+            _df_tf_ibkr["monto_usd"] = _df_tf_ibkr.apply(
+                lambda r: float(r["monto_origen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]) / float(r["tc_usd_pen"]),
+                axis=1
+            )
+            _df_tf_ibkr["monto_pen"] = _df_tf_ibkr.apply(
+                lambda r: float(r["monto_origen"]) * float(r["tc_usd_pen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]),
+                axis=1
+            )
+            _df_tf_ibkr["comision_monto"] = pd.to_numeric(_df_tf_ibkr["comision_monto"], errors="coerce").fillna(0.0)
+            _df_tf_ibkr["comision_moneda"] = _df_tf_ibkr["comision_moneda"].fillna("PEN").astype(str).str.upper()
+            _df_tf_ibkr.loc[~_df_tf_ibkr["comision_moneda"].isin(["PEN", "USD"]), "comision_moneda"] = "PEN"
+            _df_tf_ibkr["comision_pen"] = _df_tf_ibkr.apply(
+                lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
+                axis=1
+            )
+            _df_tf_ibkr["total_debitado_pen"] = _df_tf_ibkr["monto_pen"] + _df_tf_ibkr["comision_pen"]
+            _df_tf_ibkr["descripcion"] = _df_tf_ibkr["descripcion"].fillna("").astype(str)
+            _df_tf_ibkr["Eliminar"] = False
+
+            _df_tf_ibkr = _df_tf_ibkr[[
+                "id", "fecha", "cuenta_origen_id", "cuenta_origen_nombre",
+                "monto_origen", "moneda_monto", "tc_usd_pen", "monto_usd", "monto_pen",
+                "comision_monto", "comision_moneda", "comision_pen", "total_debitado_pen",
+                "descripcion", "Eliminar"
+            ]]
+
+            _cash_tf_usd = float(_df_tf_ibkr["monto_usd"].sum())
+            _debito_tf_pen = float(_df_tf_ibkr["total_debitado_pen"].sum())
+            _metric_tf1, _metric_tf2, _metric_tf3 = st.columns(3)
+            _metric_tf1.metric("Cash agregado por transferencias", f"US$ {_cash_tf_usd:,.2f}")
+            _metric_tf2.metric("Total debitado de cuentas", f"S/ {_debito_tf_pen:,.0f}")
+            _metric_tf3.metric("TC actual configuración", f"{_tf_tc_default:.4f}")
+
+            with st.expander("🧾 Historial de cash agregado desde cuentas", expanded=False):
+                st.caption("Puedes editar una transferencia; al guardar se recalculan USD, comisión equivalente y total debitado.")
+                _ed_tf_ibkr = st.data_editor(
+                    _df_tf_ibkr,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    height=min(38 * len(_df_tf_ibkr) + 46, 320),
+                    column_config={
+                        "id": None,
+                        "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
+                        "cuenta_origen_id": None,
+                        "cuenta_origen_nombre": st.column_config.SelectboxColumn("Cuenta origen", options=list(_tf_ctas.keys()), width="medium"),
+                        "monto_origen": st.column_config.NumberColumn("Monto enviado", min_value=0.0, step=100.0, format="%.2f", width="small"),
+                        "moneda_monto": st.column_config.SelectboxColumn("Moneda monto", options=["PEN", "USD"], width="small"),
+                        "tc_usd_pen": st.column_config.NumberColumn("TC", min_value=1.0, step=0.01, format="%.4f", width="small"),
+                        "monto_usd": st.column_config.NumberColumn("Cash IBKR USD", format="US$ %.2f", width="small", disabled=True),
+                        "monto_pen": st.column_config.NumberColumn("Monto equiv. PEN", format="S/ %.2f", width="small", disabled=True),
+                        "comision_monto": st.column_config.NumberColumn("Comisión", min_value=0.0, step=1.0, format="%.2f", width="small"),
+                        "comision_moneda": st.column_config.SelectboxColumn("Moneda comisión", options=["PEN", "USD"], width="small"),
+                        "comision_pen": st.column_config.NumberColumn("Comisión PEN", format="S/ %.2f", width="small", disabled=True),
+                        "total_debitado_pen": st.column_config.NumberColumn("Total debitado PEN", format="S/ %.2f", width="small", disabled=True),
+                        "descripcion": st.column_config.TextColumn("Descripción", width="large"),
+                        "Eliminar": st.column_config.CheckboxColumn("🗑"),
+                    },
+                    key="editor_transferencias_ibkr"
+                )
+
+                if st.button("💾 Guardar transferencias a IBKR", type="primary"):
+                    _df_tf_save = _ed_tf_ibkr.copy()
+                    _df_tf_save = _df_tf_save[_df_tf_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+
+                    if not _df_tf_save.empty:
+                        _df_tf_save["id"] = _df_tf_save["id"].apply(
+                            lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                        )
+                        _df_tf_save["fecha"] = pd.to_datetime(_df_tf_save["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                        _df_tf_save["cuenta_origen_nombre"] = _df_tf_save["cuenta_origen_nombre"].fillna(_tf_ncp).astype(str)
+                        _df_tf_save["cuenta_origen_id"] = _df_tf_save["cuenta_origen_nombre"].map(lambda n: _tf_ctas.get(str(n), "principal"))
+                        _df_tf_save["monto_origen"] = pd.to_numeric(_df_tf_save["monto_origen"], errors="coerce").fillna(0.0)
+                        _df_tf_save["moneda_monto"] = _df_tf_save["moneda_monto"].fillna("PEN").astype(str).str.upper()
+                        _df_tf_save.loc[~_df_tf_save["moneda_monto"].isin(["PEN", "USD"]), "moneda_monto"] = "PEN"
+                        _df_tf_save["tc_usd_pen"] = pd.to_numeric(_df_tf_save["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
+                        _df_tf_save["tc_usd_pen"] = _df_tf_save["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
+                        _df_tf_save["monto_usd"] = _df_tf_save.apply(
+                            lambda r: float(r["monto_origen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]) / float(r["tc_usd_pen"]),
+                            axis=1
+                        )
+                        _df_tf_save["monto_pen"] = _df_tf_save.apply(
+                            lambda r: float(r["monto_origen"]) * float(r["tc_usd_pen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]),
+                            axis=1
+                        )
+                        _df_tf_save["comision_monto"] = pd.to_numeric(_df_tf_save["comision_monto"], errors="coerce").fillna(0.0)
+                        _df_tf_save["comision_moneda"] = _df_tf_save["comision_moneda"].fillna("PEN").astype(str).str.upper()
+                        _df_tf_save.loc[~_df_tf_save["comision_moneda"].isin(["PEN", "USD"]), "comision_moneda"] = "PEN"
+                        _df_tf_save["comision_pen"] = _df_tf_save.apply(
+                            lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
+                            axis=1
+                        )
+                        _df_tf_save["total_debitado_pen"] = _df_tf_save["monto_pen"] + _df_tf_save["comision_pen"]
+                        _df_tf_save["descripcion"] = _df_tf_save["descripcion"].fillna("").astype(str)
+                        _df_tf_save = _df_tf_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
+                        st.session_state["ibkr_transferencias"] = _df_tf_save.to_dict("records")
+                    else:
+                        st.session_state["ibkr_transferencias"] = []
+
+                    guardar("ibkr_transferencias")
+                    st.success("✅ Transferencias a IBKR actualizadas.")
+                    st.rerun()
+        else:
+            st.info("Todavía no hay cash agregado a IBKR desde cuentas locales.")
+
+        # Recalcular cash después de normalizar transferencias y movimientos anteriores.
+        _df_cash_ibkr = _normalizar_cash_ibkr()
+        _total_cash_manual_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
+        _total_cash_transferencias_ibkr_usd = calcular_total_transferencias_ibkr_usd()
+        _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
+        st.markdown("#### 2️⃣ Comprar acciones o ETFs usando el cash IBKR")
+        st.info(f"Cash IBKR disponible para invertir: **US$ {_total_cash_ibkr_usd:,.2f}**")
+# Paso 2: compra de acciones o ETFs
+        # ──────────────────────────────────────────────
+        with st.form("form_inversion_ibkr_portfolio", clear_on_submit=True):
+            st.markdown("##### ➕ Nueva compra usando cash IBKR")
+
+            _iv1, _iv2, _iv3 = st.columns(3)
+
+            with _iv1:
+                _inv_fecha = st.date_input(
+                    "📅 Fecha de compra",
+                    value=hoy_peru,
+                    key="fecha_compra_ibkr_portfolio"
+                )
+                _inv_ticker_raw = st.text_input(
+                    "Ticker",
+                    placeholder="Ej.: VOO, SCCO, GLD, CCOEY, MSFT",
+                    key="ticker_compra_ibkr_portfolio"
+                )
+                _inv_broker = st.selectbox(
+                    "Broker",
+                    ["IBKR"],
+                    key="broker_compra_ibkr_portfolio"
+                )
+
+            with _iv2:
+                _inv_nombre_raw = st.text_input(
+                    "Nombre del activo",
+                    placeholder="Ej.: Vanguard S&P 500 ETF",
+                    key="nombre_compra_ibkr_portfolio"
+                )
+                _inv_tipo = st.selectbox(
+                    "Tipo",
+                    ["ETF", "Accion", "ADR", "Fondo", "Otro"],
+                    key="tipo_compra_ibkr_portfolio"
+                )
+                _inv_source_symbol_raw = st.text_input(
+                    "Source symbol Yahoo",
+                    placeholder="Déjalo vacío si es igual al ticker",
+                    key="source_symbol_compra_ibkr_portfolio"
+                )
+
+            with _iv3:
+                _inv_cantidad = st.number_input(
+                    "Cantidad de acciones/participaciones",
+                    min_value=0.0,
+                    step=0.0001,
+                    format="%.4f",
+                    key="cantidad_compra_ibkr_portfolio"
+                )
+                _inv_monto_usd = st.number_input(
+                    "Monto invertido total (USD)",
+                    min_value=0.0,
+                    step=10.0,
+                    format="%.2f",
+                    key="monto_compra_ibkr_portfolio"
+                )
+                _inv_moneda = st.selectbox(
+                    "Moneda",
+                    ["USD"],
+                    key="moneda_compra_ibkr_portfolio"
+                )
+                st.caption("Esta compra se descontará automáticamente del cash IBKR para evitar doble conteo.")
+                _inv_descontar_cash = True
+
+            if st.form_submit_button("➕ Registrar compra IBKR", use_container_width=True, type="primary"):
+                _inv_ticker = str(_inv_ticker_raw or "").upper().strip()
+                _inv_nombre = str(_inv_nombre_raw or "").strip()
+                _inv_source_symbol = str(_inv_source_symbol_raw or "").strip()
+
+                if not _inv_ticker:
+                    st.warning("Debes ingresar un ticker.")
+                elif _inv_cantidad <= 0 or _inv_monto_usd <= 0:
+                    st.warning("Debes ingresar una cantidad y un monto invertido mayor a cero.")
+                elif _inv_monto_usd > (_total_cash_ibkr_usd + 0.01):
+                    st.warning(
+                        f"Cash IBKR insuficiente. Tienes US$ {_total_cash_ibkr_usd:,.2f} disponibles "
+                        f"y la compra requiere US$ {_inv_monto_usd:,.2f}. Primero agrega cash en el paso 1."
+                    )
+                else:
+                    _nombre_catalogo = obtener_nombre_instrumento_ibkr(_inv_ticker, _df_catalogo_ibkr)
+                    _symbol_catalogo = obtener_source_symbol_ibkr(_inv_ticker, _df_catalogo_ibkr)
+
+                    if not _inv_nombre:
+                        _inv_nombre = _nombre_catalogo if _nombre_catalogo != _inv_ticker else _inv_ticker
+
+                    if not _inv_source_symbol:
+                        _inv_source_symbol = _symbol_catalogo if _symbol_catalogo else _inv_ticker
+
+                    try:
+                        upsert_instrumento_ibkr(
+                            ticker=_inv_ticker,
+                            nombre=_inv_nombre,
+                            tipo=_inv_tipo,
+                            moneda=_inv_moneda,
+                            source_symbol=_inv_source_symbol,
+                            fuente_precio="Yahoo Finance",
+                            activo=True,
+                        )
+                    except Exception as _e:
+                        st.warning(
+                            "La compra se registrará, pero no se pudo actualizar el catálogo CSV "
+                            f"para Airflow: {_e}"
+                        )
+
+                    _precio_promedio = _inv_monto_usd / _inv_cantidad
+
+                    st.session_state["inversiones_ibkr"].append({
+                        "id": str(uuid.uuid4()),
+                        "fecha_compra": _inv_fecha.isoformat(),
+                        "ticker": _inv_ticker,
+                        "nombre": _inv_nombre,
+                        "broker": _inv_broker,
+                        "cantidad": float(_inv_cantidad),
+                        "monto_invertido_usd": float(_inv_monto_usd),
+                        "precio_promedio_compra_usd": float(_precio_promedio),
+                        "moneda": _inv_moneda,
+                    })
+
+                    guardar("inversiones_ibkr")
+
+                    if _inv_descontar_cash:
+                        st.session_state["ibkr_cash_movimientos"].append({
+                            "id": str(uuid.uuid4()),
+                            "fecha": _inv_fecha.isoformat(),
+                            "tipo_movimiento": "Retiro / uso de cash",
+                            "descripcion": f"Uso de cash para compra {_inv_ticker}",
+                            "monto_usd": -float(_inv_monto_usd),
+                        })
+                        guardar("ibkr_cash_movimientos")
+
+                    st.success(
+                        f"✅ Compra registrada. {_inv_ticker} quedó agregado al catálogo si era nuevo. "
+                        "El monto invertido fue descontado automáticamente del cash IBKR. "
+                        "La app intentará mostrar precio vía Yahoo; ejecuta ./run_daily_finance_dags.sh para consolidarlo por Airflow."
+                    )
+                    st.rerun()
+
+        # ──────────────────────────────────────────────
+        # Paso 3: historial y ajustes de cash IBKR
+        # ──────────────────────────────────────────────
+        with st.expander("🧾 3️⃣ Historial y ajustes de cash IBKR", expanded=False):
             st.caption(
-                "Registra el cash disponible en IBKR que todavía no está invertido en acciones o ETFs. "
-                "Se suma al valor total del portafolio, pero no genera ganancia/pérdida de mercado."
+                "Aquí puedes revisar el cash generado por transferencias, los descuentos automáticos por compras "
+                "y hacer ajustes manuales solo si necesitas cuadrar con el saldo real de IBKR."
             )
 
             with st.form("form_cash_ibkr", clear_on_submit=True):
@@ -2665,7 +2864,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                         key="descripcion_cash_ibkr"
                     )
 
-                if st.form_submit_button("➕ Registrar movimiento de cash", use_container_width=True, type="primary"):
+                if st.form_submit_button("➕ Registrar ajuste manual de cash", use_container_width=True, type="primary"):
                     if _cash_monto <= 0:
                         st.warning("Ingresa un monto mayor a cero.")
                     else:
@@ -2746,194 +2945,6 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     st.info("No hay movimientos manuales de cash. El cash actual proviene de transferencias a IBKR.")
                 else:
                     st.info("No hay cash IBKR registrado.")
-
-        # ──────────────────────────────────────────────
-        # Catálogo dinámico de instrumentos
-        # ──────────────────────────────────────────────
-        with st.expander("🧭 Catálogo de instrumentos IBKR / Airflow", expanded=False):
-            st.caption(
-                "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. Normalmente se actualiza solo cuando registras una compra nueva. "
-                "Edita source_symbol solo si Yahoo Finance usa un símbolo especial."
-            )
-
-            _df_catalogo_show = _df_catalogo_ibkr.copy()
-            _ed_catalogo = st.data_editor(
-                _df_catalogo_show,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                height=min(38 * max(len(_df_catalogo_show), 1) + 46, 320),
-                column_config={
-                    "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
-                    "nombre": st.column_config.TextColumn("Nombre", width="large"),
-                    "tipo": st.column_config.SelectboxColumn(
-                        "Tipo",
-                        options=["ETF", "Accion", "ADR", "Fondo", "Otro"],
-                        width="small",
-                    ),
-                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
-                    "source_symbol": st.column_config.TextColumn(
-                        "Source symbol",
-                        width="small",
-                        help="Símbolo usado por Yahoo Finance. Ej.: VOO, SCCO, GLD, CCOEY, 7203.T, ticker.L."
-                    ),
-                    "fuente_precio": st.column_config.SelectboxColumn(
-                        "Fuente precio",
-                        options=["Yahoo Finance"],
-                        width="medium",
-                    ),
-                    "activo": st.column_config.CheckboxColumn(
-                        "Activo",
-                        help="Si está activo, Airflow intentará actualizar su precio."
-                    ),
-                },
-                key="editor_catalogo_ibkr"
-            )
-
-            if st.button("💾 Guardar catálogo IBKR", type="primary"):
-                try:
-                    _df_catalogo_guardado = guardar_catalogo_ibkr(_ed_catalogo)
-                    st.success("✅ Catálogo guardado. En la próxima corrida, Airflow leerá estos tickers.")
-                    st.rerun()
-                except Exception as _e:
-                    st.error(f"No se pudo guardar el catálogo: {_e}")
-
-        # ──────────────────────────────────────────────
-        # Registro de nueva compra
-        # ──────────────────────────────────────────────
-        with st.form("form_inversion_ibkr_portfolio", clear_on_submit=True):
-            st.markdown("#### ➕ Registrar compra IBKR")
-
-            _iv1, _iv2, _iv3 = st.columns(3)
-
-            with _iv1:
-                _inv_fecha = st.date_input(
-                    "📅 Fecha de compra",
-                    value=hoy_peru,
-                    key="fecha_compra_ibkr_portfolio"
-                )
-                _inv_ticker_raw = st.text_input(
-                    "Ticker",
-                    placeholder="Ej.: VOO, SCCO, GLD, CCOEY, MSFT",
-                    key="ticker_compra_ibkr_portfolio"
-                )
-                _inv_broker = st.selectbox(
-                    "Broker",
-                    ["IBKR"],
-                    key="broker_compra_ibkr_portfolio"
-                )
-
-            with _iv2:
-                _inv_nombre_raw = st.text_input(
-                    "Nombre del activo",
-                    placeholder="Ej.: Vanguard S&P 500 ETF",
-                    key="nombre_compra_ibkr_portfolio"
-                )
-                _inv_tipo = st.selectbox(
-                    "Tipo",
-                    ["ETF", "Accion", "ADR", "Fondo", "Otro"],
-                    key="tipo_compra_ibkr_portfolio"
-                )
-                _inv_source_symbol_raw = st.text_input(
-                    "Source symbol Yahoo",
-                    placeholder="Déjalo vacío si es igual al ticker",
-                    key="source_symbol_compra_ibkr_portfolio"
-                )
-
-            with _iv3:
-                _inv_cantidad = st.number_input(
-                    "Cantidad de acciones/participaciones",
-                    min_value=0.0,
-                    step=0.0001,
-                    format="%.4f",
-                    key="cantidad_compra_ibkr_portfolio"
-                )
-                _inv_monto_usd = st.number_input(
-                    "Monto invertido total (USD)",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f",
-                    key="monto_compra_ibkr_portfolio"
-                )
-                _inv_moneda = st.selectbox(
-                    "Moneda",
-                    ["USD"],
-                    key="moneda_compra_ibkr_portfolio"
-                )
-                _inv_descontar_cash = st.checkbox(
-                    "Descontar esta compra del cash IBKR",
-                    value=True,
-                    key="descontar_cash_compra_ibkr",
-                    help="Si está activo, la compra reduce automáticamente el cash IBKR para evitar doble conteo."
-                )
-
-            if st.form_submit_button("➕ Registrar compra IBKR", use_container_width=True, type="primary"):
-                _inv_ticker = str(_inv_ticker_raw or "").upper().strip()
-                _inv_nombre = str(_inv_nombre_raw or "").strip()
-                _inv_source_symbol = str(_inv_source_symbol_raw or "").strip()
-
-                if not _inv_ticker:
-                    st.warning("Debes ingresar un ticker.")
-                elif _inv_cantidad <= 0 or _inv_monto_usd <= 0:
-                    st.warning("Debes ingresar una cantidad y un monto invertido mayor a cero.")
-                else:
-                    _nombre_catalogo = obtener_nombre_instrumento_ibkr(_inv_ticker, _df_catalogo_ibkr)
-                    _symbol_catalogo = obtener_source_symbol_ibkr(_inv_ticker, _df_catalogo_ibkr)
-
-                    if not _inv_nombre:
-                        _inv_nombre = _nombre_catalogo if _nombre_catalogo != _inv_ticker else _inv_ticker
-
-                    if not _inv_source_symbol:
-                        _inv_source_symbol = _symbol_catalogo if _symbol_catalogo else _inv_ticker
-
-                    try:
-                        upsert_instrumento_ibkr(
-                            ticker=_inv_ticker,
-                            nombre=_inv_nombre,
-                            tipo=_inv_tipo,
-                            moneda=_inv_moneda,
-                            source_symbol=_inv_source_symbol,
-                            fuente_precio="Yahoo Finance",
-                            activo=True,
-                        )
-                    except Exception as _e:
-                        st.warning(
-                            "La compra se registrará, pero no se pudo actualizar el catálogo CSV "
-                            f"para Airflow: {_e}"
-                        )
-
-                    _precio_promedio = _inv_monto_usd / _inv_cantidad
-
-                    st.session_state["inversiones_ibkr"].append({
-                        "id": str(uuid.uuid4()),
-                        "fecha_compra": _inv_fecha.isoformat(),
-                        "ticker": _inv_ticker,
-                        "nombre": _inv_nombre,
-                        "broker": _inv_broker,
-                        "cantidad": float(_inv_cantidad),
-                        "monto_invertido_usd": float(_inv_monto_usd),
-                        "precio_promedio_compra_usd": float(_precio_promedio),
-                        "moneda": _inv_moneda,
-                    })
-
-                    guardar("inversiones_ibkr")
-
-                    if _inv_descontar_cash:
-                        st.session_state["ibkr_cash_movimientos"].append({
-                            "id": str(uuid.uuid4()),
-                            "fecha": _inv_fecha.isoformat(),
-                            "tipo_movimiento": "Retiro / uso de cash",
-                            "descripcion": f"Uso de cash para compra {_inv_ticker}",
-                            "monto_usd": -float(_inv_monto_usd),
-                        })
-                        guardar("ibkr_cash_movimientos")
-
-                    st.success(
-                        f"✅ Compra registrada. {_inv_ticker} quedó agregado al catálogo si era nuevo. "
-                        + ("También se descontó del cash IBKR. " if _inv_descontar_cash else "")
-                        + "La app intentará mostrar precio vía Yahoo; ejecuta ./run_daily_finance_dags.sh para consolidarlo por Airflow."
-                    )
-                    st.rerun()
 
         # ──────────────────────────────────────────────
         # Compras registradas
@@ -3368,7 +3379,59 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
 
 
 
-# ==================================================
+
+# Catálogo técnico de instrumentos
+        # ──────────────────────────────────────────────
+        with st.expander("⚙️ Catálogo técnico IBKR / Airflow", expanded=False):
+            st.caption(
+                "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. Normalmente se actualiza solo cuando registras una compra nueva. "
+                "Edita source_symbol solo si Yahoo Finance usa un símbolo especial."
+            )
+
+            _df_catalogo_show = _df_catalogo_ibkr.copy()
+            _ed_catalogo = st.data_editor(
+                _df_catalogo_show,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                height=min(38 * max(len(_df_catalogo_show), 1) + 46, 320),
+                column_config={
+                    "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
+                    "nombre": st.column_config.TextColumn("Nombre", width="large"),
+                    "tipo": st.column_config.SelectboxColumn(
+                        "Tipo",
+                        options=["ETF", "Accion", "ADR", "Fondo", "Otro"],
+                        width="small",
+                    ),
+                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
+                    "source_symbol": st.column_config.TextColumn(
+                        "Source symbol",
+                        width="small",
+                        help="Símbolo usado por Yahoo Finance. Ej.: VOO, SCCO, GLD, CCOEY, 7203.T, ticker.L."
+                    ),
+                    "fuente_precio": st.column_config.SelectboxColumn(
+                        "Fuente precio",
+                        options=["Yahoo Finance"],
+                        width="medium",
+                    ),
+                    "activo": st.column_config.CheckboxColumn(
+                        "Activo",
+                        help="Si está activo, Airflow intentará actualizar su precio."
+                    ),
+                },
+                key="editor_catalogo_ibkr"
+            )
+
+            if st.button("💾 Guardar catálogo IBKR", type="primary"):
+                try:
+                    _df_catalogo_guardado = guardar_catalogo_ibkr(_ed_catalogo)
+                    st.success("✅ Catálogo guardado. En la próxima corrida, Airflow leerá estos tickers.")
+                    st.rerun()
+                except Exception as _e:
+                    st.error(f"No se pudo guardar el catálogo: {_e}")
+
+        # ──────────────────────────────────────────────
+        # ==================================================
 # 4. CÁLCULOS BASE
 # ==================================================
 def obtener_ciclo_tarjeta(fecha, dia_cierre):
