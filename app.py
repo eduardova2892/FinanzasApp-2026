@@ -13,6 +13,7 @@ import requests
 import re
 import hashlib
 import unicodedata
+from scripts.streamlit_bank_inbox import render_bank_gmail_inbox
 
 
 # ==================================================
@@ -1774,6 +1775,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
     # ==================================================
     with st.expander("📩 3.0 Importar gastos desde correos BCP", expanded=False):
         st.markdown("### 📩 Importar gasto desde correo BCP")
+        render_bank_gmail_inbox(guardar)
         st.caption(
             "Primera versión semi-automática: pega el texto del correo de consumo BCP, "
             "la app extrae monto, fecha, comercio y si fue débito o crédito. Luego revisas y confirmas antes de guardar."
