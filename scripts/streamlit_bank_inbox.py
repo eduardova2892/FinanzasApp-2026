@@ -186,17 +186,16 @@ def _indice_default_por_banco(nombres: list[str], banco: str) -> int:
 
 
 def generar_pendientes_desde_gmail_bcp(
-    days: int = 30,
-    max_results: int = 50,
+    days: int = 10,
+    max_results: int = 200,
     pending_path: Path | str = BANK_GMAIL_PENDING_PATH,
 ) -> dict:
     """
-    Lee Gmail directamente desde Streamlit usando los módulos ya creados:
-    - scripts/gmail_bank_reader.py
-    - scripts/bank_email_parsers.py
+    Lee Gmail y REEMPLAZA la bandeja CSV seg?n los d?as seleccionados.
 
-    Genera/actualiza data/bank_gmail_expenses_pending.csv sin duplicar hashes.
-    Por ahora implementa BCP. La estructura queda lista para agregar GNB/BBVA/Interbank.
+    Antes el proceso agregaba nuevos registros al CSV existente. Eso hac?a que,
+    al cambiar de 30 a 10 d?as, se siguiera viendo el resumen anterior.
+    Ahora la bandeja queda sincronizada con el rango actual elegido por el usuario.
     """
     project = Path.cwd()
     scripts_dir = project / "scripts"
@@ -207,15 +206,15 @@ def generar_pendientes_desde_gmail_bcp(
     from bank_email_parsers import parse_bank_email
 
     pending_path = Path(pending_path)
-    df_existing = cargar_pendientes_bancos(pending_path)
 
-    existing_hashes = set()
-    existing_gmail_ids = set()
-    if not df_existing.empty:
-        if "hash_importacion" in df_existing.columns:
-            existing_hashes = set(df_existing["hash_importacion"].fillna("").astype(str))
-        if "gmail_id" in df_existing.columns:
-            existing_gmail_ids = set(df_existing["gmail_id"].fillna("").astype(str))
+    # Leemos lo anterior solo para conservar estado de importado/descartado si el hash coincide.
+    df_existing = cargar_pendientes_bancos(pending_path)
+    estados_previos = {}
+    if not df_existing.empty and "hash_importacion" in df_existing.columns:
+        for _, old in df_existing.iterrows():
+            h = _texto_seguro(old.get("hash_importacion"))
+            if h:
+                estados_previos[h] = old.to_dict()
 
     emails = fetch_bcp_consumption_emails(
         project,
@@ -226,7 +225,6 @@ def generar_pendientes_desde_gmail_bcp(
     rows = []
     leidos = len(emails)
     interpretados = 0
-    duplicados = 0
     errores = 0
     ahora_lima = datetime.now(ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -235,8 +233,16 @@ def generar_pendientes_desde_gmail_bcp(
             d = email.to_dict() if hasattr(email, "to_dict") else dict(email)
 
             gmail_id = _texto_seguro(d.get("gmail_id"))
+
+            texto_parse = " ".join([
+                _texto_seguro(d.get("subject")),
+                _texto_seguro(d.get("snippet")),
+                _texto_seguro(d.get("text")),
+                _texto_seguro(d.get("body")),
+            ])
+
             parsed = parse_bank_email(
-                d.get("text", "") or d.get("body", ""),
+                texto_parse,
                 banco="BCP",
                 gmail_id=gmail_id,
                 gmail_thread_id=d.get("thread_id", ""),
@@ -248,49 +254,60 @@ def generar_pendientes_desde_gmail_bcp(
                 continue
 
             interpretados += 1
+
             hash_imp = _texto_seguro(parsed.get("hash_importacion"))
+            old = estados_previos.get(hash_imp, {})
 
-            if (hash_imp and hash_imp in existing_hashes) or (gmail_id and gmail_id in existing_gmail_ids):
-                duplicados += 1
-                continue
+            # Por defecto vuelve como pendiente, pero conserva importado/descartado si ya exist?a.
+            parsed["estado"] = _texto_seguro(old.get("estado")) or "pendiente"
+            parsed["fecha_importado_lima"] = _texto_seguro(old.get("fecha_importado_lima"))
+            parsed["resultado_importacion"] = _texto_seguro(old.get("resultado_importacion"))
 
-            if not _texto_seguro(parsed.get("estado")):
-                parsed["estado"] = "pendiente"
             if not _texto_seguro(parsed.get("fecha_detectado_lima")):
-                parsed["fecha_detectado_lima"] = ahora_lima
+                parsed["fecha_detectado_lima"] = _texto_seguro(old.get("fecha_detectado_lima")) or ahora_lima
+
             if not _texto_seguro(parsed.get("fuente")):
                 parsed["fuente"] = "Gmail BCP"
 
             rows.append(parsed)
-            if hash_imp:
-                existing_hashes.add(hash_imp)
-            if gmail_id:
-                existing_gmail_ids.add(gmail_id)
 
         except Exception:
             errores += 1
 
-    nuevos = len(rows)
-
-    if nuevos > 0:
+    if rows:
         df_new = pd.DataFrame(rows)
-        if df_existing.empty:
-            df_all = df_new
-        else:
-            df_all = pd.concat([df_existing, df_new], ignore_index=True)
-        guardar_pendientes_bancos(df_all, pending_path)
-    elif not pending_path.exists():
-        guardar_pendientes_bancos(df_existing, pending_path)
+        for col in BANK_GMAIL_PENDING_COLUMNS:
+            if col not in df_new.columns:
+                df_new[col] = ""
+        df_new = df_new[BANK_GMAIL_PENDING_COLUMNS].copy()
+        df_new["monto"] = pd.to_numeric(df_new["monto"], errors="coerce").fillna(0.0)
+        df_new["estado"] = df_new["estado"].map(_normalizar_estado)
+        df_new = df_new.sort_values(["fecha", "hora"], ascending=[False, False])
+    else:
+        df_new = pd.DataFrame(columns=BANK_GMAIL_PENDING_COLUMNS)
+
+    # Punto clave: reemplaza el CSV completo.
+    guardar_pendientes_bancos(df_new, pending_path)
+
+    if not df_new.empty and "medio_pago" in df_new.columns:
+        conteo_medio = df_new["medio_pago"].value_counts(dropna=False).to_dict()
+    else:
+        conteo_medio = {}
+
+    pendientes = 0
+    if not df_new.empty and "estado" in df_new.columns:
+        pendientes = int(df_new["estado"].eq("pendiente").sum())
 
     return {
         "correos_leidos": leidos,
         "gastos_interpretados": interpretados,
-        "nuevos_pendientes": nuevos,
-        "duplicados_omitidos": duplicados,
+        "nuevos_pendientes": pendientes,
+        "duplicados_omitidos": 0,
         "errores": errores,
+        "conteo_medio": conteo_medio,
         "archivo": str(pending_path),
+        "dias": int(days),
     }
-
 
 def render_bank_gmail_inbox(
     guardar_func: Optional[Callable[[str], None]] = None,
@@ -319,7 +336,7 @@ def render_bank_gmail_inbox(
                 "Días a revisar",
                 min_value=1,
                 max_value=90,
-                value=30,
+                value=10,
                 step=1,
                 key="bank_gmail_read_days",
             )
@@ -328,7 +345,7 @@ def render_bank_gmail_inbox(
                 "Máx. correos",
                 min_value=5,
                 max_value=200,
-                value=50,
+                value=200,
                 step=5,
                 key="bank_gmail_read_max_results",
             )
@@ -446,7 +463,7 @@ def render_bank_gmail_inbox(
 
     edited_df = st.data_editor(
         editor_df,
-        key="bank_gmail_pending_editor",
+        key=f"bank_gmail_pending_editor_{st.session_state.get('bank_gmail_refresh_token', 0)}",
         hide_index=True,
         use_container_width=True,
         num_rows="fixed",
