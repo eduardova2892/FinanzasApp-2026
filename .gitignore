@@ -1,0 +1,15 @@
+secrets/
+credentials_gmail.json
+token_gmail.json
+
+__pycache__/
+*.pyc
+
+dags/__pycache__/
+scripts/__pycache__/
+
+*_backup_*.csv
+app_backup_*.py
+
+airflow_venv/
+venv/

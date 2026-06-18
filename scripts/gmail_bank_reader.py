@@ -175,53 +175,36 @@ def fetch_gmail_messages(
 
 
 def build_bcp_query(days: int = 30, medio: str | None = None) -> str:
-    """Query Gmail para consumos BCP salientes.
+    """Query amplia Gmail para notificaciones BCP recientes.
 
-    Se recomienda buscar crédito y débito por separado, porque Gmail puede no resolver
-    correctamente algunos OR complejos en búsquedas combinadas.
+    No filtramos por Cr?dito/D?bito en Gmail porque puede fallar por tildes/codificaci?n.
+    El parser local se encarga de decidir si es consumo, cr?dito o d?bito.
     """
-    base = (
+    return (
         'from:notificaciones@notificacionesbcp.com.pe '
-        f'newer_than:{int(days)}d '
+        f'newer_than:{int(days)}d'
     )
-
-    if medio == "Credito":
-        filtro = '"Tarjeta de Crédito BCP"'
-    elif medio == "Debito":
-        filtro = '"Tarjeta de Débito BCP"'
-    else:
-        filtro = '"Realizaste un consumo"'
-
-    exclusiones = '-("rechazada" OR "anulada" OR "reverso" OR "devolución" OR "abono")'
-
-    return f"{base}{filtro} {exclusiones}"
 
 
 def fetch_bcp_consumption_emails(
     project_dir: str | Path,
     days: int = 30,
-    max_results: int = 50,
+    max_results: int = 200,
 ) -> List[GmailMessage]:
-    """Lee correos BCP recientes, buscando crédito y débito por separado y deduplicando."""
+    """Lee notificaciones BCP recientes y deja que el parser filtre los consumos."""
     service = get_gmail_service(project_dir)
 
-    queries = [
-        build_bcp_query(days=days, medio="Credito"),
-        build_bcp_query(days=days, medio="Debito"),
-    ]
+    query = build_bcp_query(days=days)
 
-    messages_by_id: Dict[str, GmailMessage] = {}
+    msgs = fetch_gmail_messages(
+        service,
+        query=query,
+        max_results=max_results,
+    )
 
-    for query in queries:
-        msgs = fetch_gmail_messages(
-            service,
-            query=query,
-            max_results=max_results,
-        )
-        for msg in msgs:
-            messages_by_id[msg.gmail_id] = msg
+    print(f"Query Gmail amplia: {query} -> {len(msgs)} correos")
 
-    return list(messages_by_id.values())
+    return msgs
 
 
 if __name__ == "__main__":

@@ -381,38 +381,222 @@ GMAIL_BANK_QUERIES = {
 
 
 def parse_bank_email(
-    texto: Any,
-    *,
-    banco: Optional[str] = None,
+    text: str,
+    banco: str = "BCP",
     gmail_id: str = "",
     gmail_thread_id: str = "",
     gmail_date: str = "",
     subject: str = "",
-) -> Optional[Dict[str, Any]]:
-    """Prueba un parser específico o todos los parsers disponibles."""
-    if banco:
-        parser = PARSER_REGISTRY.get(str(banco).upper())
-        if not parser:
-            return None
-        return parser(
-            texto,
-            gmail_id=gmail_id,
-            gmail_thread_id=gmail_thread_id,
-            gmail_date=gmail_date,
-            subject=subject,
-        )
+):
+    """Parser robusto para correos bancarios BCP.
 
-    for parser in PARSER_REGISTRY.values():
-        result = parser(
-            texto,
-            gmail_id=gmail_id,
-            gmail_thread_id=gmail_thread_id,
-            gmail_date=gmail_date,
-            subject=subject,
+    Detecta consumos de tarjeta de cr?dito y d?bito, en PEN o USD.
+    Usa subject + snippet/body cuando el correo HTML no trae todo el texto limpio.
+    """
+    import re
+    import hashlib
+    import unicodedata
+    from datetime import datetime
+    from email.utils import parsedate_to_datetime
+    try:
+        from zoneinfo import ZoneInfo
+    except Exception:
+        ZoneInfo = None
+
+    def _norm(s):
+        s = str(s or "")
+        s = unicodedata.normalize("NFKD", s)
+        return "".join(ch for ch in s if not unicodedata.combining(ch))
+
+    def _clean(s):
+        return re.sub(r"\s+", " ", str(s or "")).strip()
+
+    def _parse_amount(s):
+        s = str(s or "").strip().replace(" ", "")
+        if "," in s and "." in s and s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+        try:
+            return float(s)
+        except Exception:
+            return None
+
+    def _categoria(empresa):
+        e = _norm(empresa).upper()
+        reglas = [
+            (["RAPPI", "PEDIDOSYA", "RESTAUR", "POLLO", "CAFE", "PIZZA", "BURGER", "KFC", "MCDON", "STARBUCKS", "TAMBO"], "Alimentaci?n"),
+            (["UBER", "CABIFY", "YANGO", "TAXI", "DIDI", "BEAT"], "Movilidad"),
+            (["WONG", "TOTTUS", "PLAZA VEA", "VIVANDA", "METRO", "MAKRO", "SUPERMERC"], "Supermercado"),
+            (["INKAFARMA", "MIFARMA", "FARMACIA", "CLINICA", "MEDIC", "SALUD"], "Salud"),
+            (["PET", "VET", "VETERIN"], "Mascotas"),
+            (["PLIN", "YAPE", "TRANSFER", "PAGO", "ENVIO"], "Otros"),
+            (["SHELL", "PRIMAX", "REPSOL", "GRIFO", "PECSA"], "Combustible"),
+            (["NETFLIX", "SPOTIFY", "STEAM", "PLAYSTATION", "APPLE", "GOOGLE", "AMAZON"], "Entretenimiento"),
+        ]
+        for keys, cat in reglas:
+            if any(k in e for k in keys):
+                return cat
+        return "Otros"
+
+    meses = {
+        "enero": 1, "febrero": 2, "marzo": 3, "abril": 4,
+        "mayo": 5, "junio": 6, "julio": 7, "agosto": 8,
+        "septiembre": 9, "setiembre": 9, "octubre": 10,
+        "noviembre": 11, "diciembre": 12,
+    }
+
+    original = _clean(f"{subject} {text}")
+    ascii_text = _clean(_norm(original))
+    ascii_lower = ascii_text.lower()
+
+    if banco.upper() == "BCP":
+        if "bcp" not in ascii_lower:
+            return None
+        if "realizaste un consumo" not in ascii_lower and "consumo tarjeta" not in ascii_lower:
+            return None
+
+    monto = None
+    moneda = "PEN"
+    medio_pago = None
+    empresa = ""
+
+    # Principal: Realizaste un consumo de S/ 33.78 con tu Tarjeta de Cr?dito BCP en RAPPI SAC.
+    m = re.search(
+        r"Realizaste\s+un\s+consumo\s+de\s+(S/|US\$|USD|\$)\s*([\d\.,]+)\s+con\s+tu\s+Tarjeta\s+de\s+(Credito|Debito)\s+BCP\s+en\s+(.+?)(?:\s+Por\s+tu\s+seguridad|$)",
+        ascii_text,
+        flags=re.IGNORECASE,
+    )
+
+    if m:
+        simbolo = m.group(1).upper().replace(" ", "")
+        monto = _parse_amount(m.group(2))
+        medio_pago = "Credito" if m.group(3).lower().startswith("cred") else "Debito"
+        empresa = m.group(4).strip(" .-\n\t")
+        if simbolo in ["US$", "USD", "$"]:
+            moneda = "USD"
+
+    # Fallback por campos tipo tabla
+    if monto is None:
+        m_monto = re.search(
+            r"Total\s+del\s+consumo\s+(S/|US\$|USD|\$)\s*([\d\.,]+)",
+            ascii_text,
+            flags=re.IGNORECASE,
         )
-        if result:
-            return result
-    return None
+        if m_monto:
+            simbolo = m_monto.group(1).upper().replace(" ", "")
+            monto = _parse_amount(m_monto.group(2))
+            if simbolo in ["US$", "USD", "$"]:
+                moneda = "USD"
+
+    if medio_pago is None:
+        if re.search(r"Tarjeta\s+de\s+Credito|Consumo\s+Tarjeta\s+de\s+Credito", ascii_text, flags=re.IGNORECASE):
+            medio_pago = "Credito"
+        elif re.search(r"Tarjeta\s+de\s+Debito|Consumo\s+Tarjeta\s+de\s+Debito", ascii_text, flags=re.IGNORECASE):
+            medio_pago = "Debito"
+
+    if not empresa:
+        m_emp = re.search(
+            r"Empresa\s+(.+?)(?:\s+Numero\s+de\s+operacion|\s+Fecha|\s+Operacion|$)",
+            ascii_text,
+            flags=re.IGNORECASE,
+        )
+        if m_emp:
+            empresa = m_emp.group(1).strip(" .-\n\t")
+
+    # Fecha/hora BCP: 14 de junio de 2026 - 06:05 PM
+    fecha = ""
+    hora = ""
+    fecha_hora_texto = ""
+
+    mf = re.search(
+        r"(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})\s*[-?]\s*(\d{1,2}):(\d{2})\s*(am|pm)",
+        ascii_text,
+        flags=re.IGNORECASE,
+    )
+
+    if mf:
+        dia = int(mf.group(1))
+        mes = meses.get(mf.group(2).lower())
+        anio = int(mf.group(3))
+        hh = int(mf.group(4))
+        mm = int(mf.group(5))
+        ampm = mf.group(6).lower()
+
+        if mes:
+            if ampm == "pm" and hh != 12:
+                hh += 12
+            if ampm == "am" and hh == 12:
+                hh = 0
+            dt = datetime(anio, mes, dia, hh, mm)
+            fecha = dt.date().isoformat()
+            hora = dt.strftime("%H:%M")
+            fecha_hora_texto = mf.group(0).lower()
+
+    # Si no pudo extraer fecha del cuerpo, usa fecha Gmail en Lima.
+    if not fecha and gmail_date:
+        try:
+            dtg = parsedate_to_datetime(gmail_date)
+            if ZoneInfo is not None:
+                dtg = dtg.astimezone(ZoneInfo("America/Lima"))
+            fecha = dtg.date().isoformat()
+            hora = dtg.strftime("%H:%M")
+            fecha_hora_texto = str(gmail_date)
+        except Exception:
+            pass
+
+    tarjeta_ultimos4 = ""
+    mt = re.search(r"(?:\*{4,}|x{4,}|X{4,})(\d{4})", ascii_text)
+    if mt:
+        tarjeta_ultimos4 = mt.group(1)
+
+    numero_operacion = ""
+    mo = re.search(r"Numero\s+de\s+operacion\s+([A-Za-z0-9\-]+)", ascii_text, flags=re.IGNORECASE)
+    if mo:
+        numero_operacion = mo.group(1).strip()
+
+    if monto is None or medio_pago is None or not empresa:
+        return None
+
+    categoria = _categoria(empresa)
+
+    base_hash = "|".join([
+        banco.upper(),
+        medio_pago,
+        str(fecha or ""),
+        f"{float(monto):.2f}",
+        moneda,
+        empresa.upper(),
+        tarjeta_ultimos4,
+        numero_operacion,
+        gmail_id,
+    ])
+    hash_importacion = hashlib.sha256(base_hash.encode("utf-8")).hexdigest()[:16]
+
+    return {
+        "gmail_id": gmail_id,
+        "gmail_thread_id": gmail_thread_id,
+        "gmail_date": gmail_date,
+        "subject": subject,
+        "banco": banco.upper(),
+        "medio_pago": medio_pago,
+        "monto": float(monto),
+        "moneda": moneda,
+        "empresa": empresa,
+        "fecha": fecha,
+        "hora": hora,
+        "fecha_hora_texto": fecha_hora_texto,
+        "tarjeta_ultimos4": tarjeta_ultimos4,
+        "numero_operacion": numero_operacion,
+        "categoria_sugerida": categoria,
+        "descripcion_sugerida": f"{empresa} | {banco.upper()} {medio_pago}",
+        "hash_importacion": hash_importacion,
+        "estado": "pendiente",
+        "fecha_detectado_lima": "",
+        "fecha_importado_lima": "",
+        "resultado_importacion": "",
+        "fuente": f"Gmail {banco.upper()}",
+    }
 
 
 def normalize_pending_record(record: Dict[str, Any]) -> Dict[str, Any]:
