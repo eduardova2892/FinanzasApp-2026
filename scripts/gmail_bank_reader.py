@@ -174,14 +174,27 @@ def fetch_gmail_messages(
     return messages
 
 
-def build_bcp_query(days: int = 30) -> str:
-    """Query Gmail inicial para consumos BCP salientes."""
-    return (
+def build_bcp_query(days: int = 30, medio: str | None = None) -> str:
+    """Query Gmail para consumos BCP salientes.
+
+    Se recomienda buscar crédito y débito por separado, porque Gmail puede no resolver
+    correctamente algunos OR complejos en búsquedas combinadas.
+    """
+    base = (
         'from:notificaciones@notificacionesbcp.com.pe '
         f'newer_than:{int(days)}d '
-        '("Tarjeta de Crédito BCP" OR "Tarjeta de Débito BCP" OR "Realizaste un consumo") '
-        '-("rechazada" OR "anulada" OR "reverso" OR "devolución" OR "abono")'
     )
+
+    if medio == "Credito":
+        filtro = '"Tarjeta de Crédito BCP"'
+    elif medio == "Debito":
+        filtro = '"Tarjeta de Débito BCP"'
+    else:
+        filtro = '"Realizaste un consumo"'
+
+    exclusiones = '-("rechazada" OR "anulada" OR "reverso" OR "devolución" OR "abono")'
+
+    return f"{base}{filtro} {exclusiones}"
 
 
 def fetch_bcp_consumption_emails(
@@ -189,10 +202,26 @@ def fetch_bcp_consumption_emails(
     days: int = 30,
     max_results: int = 50,
 ) -> List[GmailMessage]:
-    """Atajo para leer correos BCP recientes."""
+    """Lee correos BCP recientes, buscando crédito y débito por separado y deduplicando."""
     service = get_gmail_service(project_dir)
-    query = build_bcp_query(days=days)
-    return fetch_gmail_messages(service, query=query, max_results=max_results)
+
+    queries = [
+        build_bcp_query(days=days, medio="Credito"),
+        build_bcp_query(days=days, medio="Debito"),
+    ]
+
+    messages_by_id: Dict[str, GmailMessage] = {}
+
+    for query in queries:
+        msgs = fetch_gmail_messages(
+            service,
+            query=query,
+            max_results=max_results,
+        )
+        for msg in msgs:
+            messages_by_id[msg.gmail_id] = msg
+
+    return list(messages_by_id.values())
 
 
 if __name__ == "__main__":
