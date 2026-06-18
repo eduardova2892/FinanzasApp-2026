@@ -14,6 +14,7 @@ Uso en app.py:
 
 from __future__ import annotations
 
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -183,6 +184,114 @@ def _indice_default_por_banco(nombres: list[str], banco: str) -> int:
     return 0
 
 
+
+def generar_pendientes_desde_gmail_bcp(
+    days: int = 30,
+    max_results: int = 50,
+    pending_path: Path | str = BANK_GMAIL_PENDING_PATH,
+) -> dict:
+    """
+    Lee Gmail directamente desde Streamlit usando los módulos ya creados:
+    - scripts/gmail_bank_reader.py
+    - scripts/bank_email_parsers.py
+
+    Genera/actualiza data/bank_gmail_expenses_pending.csv sin duplicar hashes.
+    Por ahora implementa BCP. La estructura queda lista para agregar GNB/BBVA/Interbank.
+    """
+    project = Path.cwd()
+    scripts_dir = project / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+    from gmail_bank_reader import fetch_bcp_consumption_emails
+    from bank_email_parsers import parse_bank_email
+
+    pending_path = Path(pending_path)
+    df_existing = cargar_pendientes_bancos(pending_path)
+
+    existing_hashes = set()
+    existing_gmail_ids = set()
+    if not df_existing.empty:
+        if "hash_importacion" in df_existing.columns:
+            existing_hashes = set(df_existing["hash_importacion"].fillna("").astype(str))
+        if "gmail_id" in df_existing.columns:
+            existing_gmail_ids = set(df_existing["gmail_id"].fillna("").astype(str))
+
+    emails = fetch_bcp_consumption_emails(
+        project,
+        days=int(days),
+        max_results=int(max_results),
+    )
+
+    rows = []
+    leidos = len(emails)
+    interpretados = 0
+    duplicados = 0
+    errores = 0
+    ahora_lima = datetime.now(ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
+
+    for email in emails:
+        try:
+            d = email.to_dict() if hasattr(email, "to_dict") else dict(email)
+
+            gmail_id = _texto_seguro(d.get("gmail_id"))
+            parsed = parse_bank_email(
+                d.get("text", "") or d.get("body", ""),
+                banco="BCP",
+                gmail_id=gmail_id,
+                gmail_thread_id=d.get("thread_id", ""),
+                gmail_date=d.get("date", ""),
+                subject=d.get("subject", ""),
+            )
+
+            if not parsed:
+                continue
+
+            interpretados += 1
+            hash_imp = _texto_seguro(parsed.get("hash_importacion"))
+
+            if (hash_imp and hash_imp in existing_hashes) or (gmail_id and gmail_id in existing_gmail_ids):
+                duplicados += 1
+                continue
+
+            if not _texto_seguro(parsed.get("estado")):
+                parsed["estado"] = "pendiente"
+            if not _texto_seguro(parsed.get("fecha_detectado_lima")):
+                parsed["fecha_detectado_lima"] = ahora_lima
+            if not _texto_seguro(parsed.get("fuente")):
+                parsed["fuente"] = "Gmail BCP"
+
+            rows.append(parsed)
+            if hash_imp:
+                existing_hashes.add(hash_imp)
+            if gmail_id:
+                existing_gmail_ids.add(gmail_id)
+
+        except Exception:
+            errores += 1
+
+    nuevos = len(rows)
+
+    if nuevos > 0:
+        df_new = pd.DataFrame(rows)
+        if df_existing.empty:
+            df_all = df_new
+        else:
+            df_all = pd.concat([df_existing, df_new], ignore_index=True)
+        guardar_pendientes_bancos(df_all, pending_path)
+    elif not pending_path.exists():
+        guardar_pendientes_bancos(df_existing, pending_path)
+
+    return {
+        "correos_leidos": leidos,
+        "gastos_interpretados": interpretados,
+        "nuevos_pendientes": nuevos,
+        "duplicados_omitidos": duplicados,
+        "errores": errores,
+        "archivo": str(pending_path),
+    }
+
+
 def render_bank_gmail_inbox(
     guardar_func: Optional[Callable[[str], None]] = None,
     pending_path: Path | str = BANK_GMAIL_PENDING_PATH,
@@ -198,16 +307,69 @@ def render_bank_gmail_inbox(
     """
     st.markdown("#### 📥 Bandeja Gmail — gastos bancarios detectados")
     st.caption(
-        "Esta bandeja se alimenta desde Airflow leyendo Gmail. "
-        "Revisa, corrige categoría y confirma antes de importar a tus gastos."
+        "Lee automáticamente tus últimos correos bancarios de Gmail, genera una bandeja pendiente "
+        "y luego te permite importar cada consumo como gasto de débito o crédito."
     )
+
+    with st.container(border=True):
+        st.markdown("##### 🔄 Lectura automática desde Gmail")
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            dias_gmail = st.number_input(
+                "Días a revisar",
+                min_value=1,
+                max_value=90,
+                value=30,
+                step=1,
+                key="bank_gmail_read_days",
+            )
+        with c2:
+            max_correos = st.number_input(
+                "Máx. correos",
+                min_value=5,
+                max_value=200,
+                value=50,
+                step=5,
+                key="bank_gmail_read_max_results",
+            )
+        with c3:
+            st.write("")
+            leer_ahora = st.button(
+                "🔄 Leer últimos correos Gmail ahora",
+                type="primary",
+                use_container_width=True,
+                key="btn_leer_gmail_bancos_ahora",
+            )
+
+        if leer_ahora:
+            try:
+                with st.spinner("Leyendo Gmail y generando bandeja pendiente..."):
+                    resumen = generar_pendientes_desde_gmail_bcp(
+                        days=int(dias_gmail),
+                        max_results=int(max_correos),
+                        pending_path=pending_path,
+                    )
+                st.success(
+                    "Lectura completada: "
+                    f"{resumen['correos_leidos']} correos leídos, "
+                    f"{resumen['gastos_interpretados']} gastos interpretados, "
+                    f"{resumen['nuevos_pendientes']} nuevos pendientes, "
+                    f"{resumen['duplicados_omitidos']} duplicados omitidos."
+                )
+            except Exception as exc:
+                st.error(
+                    "No pude leer Gmail desde este entorno. "
+                    "Verifica que existan `secrets/credentials_gmail.json` y `secrets/token_gmail.json` "
+                    "o genera el CSV con Airflow/localmente."
+                )
+                st.caption(f"Detalle técnico: {exc}")
 
     df_all = cargar_pendientes_bancos(pending_path)
 
     if df_all.empty:
         st.info(
-            "Todavía no hay gastos detectados desde Gmail. Ejecuta el DAG "
-            "`bank_gmail_expenses_pending` o genera el CSV manualmente."
+            "Todavía no hay gastos detectados desde Gmail. Presiona "
+            "**Leer últimos correos Gmail ahora** o ejecuta el DAG `bank_gmail_expenses_pending`."
         )
         return
 
