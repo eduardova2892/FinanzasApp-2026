@@ -2504,7 +2504,13 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 _p_fecha_primera_cuota = st.date_input("📅 Primera cuota", value=hoy_peru, key="prestamo_fecha_primera")
                 _p_dia_cuota = st.number_input("📆 Día del mes", min_value=1, max_value=31, value=5, key="prestamo_dia")
             with _fq4:
-                _p_fecha_ultima_cuota = st.date_input("📅 Última cuota", value=hoy_peru, key="prestamo_fecha_fin")
+                _p_anios = st.number_input("📅 Plazo (años)", min_value=1, max_value=30, value=5, step=1, key="prestamo_anios",
+                    help="Las cuotas se pagan el mismo día del mes durante N años a partir de la primera cuota")
+                # Calcular fecha fin automáticamente: misma fecha de primera cuota + N años, día ajustado
+                _p_fecha_ultima_cuota = (
+                    pd.to_datetime(_p_fecha_primera_cuota) + pd.DateOffset(years=int(_p_anios)) - pd.DateOffset(months=1)
+                ).date()
+                st.caption(f"🗓 Última cuota estimada: **{_p_fecha_ultima_cuota.strftime('%d/%m/%Y')}**")
 
             st.markdown("**💥 Pago de cierre anticipado** *(opcional)*")
             _fc1, _fc2 = st.columns(2)
@@ -2542,6 +2548,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                         "medio_tipo":            _medio_tipo,
                         "fecha_primera_cuota":   _p_fecha_primera_cuota.isoformat(),
                         "dia_cuota":             int(_p_dia_cuota),
+                        "plazo_anios":           int(_p_anios),
                         "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
                         "descripcion":           _p_desc.strip(),
                         "monto_cierre":          float(_p_monto_cierre) if _p_monto_cierre > 0 else 0.0,
@@ -2573,10 +2580,15 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                         f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
                         f"De tus ahorros: S/ {_gasto_propio:,.0f}"
                     )
+                    _plazo_txt = (
+                        f"{_sim['plazo_anios']} año{'s' if _sim['plazo_anios'] != 1 else ''}"
+                        if _sim.get("plazo_anios")
+                        else f"hasta {_sim['fecha_fin']}"
+                    )
                     _sc1.caption(
                         f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
                         f"{_sim['medio_pago']}  ·  "
-                        f"{_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} → {_sim['fecha_fin']}"
+                        f"Desde {_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} · Plazo: {_plazo_txt}  ·  Última cuota: {_sim['fecha_fin']}"
                     )
                     if _sim.get("descripcion"):
                         _sc1.caption(f"📝 {_sim['descripcion']}")
