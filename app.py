@@ -1994,8 +1994,14 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
             st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
 
+            _cols_debito_editor = ["id", "fecha", "cuenta_origen", "cuenta_origen_nombre", "categoria", "descripcion", "monto", "hash_importacion"]
+            for _c in _cols_debito_editor:
+                if _c not in df_g.columns:
+                    df_g[_c] = ""
+            df_g_editor = df_g[_cols_debito_editor].copy()
+
             ed_g = st.data_editor(
-                df_g,
+                df_g_editor,
                 use_container_width=True,
                 hide_index=True,
                 num_rows="dynamic",
@@ -2015,7 +2021,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             if st.button("💾 Guardar cambios — Gastos débito", type="primary"):
                 df_editado = ed_g.copy()
                 # Restaurar columnas ocultas que el editor pudo haber perdido
-                for _col in ["id", "cuenta_origen"]:
+                for _col in ["id", "cuenta_origen", "hash_importacion"]:
                     if _col not in df_editado.columns:
                         df_editado[_col] = df_g[_col].values[:len(df_editado)] if _col in df_g.columns else ""
                 # Asegurar IDs únicos para filas nuevas
@@ -2028,7 +2034,11 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                 df_editado["monto"]         = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
                 df_editado["fecha"]         = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
                 df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                st.session_state["gastos_diarios"] = df_editado.to_dict("records")
+                _cols_final_debito = ["id", "fecha", "cuenta_origen", "cuenta_origen_nombre", "categoria", "descripcion", "monto", "hash_importacion"]
+                for _c in _cols_final_debito:
+                    if _c not in df_editado.columns:
+                        df_editado[_c] = ""
+                st.session_state["gastos_diarios"] = df_editado[_cols_final_debito].to_dict("records")
                 guardar("gastos_diarios")
                 st.success("✅ Guardado.")
                 st.rerun()
@@ -2125,6 +2135,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             # ==================================================
             # RESUMEN GASTOS DIARIOS CON TARJETA DE CRÉDITO
             # ==================================================
+            st.session_state["gastos_tarjeta"] = [normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta", [])]
             df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
 
             if not df_gt.empty:
@@ -2148,8 +2159,14 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
 
                 st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
 
+                _cols_tarjeta_editor = ["id", "fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "moneda", "monto", "hash_importacion"]
+                for _c in _cols_tarjeta_editor:
+                    if _c not in df_gt.columns:
+                        df_gt[_c] = ""
+                df_gt_editor = df_gt[_cols_tarjeta_editor].copy()
+
                 ed_gt = st.data_editor(
-                    df_gt,
+                    df_gt_editor,
                     use_container_width=True,
                     hide_index=True,
                     num_rows="dynamic",
@@ -2193,7 +2210,11 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
                     df_editado["monto"] = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
                     df_editado["fecha"] = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
                     df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                    st.session_state["gastos_tarjeta"] = df_editado.to_dict("records")
+                    _cols_final_tarjeta = ["id", "fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "moneda", "monto", "hash_importacion"]
+                    for _c in _cols_final_tarjeta:
+                        if _c not in df_editado.columns:
+                            df_editado[_c] = ""
+                    st.session_state["gastos_tarjeta"] = df_editado[_cols_final_tarjeta].to_dict("records")
                     guardar("gastos_tarjeta")
                     st.success("✅ Guardado.")
                     st.rerun()
