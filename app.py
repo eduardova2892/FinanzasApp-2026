@@ -15,6 +15,120 @@ import hashlib
 import unicodedata
 from scripts.streamlit_bank_inbox import render_bank_gmail_inbox
 
+# ==================================================
+# FIX GLOBAL: NORMALIZACI?N DE GASTOS IMPORTADOS
+# ==================================================
+def _valor_limpio_gmail(x, default=""):
+    try:
+        import pandas as _pd
+        if _pd.isna(x):
+            return default
+    except Exception:
+        pass
+
+    if x is None:
+        return default
+
+    s = str(x).strip()
+    if s in ["", "None", "none", "nan", "NaN", "NaT"]:
+        return default
+
+    return s
+
+
+def normalizar_gasto_debito_record(r, nombre_cuenta_principal="Cuenta principal BCP D?bito"):
+    import uuid
+    import pandas as _pd
+
+    if not isinstance(r, dict):
+        r = {}
+
+    fecha = _valor_limpio_gmail(r.get("fecha"))
+    try:
+        fecha = _pd.to_datetime(fecha, errors="coerce").strftime("%Y-%m-%d")
+        if fecha == "NaT":
+            fecha = ""
+    except Exception:
+        fecha = ""
+
+    monto = _pd.to_numeric(r.get("monto"), errors="coerce")
+    if _pd.isna(monto):
+        monto = 0.0
+
+    descripcion = (
+        _valor_limpio_gmail(r.get("descripcion"))
+        or _valor_limpio_gmail(r.get("empresa"))
+        or _valor_limpio_gmail(r.get("descripcion_sugerida"))
+        or "Gasto importado"
+    )
+
+    categoria = _valor_limpio_gmail(r.get("categoria"), "Otros")
+
+    cuenta_origen = (
+        _valor_limpio_gmail(r.get("cuenta_origen"))
+        or _valor_limpio_gmail(r.get("cuenta_id"))
+        or "principal"
+    )
+
+    cuenta_origen_nombre = (
+        _valor_limpio_gmail(r.get("cuenta_origen_nombre"))
+        or _valor_limpio_gmail(r.get("cuenta_nombre"))
+        or _valor_limpio_gmail(r.get("cuenta"))
+        or nombre_cuenta_principal
+    )
+
+    return {
+        "id": _valor_limpio_gmail(r.get("id")) or str(uuid.uuid4()),
+        "fecha": fecha,
+        "cuenta_origen": cuenta_origen,
+        "cuenta_origen_nombre": cuenta_origen_nombre,
+        "categoria": categoria,
+        "descripcion": descripcion,
+        "monto": float(monto),
+        "hash_importacion": _valor_limpio_gmail(r.get("hash_importacion")),
+    }
+
+
+def normalizar_gasto_tarjeta_record(r):
+    import uuid
+    import pandas as _pd
+
+    if not isinstance(r, dict):
+        r = {}
+
+    fecha = _valor_limpio_gmail(r.get("fecha"))
+    try:
+        fecha = _pd.to_datetime(fecha, errors="coerce").strftime("%Y-%m-%d")
+        if fecha == "NaT":
+            fecha = ""
+    except Exception:
+        fecha = ""
+
+    monto = _pd.to_numeric(r.get("monto"), errors="coerce")
+    if _pd.isna(monto):
+        monto = 0.0
+
+    descripcion = (
+        _valor_limpio_gmail(r.get("descripcion"))
+        or _valor_limpio_gmail(r.get("empresa"))
+        or _valor_limpio_gmail(r.get("descripcion_sugerida"))
+        or "Gasto importado"
+    )
+
+    return {
+        "id": _valor_limpio_gmail(r.get("id")) or str(uuid.uuid4()),
+        "fecha": fecha,
+        "tarjeta_id": _valor_limpio_gmail(r.get("tarjeta_id")),
+        "tarjeta_nombre": _valor_limpio_gmail(r.get("tarjeta_nombre")),
+        "categoria": _valor_limpio_gmail(r.get("categoria"), "Otros"),
+        "descripcion": descripcion,
+        "moneda": _valor_limpio_gmail(r.get("moneda"), "PEN"),
+        "monto": float(monto),
+        "hash_importacion": _valor_limpio_gmail(r.get("hash_importacion")),
+    }
+
+
+
 
 # ==================================================
 # HELPERS IMPORTACIÓN DE CORREOS BCP
@@ -2136,117 +2250,7 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
             # RESUMEN GASTOS DIARIOS CON TARJETA DE CRÉDITO
             # ==================================================
             st.session_state["gastos_tarjeta"] = [
-# ==================================================
-# FIX GLOBAL: NORMALIZACI?N DE GASTOS IMPORTADOS
-# ==================================================
-def _valor_limpio_gmail(x, default=""):
-    try:
-        import pandas as _pd
-        if _pd.isna(x):
-            return default
-    except Exception:
-        pass
 
-    if x is None:
-        return default
-
-    s = str(x).strip()
-    if s in ["", "None", "none", "nan", "NaN", "NaT"]:
-        return default
-
-    return s
-
-
-def normalizar_gasto_debito_record(r, nombre_cuenta_principal="Cuenta principal BCP D?bito"):
-    import uuid
-    import pandas as _pd
-
-    if not isinstance(r, dict):
-        r = {}
-
-    fecha = _valor_limpio_gmail(r.get("fecha"))
-    try:
-        fecha = _pd.to_datetime(fecha, errors="coerce").strftime("%Y-%m-%d")
-        if fecha == "NaT":
-            fecha = ""
-    except Exception:
-        fecha = ""
-
-    monto = _pd.to_numeric(r.get("monto"), errors="coerce")
-    if _pd.isna(monto):
-        monto = 0.0
-
-    descripcion = (
-        _valor_limpio_gmail(r.get("descripcion"))
-        or _valor_limpio_gmail(r.get("empresa"))
-        or _valor_limpio_gmail(r.get("descripcion_sugerida"))
-        or "Gasto importado"
-    )
-
-    categoria = _valor_limpio_gmail(r.get("categoria"), "Otros")
-
-    cuenta_origen = (
-        _valor_limpio_gmail(r.get("cuenta_origen"))
-        or _valor_limpio_gmail(r.get("cuenta_id"))
-        or "principal"
-    )
-
-    cuenta_origen_nombre = (
-        _valor_limpio_gmail(r.get("cuenta_origen_nombre"))
-        or _valor_limpio_gmail(r.get("cuenta_nombre"))
-        or _valor_limpio_gmail(r.get("cuenta"))
-        or nombre_cuenta_principal
-    )
-
-    return {
-        "id": _valor_limpio_gmail(r.get("id")) or str(uuid.uuid4()),
-        "fecha": fecha,
-        "cuenta_origen": cuenta_origen,
-        "cuenta_origen_nombre": cuenta_origen_nombre,
-        "categoria": categoria,
-        "descripcion": descripcion,
-        "monto": float(monto),
-        "hash_importacion": _valor_limpio_gmail(r.get("hash_importacion")),
-    }
-
-
-def normalizar_gasto_tarjeta_record(r):
-    import uuid
-    import pandas as _pd
-
-    if not isinstance(r, dict):
-        r = {}
-
-    fecha = _valor_limpio_gmail(r.get("fecha"))
-    try:
-        fecha = _pd.to_datetime(fecha, errors="coerce").strftime("%Y-%m-%d")
-        if fecha == "NaT":
-            fecha = ""
-    except Exception:
-        fecha = ""
-
-    monto = _pd.to_numeric(r.get("monto"), errors="coerce")
-    if _pd.isna(monto):
-        monto = 0.0
-
-    descripcion = (
-        _valor_limpio_gmail(r.get("descripcion"))
-        or _valor_limpio_gmail(r.get("empresa"))
-        or _valor_limpio_gmail(r.get("descripcion_sugerida"))
-        or "Gasto importado"
-    )
-
-    return {
-        "id": _valor_limpio_gmail(r.get("id")) or str(uuid.uuid4()),
-        "fecha": fecha,
-        "tarjeta_id": _valor_limpio_gmail(r.get("tarjeta_id")),
-        "tarjeta_nombre": _valor_limpio_gmail(r.get("tarjeta_nombre")),
-        "categoria": _valor_limpio_gmail(r.get("categoria"), "Otros"),
-        "descripcion": descripcion,
-        "moneda": _valor_limpio_gmail(r.get("moneda"), "PEN"),
-        "monto": float(monto),
-        "hash_importacion": _valor_limpio_gmail(r.get("hash_importacion")),
-    }
 
 
 normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta", [])]
