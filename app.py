@@ -1059,8 +1059,87 @@ st.caption("Control de ingresos, gastos, tarjetas, cuentas de ahorro y proyecci√
 # ==================================================
 # PERSISTENCIA JSON A SUPABASE
 # ==================================================
+
+# ==================================================
+# LIMPIEZA JSON PARA SUPABASE
+# ==================================================
+def limpiar_json_para_supabase(obj):
+    """Convierte NaN/NaT/inf/numpy/pandas a valores JSON v?lidos para Supabase."""
+    import math
+    from datetime import date, datetime
+
+    try:
+        import pandas as _pd
+    except Exception:
+        _pd = None
+
+    try:
+        import numpy as _np
+    except Exception:
+        _np = None
+
+    if obj is None:
+        return None
+
+    if isinstance(obj, dict):
+        return {str(k): limpiar_json_para_supabase(v) for k, v in obj.items()}
+
+    if isinstance(obj, (list, tuple, set)):
+        return [limpiar_json_para_supabase(v) for v in obj]
+
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+
+    if _np is not None and isinstance(obj, _np.generic):
+        obj = obj.item()
+
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+
+    if isinstance(obj, (int, str, bool)):
+        return obj
+
+    if _pd is not None:
+        try:
+            if _pd.isna(obj):
+                return None
+        except Exception:
+            pass
+
+    return str(obj)
+
+
+def deduplicar_por_hash_importacion(registros):
+    """Evita duplicados cuando un gasto importado desde Gmail se reintenta guardar."""
+    if not isinstance(registros, list):
+        return registros
+
+    vistos = set()
+    salida = []
+
+    for r in registros:
+        if isinstance(r, dict):
+            h = str(r.get("hash_importacion", "") or "").strip()
+            if h:
+                if h in vistos:
+                    continue
+                vistos.add(h)
+
+        salida.append(r)
+
+    return salida
+
+
 def guardar(clave):
-    data = st.session_state[clave]
+    data_raw = st.session_state[clave]
+
+    if clave in ["gastos_diarios", "gastos_tarjeta"]:
+        data_raw = deduplicar_por_hash_importacion(data_raw)
+        st.session_state[clave] = data_raw
+
+    data = limpiar_json_para_supabase(data_raw)
 
     res = (
         supabase.table("financial_records")
