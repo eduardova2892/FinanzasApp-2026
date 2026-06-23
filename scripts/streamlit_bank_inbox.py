@@ -53,6 +53,22 @@ BANK_GMAIL_PENDING_COLUMNS = [
 ]
 
 
+def filtrar_por_fecha_desde_hasta(df: pd.DataFrame, fecha_desde, fecha_hasta) -> pd.DataFrame:
+    if df.empty or "fecha" not in df.columns:
+        return df.copy()
+
+    tmp = df.copy()
+    tmp["_fecha_dt"] = pd.to_datetime(tmp["fecha"], errors="coerce").dt.date
+
+    tmp = tmp[
+        (tmp["_fecha_dt"] >= fecha_desde) &
+        (tmp["_fecha_dt"] <= fecha_hasta)
+    ].copy()
+
+    tmp = tmp.drop(columns=["_fecha_dt"], errors="ignore")
+    return tmp
+
+
 def _texto_seguro(value) -> str:
     if value is None:
         return ""
