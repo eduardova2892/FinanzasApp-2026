@@ -49,41 +49,129 @@ def project_root_from_file(current_file: str | Path) -> Path:
     return Path(current_file).resolve().parents[1]
 
 
-def get_gmail_service(
-    project_dir: str | Path,
-    credentials_relative_path: str = "secrets/credentials_gmail.json",
-    token_relative_path: str = "secrets/token_gmail.json",
-):
-    """Construye cliente Gmail API usando OAuth local de solo lectura.
+def _json_from_streamlit_secret(key: str):
+    """Lee JSON desde Streamlit Secrets.
 
-    La primera vez abre flujo OAuth y crea token_gmail.json. En corridas futuras,
-    reutiliza o refresca el token.
+    Soporta:
+    [gmail]
+    credentials_json = """..."""
+    token_json = """..."""
     """
+    import json
+
+    try:
+        import streamlit as st
+    except Exception:
+        return None
+
+    try:
+        gmail_group = st.secrets.get("gmail", {})
+    except Exception:
+        gmail_group = {}
+
+    value = None
+
+    try:
+        if isinstance(gmail_group, dict):
+            value = gmail_group.get(key)
+        else:
+            value = gmail_group[key]
+    except Exception:
+        value = None
+
+    if value is None:
+        try:
+            value = st.secrets.get(key)
+        except Exception:
+            value = None
+
+    if value is None:
+        return None
+
+    if isinstance(value, dict):
+        return dict(value)
+
+    value = str(value).strip()
+    if not value:
+        return None
+
+    return json.loads(value)
+
+
+def get_gmail_service(project_dir: str | Path):
+    """Crea servicio Gmail usando primero Streamlit Secrets y luego archivos locales.
+
+    En local usa:
+    secrets/credentials_gmail.json
+    secrets/token_gmail.json
+
+    En Streamlit Cloud usa:
+    [gmail]
+    credentials_json = """..."""
+    token_json = """..."""
+    """
+    import json
+    from pathlib import Path
+
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from googleapiclient.discovery import build
 
     project_dir = Path(project_dir)
-    credentials_path = project_dir / credentials_relative_path
-    token_path = project_dir / token_relative_path
 
-    if not credentials_path.exists():
-        raise FileNotFoundError(f"No existe credentials Gmail: {credentials_path}")
+    credentials_path = project_dir / "secrets" / "credentials_gmail.json"
+    token_path = project_dir / "secrets" / "token_gmail.json"
 
-    creds: Optional[Credentials] = None
+    credentials_info = _json_from_streamlit_secret("credentials_json")
+    token_info = _json_from_streamlit_secret("token_json")
 
-    if token_path.exists():
+    creds = None
+
+    # 1. Token desde Streamlit Secrets
+    if token_info:
+        creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+
+    # 2. Token desde archivo local
+    elif token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
 
+    # 3. Refrescar token si venci?
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+        # En local, actualizamos token_gmail.json.
+        # En Streamlit Cloud no escribimos secrets.
+        try:
+            if token_path.exists():
+                token_path.write_text(creds.to_json(), encoding="utf-8")
+        except Exception:
+            pass
+
+    # 4. Si no hay token v?lido, crear flujo OAuth solo en local
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)
-            creds = flow.run_local_server(port=0)
+        if credentials_info:
+            raise RuntimeError(
+                "Existe credentials_json en Streamlit Secrets, pero falta token_json v?lido. "
+                "Debes copiar tambi?n el contenido de secrets/token_gmail.json a Streamlit Secrets."
+            )
+
+        if not credentials_path.exists():
+            raise FileNotFoundError(
+                f"No existe credentials Gmail: {credentials_path}. "
+                "En Streamlit Cloud configura [gmail].credentials_json y [gmail].token_json en Secrets."
+            )
+
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(credentials_path),
+            SCOPES,
+        )
+        creds = flow.run_local_server(port=0)
 
         token_path.parent.mkdir(parents=True, exist_ok=True)
         token_path.write_text(creds.to_json(), encoding="utf-8")
 
     return build("gmail", "v1", credentials=creds)
-
 
 def _decode_gmail_base64(data: str | None) -> str:
     """Decodifica contenido base64url de Gmail."""
