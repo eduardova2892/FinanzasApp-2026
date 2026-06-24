@@ -1166,14 +1166,32 @@ with st.sidebar:
             st.session_state.pop(_k, None)
         st.rerun()
 
-st.title("📊 Dashboard de Finanzas Personales")
+st.markdown("<h1 style='margin-bottom:0'>📊 Finanzas Personales</h1>", unsafe_allow_html=True)
 st.markdown("""<style>
-.streamlit-expanderHeader{font-size:0.93rem!important;padding:0.45rem 0.75rem!important}
-.block-container{padding-top:0.8rem!important;padding-bottom:1rem!important}
-h4{margin-top:0.5rem!important;margin-bottom:0.25rem!important;font-size:0.98rem!important}
-h3{margin-top:0.6rem!important;margin-bottom:0.3rem!important;font-size:1.02rem!important}
-.stCaption p{font-size:0.78rem!important;margin-bottom:0.1rem!important}
-div[data-testid="stExpander"]{margin-bottom:0.25rem!important}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+html,body,[class*="css"]{font-family:'Inter',sans-serif!important}
+.block-container{padding:0.5rem 1.4rem 1rem!important;max-width:1400px!important}
+h1{font-size:1.35rem!important;font-weight:700!important;letter-spacing:-0.3px!important;margin-bottom:0.05rem!important}
+h2{font-size:1.05rem!important;font-weight:600!important;margin:0.3rem 0 0.15rem!important}
+h3{font-size:0.95rem!important;font-weight:600!important;margin:0.3rem 0 0.1rem!important}
+h4{font-size:0.87rem!important;font-weight:500!important;margin:0.2rem 0 0.08rem!important}
+.streamlit-expanderHeader{font-size:0.87rem!important;font-weight:500!important;padding:0.38rem 0.65rem!important}
+div[data-testid="stExpander"]{margin-bottom:0.18rem!important;border-radius:6px!important}
+div[data-testid="stExpanderDetails"]{padding:0.45rem 0.7rem 0.55rem!important}
+div[data-testid="stTextInput"]>label,div[data-testid="stNumberInput"]>label,div[data-testid="stSelectbox"]>label,div[data-testid="stDateInput"]>label{font-size:0.73rem!important;font-weight:500!important;margin-bottom:0.02rem!important;color:#8b9ab0!important}
+div[data-testid="stTextInput"] input,div[data-testid="stNumberInput"] input{font-size:0.81rem!important;padding:0.22rem 0.45rem!important}
+div[data-testid="stSelectbox"]>div>div{font-size:0.81rem!important;min-height:1.9rem!important}
+div[data-testid="stMetric"]{padding:0.35rem 0.5rem!important}
+div[data-testid="stMetricLabel"] p{font-size:0.7rem!important;color:#8b9ab0!important}
+div[data-testid="stMetricValue"]{font-size:1.05rem!important;font-weight:600!important}
+div[data-testid="stMetricDelta"]{font-size:0.7rem!important}
+button[kind="primary"]{font-size:0.79rem!important;padding:0.28rem 0.75rem!important;border-radius:5px!important}
+button[kind="secondary"]{font-size:0.76rem!important;padding:0.22rem 0.55rem!important;border-radius:5px!important}
+.stCaption p{font-size:0.71rem!important;color:#7a8899!important;margin:0.03rem 0!important}
+button[data-baseweb="tab"]{font-size:0.79rem!important;padding:0.28rem 0.75rem!important}
+hr{margin:0.35rem 0!important;opacity:0.15!important}
+div[data-testid="stForm"]{padding:0.45rem!important;border-radius:6px!important}
+div[data-testid="stDataFrame"]{font-size:0.77rem!important}
 </style>""", unsafe_allow_html=True)
 
 
@@ -4674,7 +4692,7 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 1 — EVOLUCIÓN DE SALDOS
     # ─────────────────────────────────────────────────────────
-    st.markdown("### 📈 Evolución de saldos")
+    st.divider()
 
     # ── Cuadro de saldos actuales ──────────────────────────────
     # Índice de la fecha más cercana a hoy (evitar conflictos de timezone)
@@ -4716,6 +4734,41 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
                 "📌 La cuenta secundaria IBKR fue reemplazada por el valor total actual del portafolio IBKR "
                 "para evitar doble conteo."
             )
+
+    # ── Ajuste manual de saldo real ──────────────────────────
+    with st.expander("⚖️ Ajustar saldo real de hoy", expanded=False):
+        st.caption("Corrige el saldo si difiere de la proyección. Solo mueve el punto de partida, no toca gastos ni deudas.")
+        _aj_c1, _aj_c2, _aj_c3 = st.columns([2, 2, 1])
+        with _aj_c1:
+            _ctas_aj = {nombre_cuenta_principal: "principal"}
+            for _ca in st.session_state["cuentas_ahorro"]:
+                _ctas_aj[_ca["nombre"]] = _ca["id"]
+            _aj_cta = st.selectbox("Cuenta", list(_ctas_aj.keys()), key="aj_cta_sel")
+        with _aj_c2:
+            _aj_proy = _saldo_principal_hoy if _aj_cta == nombre_cuenta_principal else float(saldos_sec.get(_aj_cta, pd.Series([0])).iloc[_idx_ref])
+            _aj_real = st.number_input(
+                f"Saldo real hoy (S/)",
+                min_value=0.0, step=100.0,
+                value=float(st.session_state["configuracion"].get(f"ajuste_saldo_{_ctas_aj[_aj_cta]}", _aj_proy)),
+                key="aj_saldo_inp",
+                help=f"Proyectado: S/ {_aj_proy:,.0f}"
+            )
+        with _aj_c3:
+            st.write("")
+            st.write("")
+            if st.button("💾 Aplicar", key="btn_aj_saldo", type="primary"):
+                _aj_diff = _aj_real - _aj_proy
+                st.session_state["configuracion"][f"ajuste_saldo_{_ctas_aj[_aj_cta]}"] = float(_aj_real)
+                if _ctas_aj[_aj_cta] == "principal":
+                    st.session_state["configuracion"]["ahorro_inicial"] = float(st.session_state["configuracion"].get("ahorro_inicial", 0)) + _aj_diff
+                else:
+                    for _ca2 in st.session_state["cuentas_ahorro"]:
+                        if _ca2["id"] == _ctas_aj[_aj_cta]:
+                            _ca2["saldo_inicial"] = float(_ca2.get("saldo_inicial", 0)) + _aj_diff
+                    guardar("cuentas_ahorro")
+                guardar("configuracion")
+                st.success(f"✅ Ajuste aplicado: S/ {_aj_diff:+,.0f} en '{_aj_cta}'. Gastos y deudas sin cambio.")
+                st.rerun()
 
     # ── Controles del gráfico ──────────────────────────────────
     ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([1, 1, 1])
@@ -4842,8 +4895,7 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 2 — META MENSUAL DE AHORRO
     # ─────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 🎯 Meta mensual de ahorro")
+    st.divider()
 
     mes_actual = pd.Timestamp(hoy_peru).to_period("M")
 
@@ -4923,8 +4975,7 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 3 — GASTOS NO FIJOS POR CATEGORÍA
     # ─────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 🗂️ Gastos no fijos por categoría")
+    st.divider()
 
     meses_disponibles = pd.period_range(start=fecha_inicio_sim, end=fecha_fin_sim, freq="M")
     opciones_meses = {
@@ -5047,8 +5098,7 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 4 — GRÁFICOS MENSUALES COMPARATIVOS
     # ─────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 📊 Comparativa mensual de gastos")
+    st.divider()
 
     if df_mes_tipo["Total general"].sum() > 0:
 
@@ -5156,8 +5206,7 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 5 — RESUMEN POR CICLO DE TARJETA
     # ─────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 💳 Pagos de tarjeta de crédito")
+    st.divider()
 
     if not df_gt_calc.empty or any(
         r.get("medio_pago") == "Tarjeta de credito"
