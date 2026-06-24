@@ -30,8 +30,36 @@ class GmailMessage:
         }
 
 
-def _json_from_streamlit_secret(key: str) -> Optional[dict]:
-    """Lee JSON desde Streamlit Secrets si existe."""
+def _debug_streamlit_secret_keys() -> str:
+    """Devuelve solo nombres de keys, nunca valores."""
+    try:
+        import streamlit as st
+
+        root_keys = list(st.secrets.keys())
+        gmail_keys = []
+
+        if "gmail" in st.secrets:
+            try:
+                gmail_keys = list(st.secrets["gmail"].keys())
+            except Exception:
+                gmail_keys = ["gmail_existe_pero_no_lista_keys"]
+
+        return f"root_keys={root_keys}; gmail_keys={gmail_keys}"
+
+    except Exception as exc:
+        return f"no_se_pudo_leer_st_secrets: {exc}"
+
+
+def _json_from_streamlit_secret(key: str):
+    """Lee JSON desde Streamlit Secrets si existe.
+
+    Espera:
+    [gmail]
+    credentials_json = """..."""
+    token_json = """..."""
+    """
+    import json
+
     try:
         import streamlit as st
     except Exception:
@@ -39,20 +67,22 @@ def _json_from_streamlit_secret(key: str) -> Optional[dict]:
 
     value = None
 
+    # Forma principal: [gmail].credentials_json / [gmail].token_json
     try:
-        gmail_group = st.secrets.get("gmail", {})
-        try:
-            value = gmail_group.get(key)
-        except Exception:
-            value = gmail_group[key]
+        if "gmail" in st.secrets:
+            gmail_group = st.secrets["gmail"]
+            if key in gmail_group:
+                value = gmail_group[key]
     except Exception:
         value = None
 
+    # Fallback: credentials_json / token_json en ra?z
     if value is None:
         try:
-            value = st.secrets.get(key)
+            if key in st.secrets:
+                value = st.secrets[key]
         except Exception:
-            value = None
+            pass
 
     if value is None:
         return None
@@ -65,7 +95,6 @@ def _json_from_streamlit_secret(key: str) -> Optional[dict]:
         return None
 
     return json.loads(value)
-
 
 def get_gmail_service(project_dir: str | Path):
     """Crea servicio Gmail usando Streamlit Secrets o archivos locales."""
@@ -108,7 +137,8 @@ def get_gmail_service(project_dir: str | Path):
         if not credentials_path.exists():
             raise FileNotFoundError(
                 f"No existe credentials Gmail: {credentials_path}. "
-                "En Streamlit Cloud configura [gmail].credentials_json y [gmail].token_json."
+                "En Streamlit Cloud configura [gmail].credentials_json y [gmail].token_json. "
+                f"DEBUG_SECRETS: {_debug_streamlit_secret_keys()}"
             )
 
         flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), SCOPES)
