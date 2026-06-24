@@ -1513,39 +1513,61 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
             )
             with _tc_col2:
                 st.write("")
-                if st.button("🔄 Actualizar TC", key="btn_refresh_tc", help="Consulta tipo de cambio en vivo desde BCRP"):
-                    try:
-                        _resp_tc = requests.get(
-                            "https://api.apis.net.pe/v2/tipo-cambio-sunat",
-                            timeout=8,
-                            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://apis.net.pe"}
-                        )
-                        _resp_tc.raise_for_status()
-                        _tc_data = _resp_tc.json()
-                        _tc_live = float(_tc_data.get("venta") or _tc_data.get("compra") or 0)
-                        if _tc_live > 2.0:
-                            import csv as _csv
-                            from pathlib import Path as _Path
-                            _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
-                            _tc_row = {
-                                "fecha": _now_lima.strftime("%Y-%m-%d"),
-                                "usd_pen": _tc_live,
-                                "fuente": "SUNAT via apis.net.pe",
-                                "fuente_csv": "SUNAT",
-                                "fecha_fuente": _now_lima.strftime("%Y-%m-%d"),
-                                "updated_at_lima": _now_lima.strftime("%Y-%m-%d %H:%M:%S"),
-                            }
-                            _tc_path = _Path("data/exchange_rate_bcp.csv")
-                            _tc_path.parent.mkdir(parents=True, exist_ok=True)
-                            _df_tc_exist = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
-                            _df_tc_exist = pd.concat([_df_tc_exist, pd.DataFrame([_tc_row])], ignore_index=True)
-                            _df_tc_exist.to_csv(_tc_path, index=False)
-                            st.success(f"✅ TC actualizado: S/ {_tc_live:.4f}")
-                            st.rerun()
-                        else:
-                            st.warning("No se pudo obtener TC válido.")
-                    except Exception as _tc_err:
-                        st.warning(f"Error al consultar TC: {_tc_err}")
+                if st.button("🔄 Actualizar TC", key="btn_refresh_tc", help="Consulta tipo de cambio USD/PEN en vivo"):
+                    _tc_live = None
+                    _tc_fuente = ""
+                    _tc_sources = [
+                        {
+                            "url": "https://api.apis.net.pe/v1/tipo-cambio-sunat",
+                            "nombre": "SUNAT (apis.net.pe)",
+                            "extractor": lambda d: float(d.get("venta") or d.get("precio") or 0),
+                        },
+                        {
+                            "url": "https://open.er-api.com/v6/latest/USD",
+                            "nombre": "open.er-api.com",
+                            "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
+                        },
+                        {
+                            "url": "https://api.exchangerate-api.com/v4/latest/USD",
+                            "nombre": "exchangerate-api.com",
+                            "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
+                        },
+                        {
+                            "url": "https://api.frankfurter.app/latest?from=USD&to=PEN",
+                            "nombre": "frankfurter.app",
+                            "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
+                        },
+                    ]
+                    for _src in _tc_sources:
+                        try:
+                            _r = requests.get(_src["url"], timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+                            _r.raise_for_status()
+                            _val = _src["extractor"](_r.json())
+                            if _val and _val > 2.0:
+                                _tc_live = _val
+                                _tc_fuente = _src["nombre"]
+                                break
+                        except Exception:
+                            continue
+                    if _tc_live and _tc_live > 2.0:
+                        _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
+                        _tc_row = {
+                            "fecha": _now_lima.strftime("%Y-%m-%d"),
+                            "usd_pen": _tc_live,
+                            "fuente": _tc_fuente,
+                            "fuente_csv": _tc_fuente,
+                            "fecha_fuente": _now_lima.strftime("%Y-%m-%d"),
+                            "updated_at_lima": _now_lima.strftime("%Y-%m-%d %H:%M:%S"),
+                        }
+                        _tc_path = Path("data/exchange_rate_bcp.csv")
+                        _tc_path.parent.mkdir(parents=True, exist_ok=True)
+                        _df_tc_old = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
+                        _df_tc_new = pd.concat([_df_tc_old, pd.DataFrame([_tc_row])], ignore_index=True)
+                        _df_tc_new.to_csv(_tc_path, index=False)
+                        st.success(f"✅ TC actualizado: S/ {_tc_live:.4f} ({_tc_fuente})")
+                        st.rerun()
+                    else:
+                        st.error("No se pudo obtener el tipo de cambio. Actualízalo manualmente.")
             _tc_val_default = _tc_airflow["usd_pen"]
             _tc_widget_key = f"tipo_cambio_default_input_{_fuente_tc_cfg}_{_tc_airflow['fecha']}"
         else:
