@@ -425,7 +425,7 @@ def parse_bank_email(
     def _categoria(empresa):
         e = _norm(empresa).upper()
         reglas = [
-            (["RAPPI", "PEDIDOSYA", "RESTAUR", "POLLO", "CAFE", "PIZZA", "BURGER", "KFC", "MCDON", "STARBUCKS", "TAMBO"], "Alimentaci?n"),
+            (["RAPPI", "PEDIDOSYA", "RESTAUR", "POLLO", "CAFE", "PIZZA", "BURGER", "KFC", "MCDON", "STARBUCKS", "TAMBO"], "Alimentación"),
             (["UBER", "CABIFY", "YANGO", "TAXI", "DIDI", "BEAT"], "Movilidad"),
             (["WONG", "TOTTUS", "PLAZA VEA", "VIVANDA", "METRO", "MAKRO", "SUPERMERC"], "Supermercado"),
             (["INKAFARMA", "MIFARMA", "FARMACIA", "CLINICA", "MEDIC", "SALUD"], "Salud"),
@@ -463,7 +463,7 @@ def parse_bank_email(
 
     # Principal: Realizaste un consumo de S/ 33.78 con tu Tarjeta de Cr?dito BCP en RAPPI SAC.
     m = re.search(
-        r"Realizaste\s+un\s+consumo\s+de\s+(S/|US\$|USD|\$)\s*([\d\.,]+)\s+con\s+tu\s+Tarjeta\s+de\s+(Credito|Debito)\s+BCP\s+en\s+(.+?)(?:\s+Por\s+tu\s+seguridad|$)",
+        r"Realizaste\s+un\s+consumo\s+de\s+(S/|US\$|USD|\$)\s*([\d\.,]+)\s+con\s+tu\s+Tarjeta\s+de\s+(Credito|Debito)\s+BCP\s+en\s+(.+?)(?:\.|(?:\s+Fecha\s+y\s+hora)|\s+Por\s+tu\s+seguridad|$)",
         ascii_text,
         flags=re.IGNORECASE,
     )
@@ -510,7 +510,7 @@ def parse_bank_email(
     fecha_hora_texto = ""
 
     mf = re.search(
-        r"(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})\s*[-?]\s*(\d{1,2}):(\d{2})\s*(am|pm)",
+        r"(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})\s*[-\u2013\u2014]\s*(\d{1,2}):(\d{2})\s*(am|pm)",
         ascii_text,
         flags=re.IGNORECASE,
     )
@@ -524,7 +524,7 @@ def parse_bank_email(
         ampm = mf.group(6).lower()
 
         if mes:
-            if ampm == "pm" and hh != 12:
+            if ampm == "pm" and hh < 12:
                 hh += 12
             if ampm == "am" and hh == 12:
                 hh = 0

@@ -237,6 +237,10 @@ def generar_pendientes_desde_gmail_bcp(
         days=int(days),
         max_results=int(max_results),
     )
+    from datetime import timedelta
+
+    hoy_lima = datetime.now(ZoneInfo("America/Lima")).date()
+    fecha_corte = hoy_lima - timedelta(days=int(days))
 
     rows = []
     leidos = len(emails)
@@ -269,12 +273,18 @@ def generar_pendientes_desde_gmail_bcp(
             if not parsed:
                 continue
 
+            # Filtro real por fecha del correo (no por fecha de recepción)
+            fecha_txt = _texto_seguro(parsed.get("fecha"))
+            fecha_dt = pd.to_datetime(fecha_txt, errors="coerce")
+            if pd.isna(fecha_dt) or fecha_dt.date() < fecha_corte:
+                continue
+
             interpretados += 1
 
             hash_imp = _texto_seguro(parsed.get("hash_importacion"))
             old = estados_previos.get(hash_imp, {})
 
-            # Por defecto vuelve como pendiente, pero conserva importado/descartado si ya exist?a.
+            # Conserva importado/descartado si ya existía; si no, pendiente.
             parsed["estado"] = _texto_seguro(old.get("estado")) or "pendiente"
             parsed["fecha_importado_lima"] = _texto_seguro(old.get("fecha_importado_lima"))
             parsed["resultado_importacion"] = _texto_seguro(old.get("resultado_importacion"))
@@ -643,146 +653,3 @@ def render_bank_gmail_inbox(
 
     with st.expander("🗃️ Ver histórico de bandeja Gmail", expanded=expanded_history):
         st.dataframe(df_all.tail(300), use_container_width=True, hide_index=True)
-
-# ==================================================
-# OVERRIDE FINAL: ACTUALIZACIÓN LIMPIA DESDE GMAIL
-# ==================================================
-def generar_pendientes_desde_gmail_bcp(
-    days: int = 10,
-    max_results: int = 200,
-    pending_path: Path | str = BANK_GMAIL_PENDING_PATH,
-) -> dict:
-    """
-    Lee Gmail y reemplaza completamente la bandeja visible según el rango actual.
-
-    No mezcla con CSV antiguos de recuperación. Solo conserva estado importado/descartado
-    si el mismo hash_importacion vuelve a aparecer.
-    """
-    import sys
-    from pathlib import Path
-    from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
-
-    import pandas as pd
-
-    project = Path.cwd()
-    scripts_dir = project / "scripts"
-
-    if str(scripts_dir) not in sys.path:
-        sys.path.insert(0, str(scripts_dir))
-
-    from gmail_bank_reader import fetch_bcp_consumption_emails
-    from bank_email_parsers import parse_bank_email
-
-    pending_path = Path(pending_path)
-
-    # Estados previos para no reimportar lo que ya estaba importado/descartado
-    df_existing = cargar_pendientes_bancos(pending_path)
-    estados_previos = {}
-
-    if not df_existing.empty and "hash_importacion" in df_existing.columns:
-        for _, old in df_existing.iterrows():
-            h = _texto_seguro(old.get("hash_importacion"))
-            if h:
-                estados_previos[h] = old.to_dict()
-
-    dias = int(days)
-    max_results = int(max_results)
-
-    emails = fetch_bcp_consumption_emails(
-        project,
-        days=dias,
-        max_results=max_results,
-    )
-
-    hoy_lima = datetime.now(ZoneInfo("America/Lima")).date()
-    fecha_corte = hoy_lima - timedelta(days=dias)
-
-    rows = []
-    errores = 0
-    ahora_lima = datetime.now(ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
-
-    for email in emails:
-        try:
-            d = email.to_dict() if hasattr(email, "to_dict") else dict(email)
-
-            texto_parse = " ".join([
-                _texto_seguro(d.get("subject")),
-                _texto_seguro(d.get("snippet")),
-                _texto_seguro(d.get("text")),
-                _texto_seguro(d.get("body")),
-            ])
-
-            parsed = parse_bank_email(
-                texto_parse,
-                banco="BCP",
-                gmail_id=d.get("gmail_id", ""),
-                gmail_thread_id=d.get("thread_id", ""),
-                gmail_date=d.get("date", ""),
-                subject=d.get("subject", ""),
-            )
-
-            if not parsed:
-                continue
-
-            fecha_txt = _texto_seguro(parsed.get("fecha"))
-            fecha_dt = pd.to_datetime(fecha_txt, errors="coerce")
-
-            if pd.isna(fecha_dt):
-                continue
-
-            # Filtro real por días seleccionados
-            if fecha_dt.date() < fecha_corte:
-                continue
-
-            hash_imp = _texto_seguro(parsed.get("hash_importacion"))
-            old = estados_previos.get(hash_imp, {})
-
-            parsed["estado"] = _texto_seguro(old.get("estado")) or "pendiente"
-            parsed["fecha_importado_lima"] = _texto_seguro(old.get("fecha_importado_lima"))
-            parsed["resultado_importacion"] = _texto_seguro(old.get("resultado_importacion"))
-            parsed["fecha_detectado_lima"] = _texto_seguro(old.get("fecha_detectado_lima")) or ahora_lima
-            parsed["fuente"] = _texto_seguro(parsed.get("fuente")) or "Gmail BCP"
-
-            rows.append(parsed)
-
-        except Exception:
-            errores += 1
-
-    if rows:
-        df_new = pd.DataFrame(rows)
-
-        for col in BANK_GMAIL_PENDING_COLUMNS:
-            if col not in df_new.columns:
-                df_new[col] = ""
-
-        df_new = df_new[BANK_GMAIL_PENDING_COLUMNS].copy()
-        df_new["monto"] = pd.to_numeric(df_new["monto"], errors="coerce").fillna(0.0)
-        df_new["estado"] = df_new["estado"].map(_normalizar_estado)
-        df_new = df_new.sort_values(["fecha", "hora"], ascending=[False, False])
-
-    else:
-        df_new = pd.DataFrame(columns=BANK_GMAIL_PENDING_COLUMNS)
-
-    # Punto clave: reemplaza totalmente el CSV
-    guardar_pendientes_bancos(df_new, pending_path)
-
-    pendientes = 0
-    if not df_new.empty and "estado" in df_new.columns:
-        pendientes = int(df_new["estado"].eq("pendiente").sum())
-
-    conteo_medio = {}
-    if not df_new.empty and "medio_pago" in df_new.columns:
-        conteo_medio = df_new["medio_pago"].value_counts(dropna=False).to_dict()
-
-    return {
-        "correos_leidos": len(emails),
-        "gastos_interpretados": len(df_new),
-        "nuevos_pendientes": pendientes,
-        "duplicados_omitidos": 0,
-        "errores": errores,
-        "conteo_medio": conteo_medio,
-        "archivo": str(pending_path),
-        "dias": dias,
-    }
-
