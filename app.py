@@ -1167,7 +1167,14 @@ with st.sidebar:
         st.rerun()
 
 st.title("📊 Dashboard de Finanzas Personales")
-st.caption("Control de ingresos, gastos, tarjetas, cuentas de ahorro y proyección mensual.")
+st.markdown("""<style>
+.streamlit-expanderHeader{font-size:0.93rem!important;padding:0.45rem 0.75rem!important}
+.block-container{padding-top:0.8rem!important;padding-bottom:1rem!important}
+h4{margin-top:0.5rem!important;margin-bottom:0.25rem!important;font-size:0.98rem!important}
+h3{margin-top:0.6rem!important;margin-bottom:0.3rem!important;font-size:1.02rem!important}
+.stCaption p{font-size:0.78rem!important;margin-bottom:0.1rem!important}
+div[data-testid="stExpander"]{margin-bottom:0.25rem!important}
+</style>""", unsafe_allow_html=True)
 
 
 # ==================================================
@@ -1492,9 +1499,11 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
             )
 
             _tc_airflow = _fuentes_tc_airflow[_fuente_tc_cfg]
-            st.metric(
-                f"💱 TC USD → PEN ({_fuente_tc_cfg})",
-                f"S/ {_tc_airflow['usd_pen']:.4f}",
+            _tc_col1, _tc_col2 = st.columns([2, 1])
+            with _tc_col1:
+                st.metric(
+                    f"💱 TC USD → PEN ({_fuente_tc_cfg})",
+                    f"S/ {_tc_airflow['usd_pen']:.4f}",
                 help=(
                     f"Archivo: {_tc_airflow['archivo']} | "
                     f"Fuente CSV: {_tc_airflow['fuente_csv']} | "
@@ -1502,6 +1511,41 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
                     f"Actualizado: {_tc_airflow['updated_at_lima']}"
                 )
             )
+            with _tc_col2:
+                st.write("")
+                if st.button("🔄 Actualizar TC", key="btn_refresh_tc", help="Consulta tipo de cambio en vivo desde BCRP"):
+                    try:
+                        _resp_tc = requests.get(
+                            "https://api.apis.net.pe/v2/tipo-cambio-sunat",
+                            timeout=8,
+                            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://apis.net.pe"}
+                        )
+                        _resp_tc.raise_for_status()
+                        _tc_data = _resp_tc.json()
+                        _tc_live = float(_tc_data.get("venta") or _tc_data.get("compra") or 0)
+                        if _tc_live > 2.0:
+                            import csv as _csv
+                            from pathlib import Path as _Path
+                            _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
+                            _tc_row = {
+                                "fecha": _now_lima.strftime("%Y-%m-%d"),
+                                "usd_pen": _tc_live,
+                                "fuente": "SUNAT via apis.net.pe",
+                                "fuente_csv": "SUNAT",
+                                "fecha_fuente": _now_lima.strftime("%Y-%m-%d"),
+                                "updated_at_lima": _now_lima.strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                            _tc_path = _Path("data/exchange_rate_bcp.csv")
+                            _tc_path.parent.mkdir(parents=True, exist_ok=True)
+                            _df_tc_exist = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
+                            _df_tc_exist = pd.concat([_df_tc_exist, pd.DataFrame([_tc_row])], ignore_index=True)
+                            _df_tc_exist.to_csv(_tc_path, index=False)
+                            st.success(f"✅ TC actualizado: S/ {_tc_live:.4f}")
+                            st.rerun()
+                        else:
+                            st.warning("No se pudo obtener TC válido.")
+                    except Exception as _tc_err:
+                        st.warning(f"Error al consultar TC: {_tc_err}")
             _tc_val_default = _tc_airflow["usd_pen"]
             _tc_widget_key = f"tipo_cambio_default_input_{_fuente_tc_cfg}_{_tc_airflow['fecha']}"
         else:
@@ -1967,7 +2011,6 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
     # 3.0 IMPORTACIÓN SEMIAUTOMÁTICA DE CORREOS BCP
     # ==================================================
     with st.expander("📩 3.0 Importar gastos desde Gmail bancario", expanded=False):
-        st.markdown("### 📩 Importar gastos desde Gmail bancario")
         st.caption(
             "Presiona el botón para leer automáticamente los últimos correos bancarios desde Gmail. "
             "Luego revisa la bandeja, corrige categorías e importa cada gasto como débito o crédito."
@@ -1982,7 +2025,6 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         # ==================================================
         # GASTOS DIARIOS DÉBITO
         # ==================================================
-        st.markdown("### 🧾 Gastos diarios débito")
 
         nombre_cuenta_principal = st.session_state["configuracion"].get(
             "nombre_cuenta_principal",
@@ -2165,7 +2207,6 @@ with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
         # ==================================================
         # GASTOS DIARIOS CON TARJETA DE CRÉDITO
         # ==================================================
-        st.markdown("### 💳 Gastos diarios con tarjeta de crédito")
 
         if st.session_state["tarjetas"]:
 
@@ -2666,12 +2707,10 @@ normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta
 # 4. FUNCIONES AVANZADAS
 # ==================================================
 with st.expander("🧩 4. Funciones avanzadas", expanded=False):
-    st.caption("Módulos complementarios: simulación de préstamos y flujo completo de IBKR: cash, compras, valorización y seguimiento.")
 
 # 4.1 SIMULACIÓN DE PRÉSTAMOS
     # ==================================================
     with st.expander("🏦 4.1 Simulación de préstamos", expanded=False):
-        st.caption("Simula el impacto de un préstamo en tus ahorros. Puedes guardar la simulación y activar/desactivar su efecto en los gráficos.")
 
         # ── Mapas de cuentas y tarjetas ──────────────────────────────
         _p_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
@@ -3676,6 +3715,47 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 else 0.0
             )
 
+            # Botón actualizar precios IBKR en vivo
+            _btn_col, _info_col = st.columns([1, 3])
+            with _btn_col:
+                if st.button("🔄 Actualizar precios IBKR", key="btn_refresh_ibkr", type="primary"):
+                    tickers_activos = [str(r["ticker"]).upper().strip() for r in st.session_state.get("inversiones_ibkr", []) if str(r.get("ticker","")).strip()]
+                    tickers_activos = sorted(set(tickers_activos))
+                    if tickers_activos:
+                        _filas_nuevas = []
+                        _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
+                        for _tk in tickers_activos:
+                            _sym = obtener_source_symbol_ibkr(_tk, _df_catalogo_ibkr)
+                            _precio_info = consultar_precio_yahoo_ibkr(_sym)
+                            if _precio_info:
+                                _filas_nuevas.append({
+                                    "ticker": _tk,
+                                    "precio_actual_usd": _precio_info["precio_actual_usd"],
+                                    "fecha_precio": _precio_info["fecha_precio"],
+                                    "hora_precio": _precio_info["hora_precio"],
+                                    "fuente_precio": "Yahoo Finance (manual)",
+                                    "exchange": _precio_info.get("exchange", ""),
+                                    "updated_at_lima": _now_lima,
+                                })
+                        if _filas_nuevas:
+                            _df_nuevos = pd.DataFrame(_filas_nuevas)
+                            try:
+                                _df_existing = cargar_precios_ibkr_airflow()
+                                if not _df_existing.empty:
+                                    _df_existing = _df_existing[~_df_existing["ticker"].isin([r["ticker"] for r in _filas_nuevas])].copy()
+                                    _df_combined = pd.concat([_df_existing, _df_nuevos], ignore_index=True)
+                                else:
+                                    _df_combined = _df_nuevos
+                                IBKR_MARKET_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
+                                _df_combined.to_csv(IBKR_MARKET_PRICES_PATH, index=False)
+                                st.success(f"✅ Precios actualizados: {', '.join([r['ticker'] for r in _filas_nuevas])}")
+                            except Exception as _e:
+                                st.warning(f"Precios obtenidos pero no guardados en CSV: {_e}")
+                            st.rerun()
+                        else:
+                            st.warning("No se pudieron obtener precios desde Yahoo Finance.")
+                    else:
+                        st.info("No hay tickers registrados.")
             _m1, _m2, _m3, _m4, _m5 = st.columns(5)
             _m1.metric("Invertido activos", f"US$ {_total_invertido_usd:,.2f}")
             _m2.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
