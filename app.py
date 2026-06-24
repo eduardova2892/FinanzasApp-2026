@@ -1559,12 +1559,19 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
                             "fecha_fuente": _now_lima.strftime("%Y-%m-%d"),
                             "updated_at_lima": _now_lima.strftime("%Y-%m-%d %H:%M:%S"),
                         }
-                        _tc_path = Path("data/exchange_rate_bcp.csv")
-                        _tc_path.parent.mkdir(parents=True, exist_ok=True)
-                        _df_tc_old = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
-                        _df_tc_new = pd.concat([_df_tc_old, pd.DataFrame([_tc_row])], ignore_index=True)
-                        _df_tc_new.to_csv(_tc_path, index=False)
-                        st.success(f"✅ TC actualizado: S/ {_tc_live:.4f} ({_tc_fuente})")
+                        # Actualizar los 3 archivos de tipo de cambio
+                        _tc_archivos = [
+                            "data/exchange_rate_bcp.csv",
+                            "data/exchange_rate_bcrp.csv",
+                            "data/exchange_rate_usd_pen.csv",
+                        ]
+                        for _tc_archivo in _tc_archivos:
+                            _tc_path = Path(_tc_archivo)
+                            _tc_path.parent.mkdir(parents=True, exist_ok=True)
+                            _df_tc_old = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
+                            _df_tc_new = pd.concat([_df_tc_old, pd.DataFrame([_tc_row])], ignore_index=True)
+                            _df_tc_new.to_csv(_tc_path, index=False)
+                        st.success(f"✅ TC actualizado en BCP, BCRP y API: S/ {_tc_live:.4f} ({_tc_fuente})")
                         st.rerun()
                     else:
                         st.error("No se pudo obtener el tipo de cambio. Actualízalo manualmente.")
