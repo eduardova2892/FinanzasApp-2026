@@ -4653,9 +4653,15 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     if not df_credito_diario.empty:
         df_credito_diario["fecha"] = pd.to_datetime(df_credito_diario["fecha"], errors="coerce")
         df_credito_diario["monto"] = pd.to_numeric(df_credito_diario["monto"], errors="coerce").fillna(0)
+        # Convertir USD → PEN usando el TC configurado
+        if "moneda" not in df_credito_diario.columns:
+            df_credito_diario["moneda"] = "PEN"
+        df_credito_diario["monto_pen"] = df_credito_diario.apply(
+            lambda r: r["monto"] * _tc_default if str(r.get("moneda", "PEN")).upper() == "USD" else r["monto"], axis=1
+        )
         df_credito_diario["mes"] = df_credito_diario["fecha"].dt.to_period("M")
-        df_credito_diario_mes = (df_credito_diario.groupby("mes")["monto"].sum()
-                                 .reset_index().rename(columns={"monto": "Crédito diario"}))
+        df_credito_diario_mes = (df_credito_diario.groupby("mes")["monto_pen"].sum()
+                                 .reset_index().rename(columns={"monto_pen": "Crédito diario"}))
     else:
         df_credito_diario_mes = pd.DataFrame(columns=["mes", "Crédito diario"])
 
@@ -5010,6 +5016,10 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     if not df_debito_cat.empty:
         df_debito_cat["fecha"] = pd.to_datetime(df_debito_cat["fecha"], errors="coerce")
         df_debito_cat["monto"] = pd.to_numeric(df_debito_cat["monto"], errors="coerce").fillna(0)
+        if "moneda" in df_debito_cat.columns:
+            df_debito_cat["monto"] = df_debito_cat.apply(
+                lambda r: r["monto"] * _tc_default if str(r.get("moneda","PEN")).upper() == "USD" else r["monto"], axis=1
+            )
         df_debito_cat["mes"]   = df_debito_cat["fecha"].dt.to_period("M")
         frames_cat.append(df_debito_cat[["fecha", "mes", "categoria", "monto"]])
 
@@ -5017,6 +5027,11 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
     if not df_credito_cat.empty:
         df_credito_cat["fecha"] = pd.to_datetime(df_credito_cat["fecha"], errors="coerce")
         df_credito_cat["monto"] = pd.to_numeric(df_credito_cat["monto"], errors="coerce").fillna(0)
+        if "moneda" not in df_credito_cat.columns:
+            df_credito_cat["moneda"] = "PEN"
+        df_credito_cat["monto"] = df_credito_cat.apply(
+            lambda r: r["monto"] * _tc_default if str(r.get("moneda","PEN")).upper() == "USD" else r["monto"], axis=1
+        )
         df_credito_cat["mes"]   = df_credito_cat["fecha"].dt.to_period("M")
         frames_cat.append(df_credito_cat[["fecha", "mes", "categoria", "monto"]])
 
