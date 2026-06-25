@@ -2866,74 +2866,74 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                         st.warning("Completa nombre, monto del préstamo y cuota.")
 
             # ── Lista de simulaciones guardadas ───────────────────────────
-            with st.expander("📋 Simulaciones guardadas", expanded=False):
-              _sims = st.session_state.get("simulaciones_prestamo", [])
-              if _sims:
-                for _sim in _sims:
-                    _s_activo = _sim.get("activo", True)
-                    with st.container(border=True):
-                        _sc1, _sc2, _sc3, _sc4 = st.columns([3, 2, 1, 1])
-                        _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
-                        _sc1.markdown(f"**{_sim['nombre']}**")
+        with st.expander("📋 Simulaciones guardadas", expanded=False):
+          _sims = st.session_state.get("simulaciones_prestamo", [])
+          if _sims:
+            for _sim in _sims:
+                _s_activo = _sim.get("activo", True)
+                with st.container(border=True):
+                    _sc1, _sc2, _sc3, _sc4 = st.columns([3, 2, 1, 1])
+                    _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
+                    _sc1.markdown(f"**{_sim['nombre']}**")
+                    _sc1.caption(
+                        f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
+                        f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
+                    )
+                    _sc1.caption(
+                        f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
+                        f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
+                        f"De tus ahorros: S/ {_gasto_propio:,.0f}"
+                    )
+                    _plazo_txt = (
+                        f"{_sim['plazo_anios']} año{'s' if _sim['plazo_anios'] != 1 else ''}"
+                        if _sim.get("plazo_anios")
+                        else f"hasta {_sim['fecha_fin']}"
+                    )
+                    _sc1.caption(
+                        f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
+                        f"{_sim['medio_pago']}  ·  "
+                        f"Desde {_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} · Plazo: {_plazo_txt}  ·  Última cuota: {_sim['fecha_fin']}"
+                    )
+                    if _sim.get("descripcion"):
+                        _sc1.caption(f"📝 {_sim['descripcion']}")
+                    if _sim.get("monto_cierre", 0) > 0:
                         _sc1.caption(
-                            f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
-                            f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
+                            f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
+                            f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
                         )
-                        _sc1.caption(
-                            f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
-                            f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
-                            f"De tus ahorros: S/ {_gasto_propio:,.0f}"
+                    # Calcular cuotas totales y monto pagado/restante
+                    _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
+                    _f_ini = pd.to_datetime(_f_ini_ref)
+                    _f_fin = pd.to_datetime(_sim["fecha_fin"])
+                    _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
+                    _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
+                    _pagado      = min(_meses_pag, _meses_total) * float(_sim["cuota"])
+                    _pendiente   = max(0, _meses_total - _meses_pag) * float(_sim["cuota"])
+                    _sc2.metric("Total cuotas", f"S/ {_meses_total * _sim['cuota']:,.0f}")
+                    _sc2.caption(f"Pagado: S/ {_pagado:,.0f}  |  Pendiente: S/ {_pendiente:,.0f}")
+                    with _sc3:
+                        _tog_key = f"tog_sim_{_sim['id']}"
+                        _nuevo_estado = st.toggle(
+                            "Simular",
+                            value=_s_activo,
+                            key=_tog_key,
+                            help="Activa para ver el impacto en los gráficos de ahorros"
                         )
-                        _plazo_txt = (
-                            f"{_sim['plazo_anios']} año{'s' if _sim['plazo_anios'] != 1 else ''}"
-                            if _sim.get("plazo_anios")
-                            else f"hasta {_sim['fecha_fin']}"
-                        )
-                        _sc1.caption(
-                            f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
-                            f"{_sim['medio_pago']}  ·  "
-                            f"Desde {_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} · Plazo: {_plazo_txt}  ·  Última cuota: {_sim['fecha_fin']}"
-                        )
-                        if _sim.get("descripcion"):
-                            _sc1.caption(f"📝 {_sim['descripcion']}")
-                        if _sim.get("monto_cierre", 0) > 0:
-                            _sc1.caption(
-                                f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
-                                f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
-                            )
-                        # Calcular cuotas totales y monto pagado/restante
-                        _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
-                        _f_ini = pd.to_datetime(_f_ini_ref)
-                        _f_fin = pd.to_datetime(_sim["fecha_fin"])
-                        _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
-                        _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
-                        _pagado      = min(_meses_pag, _meses_total) * float(_sim["cuota"])
-                        _pendiente   = max(0, _meses_total - _meses_pag) * float(_sim["cuota"])
-                        _sc2.metric("Total cuotas", f"S/ {_meses_total * _sim['cuota']:,.0f}")
-                        _sc2.caption(f"Pagado: S/ {_pagado:,.0f}  |  Pendiente: S/ {_pendiente:,.0f}")
-                        with _sc3:
-                            _tog_key = f"tog_sim_{_sim['id']}"
-                            _nuevo_estado = st.toggle(
-                                "Simular",
-                                value=_s_activo,
-                                key=_tog_key,
-                                help="Activa para ver el impacto en los gráficos de ahorros"
-                            )
-                            if _nuevo_estado != _s_activo:
-                                _sim["activo"] = _nuevo_estado
-                                guardar("simulaciones_prestamo")
-                                st.rerun()
-                        with _sc4:
-                            st.write("")
-                            if st.button("🗑️", key=f"del_sim_{_sim['id']}", help="Eliminar simulación"):
-                                st.session_state["simulaciones_prestamo"] = [
-                                    s for s in st.session_state["simulaciones_prestamo"]
-                                    if s["id"] != _sim["id"]
-                                ]
-                                guardar("simulaciones_prestamo")
-                                st.rerun()
-              else:
-                  st.info("No hay simulaciones de préstamo guardadas.")
+                        if _nuevo_estado != _s_activo:
+                            _sim["activo"] = _nuevo_estado
+                            guardar("simulaciones_prestamo")
+                            st.rerun()
+                    with _sc4:
+                        st.write("")
+                        if st.button("🗑️", key=f"del_sim_{_sim['id']}", help="Eliminar simulación"):
+                            st.session_state["simulaciones_prestamo"] = [
+                                s for s in st.session_state["simulaciones_prestamo"]
+                                if s["id"] != _sim["id"]
+                            ]
+                            guardar("simulaciones_prestamo")
+                            st.rerun()
+          else:
+              st.info("No hay simulaciones de préstamo guardadas.")
 
 
 
