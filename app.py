@@ -1469,390 +1469,390 @@ limpiar_gastos_invalidos()
 with st.expander("⚙️ 1. Configuración", expanded=False):
 
     # ── Simulación ──────────────────────────────────────
-    st.markdown("#### 📅 Período de simulación")
-    conf = st.session_state["configuracion"]
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        fecha_inicio_sim = st.date_input(
-            "Fecha inicio",
-            date.fromisoformat(conf["fecha_inicio_sim"]) if conf["fecha_inicio_sim"] else date(2026, 4, 1)
-        )
-    with col_f2:
-        fecha_fin_sim = st.date_input(
-            "Fecha fin",
-            date.fromisoformat(conf["fecha_fin_sim"]) if conf["fecha_fin_sim"] else date(2026, 12, 31)
-        )
-
-    st.divider()
-
-    # ── Cuenta principal ────────────────────────────────
-    st.markdown("#### 🏦 Cuenta principal (débito / sueldo)")
-    col_cp1, col_cp2, col_cp3 = st.columns(3)
-    with col_cp1:
-        nombre_cuenta_principal = st.text_input(
-            "Nombre de la cuenta",
-            conf.get("nombre_cuenta_principal", "Cuenta principal")
-        )
-    with col_cp2:
-        ahorro_inicial = st.number_input(
-            "Saldo inicial (S/)",
-            min_value=0.0, step=100.0,
-            value=float(conf.get("ahorro_inicial", 0.0))
-        )
-    with col_cp3:
-        _fuentes_tc_airflow = cargar_tipos_cambio_airflow()
-
-        if _fuentes_tc_airflow:
-            _fuente_default_tc = seleccionar_fuente_default_tc(
-                _fuentes_tc_airflow,
-                conf.get("fuente_tipo_cambio_default")
+    with st.expander("📅 Período de simulación", expanded=True):
+        conf = st.session_state["configuracion"]
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            fecha_inicio_sim = st.date_input(
+                "Fecha inicio",
+                date.fromisoformat(conf["fecha_inicio_sim"]) if conf["fecha_inicio_sim"] else date(2026, 4, 1)
             )
-            _opciones_tc = list(_fuentes_tc_airflow.keys())
-            _fuente_tc_cfg = st.selectbox(
-                "Fuente TC Airflow",
-                _opciones_tc,
-                index=_opciones_tc.index(_fuente_default_tc),
-                key="fuente_tipo_cambio_default_cfg",
-                help="Selecciona qué archivo generado por Airflow usará la app como TC por defecto."
+        with col_f2:
+            fecha_fin_sim = st.date_input(
+                "Fecha fin",
+                date.fromisoformat(conf["fecha_fin_sim"]) if conf["fecha_fin_sim"] else date(2026, 12, 31)
             )
 
-            _tc_airflow = _fuentes_tc_airflow[_fuente_tc_cfg]
-            _tc_col1, _tc_col2 = st.columns([2, 1])
-            with _tc_col1:
-                st.metric(
-                    f"💱 TC USD → PEN ({_fuente_tc_cfg})",
-                    f"S/ {_tc_airflow['usd_pen']:.4f}",
-                help=(
-                    f"Archivo: {_tc_airflow['archivo']} | "
-                    f"Fuente CSV: {_tc_airflow['fuente_csv']} | "
-                    f"Fecha: {_tc_airflow['fecha']} | "
-                    f"Actualizado: {_tc_airflow['updated_at_lima']}"
+        st.divider()
+
+        # ── Cuenta principal ────────────────────────────────
+    with st.expander("🏦 Cuenta principal (débito / sueldo)", expanded=True):
+        col_cp1, col_cp2, col_cp3 = st.columns(3)
+        with col_cp1:
+            nombre_cuenta_principal = st.text_input(
+                "Nombre de la cuenta",
+                conf.get("nombre_cuenta_principal", "Cuenta principal")
+            )
+        with col_cp2:
+            ahorro_inicial = st.number_input(
+                "Saldo inicial (S/)",
+                min_value=0.0, step=100.0,
+                value=float(conf.get("ahorro_inicial", 0.0))
+            )
+        with col_cp3:
+            _fuentes_tc_airflow = cargar_tipos_cambio_airflow()
+
+            if _fuentes_tc_airflow:
+                _fuente_default_tc = seleccionar_fuente_default_tc(
+                    _fuentes_tc_airflow,
+                    conf.get("fuente_tipo_cambio_default")
                 )
-            )
-            with _tc_col2:
-                st.write("")
-                if st.button("🔄 Actualizar TC", key="btn_refresh_tc", help="Consulta tipo de cambio USD/PEN en vivo"):
-                    _tc_live = None
-                    _tc_fuente = ""
-                    _tc_sources = [
-                        {
-                            "url": "https://api.apis.net.pe/v1/tipo-cambio-sunat",
-                            "nombre": "SUNAT (apis.net.pe)",
-                            "extractor": lambda d: float(d.get("venta") or d.get("precio") or 0),
-                        },
-                        {
-                            "url": "https://open.er-api.com/v6/latest/USD",
-                            "nombre": "open.er-api.com",
-                            "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
-                        },
-                        {
-                            "url": "https://api.exchangerate-api.com/v4/latest/USD",
-                            "nombre": "exchangerate-api.com",
-                            "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
-                        },
-                        {
-                            "url": "https://api.frankfurter.app/latest?from=USD&to=PEN",
-                            "nombre": "frankfurter.app",
-                            "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
-                        },
-                    ]
-                    for _src in _tc_sources:
-                        try:
-                            _r = requests.get(_src["url"], timeout=6, headers={"User-Agent": "Mozilla/5.0"})
-                            _r.raise_for_status()
-                            _val = _src["extractor"](_r.json())
-                            if _val and _val > 2.0:
-                                _tc_live = _val
-                                _tc_fuente = _src["nombre"]
-                                break
-                        except Exception:
-                            continue
-                    if _tc_live and _tc_live > 2.0:
-                        _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
-                        _tc_row = {
-                            "fecha": _now_lima.strftime("%Y-%m-%d"),
-                            "usd_pen": _tc_live,
-                            "fuente": _tc_fuente,
-                            "fuente_csv": _tc_fuente,
-                            "fecha_fuente": _now_lima.strftime("%Y-%m-%d"),
-                            "updated_at_lima": _now_lima.strftime("%Y-%m-%d %H:%M:%S"),
-                        }
-                        # Actualizar los 3 archivos de tipo de cambio
-                        _tc_archivos = [
-                            "data/exchange_rate_bcp.csv",
-                            "data/exchange_rate_bcrp.csv",
-                            "data/exchange_rate_usd_pen.csv",
+                _opciones_tc = list(_fuentes_tc_airflow.keys())
+                _fuente_tc_cfg = st.selectbox(
+                    "Fuente TC Airflow",
+                    _opciones_tc,
+                    index=_opciones_tc.index(_fuente_default_tc),
+                    key="fuente_tipo_cambio_default_cfg",
+                    help="Selecciona qué archivo generado por Airflow usará la app como TC por defecto."
+                )
+
+                _tc_airflow = _fuentes_tc_airflow[_fuente_tc_cfg]
+                _tc_col1, _tc_col2 = st.columns([2, 1])
+                with _tc_col1:
+                    st.metric(
+                        f"💱 TC USD → PEN ({_fuente_tc_cfg})",
+                        f"S/ {_tc_airflow['usd_pen']:.4f}",
+                    help=(
+                        f"Archivo: {_tc_airflow['archivo']} | "
+                        f"Fuente CSV: {_tc_airflow['fuente_csv']} | "
+                        f"Fecha: {_tc_airflow['fecha']} | "
+                        f"Actualizado: {_tc_airflow['updated_at_lima']}"
+                    )
+                )
+                with _tc_col2:
+                    st.write("")
+                    if st.button("🔄 Actualizar TC", key="btn_refresh_tc", help="Consulta tipo de cambio USD/PEN en vivo"):
+                        _tc_live = None
+                        _tc_fuente = ""
+                        _tc_sources = [
+                            {
+                                "url": "https://api.apis.net.pe/v1/tipo-cambio-sunat",
+                                "nombre": "SUNAT (apis.net.pe)",
+                                "extractor": lambda d: float(d.get("venta") or d.get("precio") or 0),
+                            },
+                            {
+                                "url": "https://open.er-api.com/v6/latest/USD",
+                                "nombre": "open.er-api.com",
+                                "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
+                            },
+                            {
+                                "url": "https://api.exchangerate-api.com/v4/latest/USD",
+                                "nombre": "exchangerate-api.com",
+                                "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
+                            },
+                            {
+                                "url": "https://api.frankfurter.app/latest?from=USD&to=PEN",
+                                "nombre": "frankfurter.app",
+                                "extractor": lambda d: float((d.get("rates") or {}).get("PEN") or 0),
+                            },
                         ]
-                        for _tc_archivo in _tc_archivos:
-                            _tc_path = Path(_tc_archivo)
-                            _tc_path.parent.mkdir(parents=True, exist_ok=True)
-                            _df_tc_old = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
-                            _df_tc_new = pd.concat([_df_tc_old, pd.DataFrame([_tc_row])], ignore_index=True)
-                            _df_tc_new.to_csv(_tc_path, index=False)
-                        st.success(f"✅ TC actualizado en BCP, BCRP y API: S/ {_tc_live:.4f} ({_tc_fuente})")
-                        st.rerun()
-                    else:
-                        st.error("No se pudo obtener el tipo de cambio. Actualízalo manualmente.")
-            _tc_val_default = _tc_airflow["usd_pen"]
-            _tc_widget_key = f"tipo_cambio_default_input_{_fuente_tc_cfg}_{_tc_airflow['fecha']}"
-        else:
-            _fuente_tc_cfg = "Manual"
-            _tc_val_default = float(conf.get("tipo_cambio_default", 3.85))
-            _tc_widget_key = "tipo_cambio_default_input_manual"
-            st.warning("No se encontraron CSVs de tipo de cambio generados por Airflow.")
+                        for _src in _tc_sources:
+                            try:
+                                _r = requests.get(_src["url"], timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+                                _r.raise_for_status()
+                                _val = _src["extractor"](_r.json())
+                                if _val and _val > 2.0:
+                                    _tc_live = _val
+                                    _tc_fuente = _src["nombre"]
+                                    break
+                            except Exception:
+                                continue
+                        if _tc_live and _tc_live > 2.0:
+                            _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima"))
+                            _tc_row = {
+                                "fecha": _now_lima.strftime("%Y-%m-%d"),
+                                "usd_pen": _tc_live,
+                                "fuente": _tc_fuente,
+                                "fuente_csv": _tc_fuente,
+                                "fecha_fuente": _now_lima.strftime("%Y-%m-%d"),
+                                "updated_at_lima": _now_lima.strftime("%Y-%m-%d %H:%M:%S"),
+                            }
+                            # Actualizar los 3 archivos de tipo de cambio
+                            _tc_archivos = [
+                                "data/exchange_rate_bcp.csv",
+                                "data/exchange_rate_bcrp.csv",
+                                "data/exchange_rate_usd_pen.csv",
+                            ]
+                            for _tc_archivo in _tc_archivos:
+                                _tc_path = Path(_tc_archivo)
+                                _tc_path.parent.mkdir(parents=True, exist_ok=True)
+                                _df_tc_old = pd.read_csv(_tc_path) if _tc_path.exists() else pd.DataFrame()
+                                _df_tc_new = pd.concat([_df_tc_old, pd.DataFrame([_tc_row])], ignore_index=True)
+                                _df_tc_new.to_csv(_tc_path, index=False)
+                            st.success(f"✅ TC actualizado en BCP, BCRP y API: S/ {_tc_live:.4f} ({_tc_fuente})")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo obtener el tipo de cambio. Actualízalo manualmente.")
+                _tc_val_default = _tc_airflow["usd_pen"]
+                _tc_widget_key = f"tipo_cambio_default_input_{_fuente_tc_cfg}_{_tc_airflow['fecha']}"
+            else:
+                _fuente_tc_cfg = "Manual"
+                _tc_val_default = float(conf.get("tipo_cambio_default", 3.85))
+                _tc_widget_key = "tipo_cambio_default_input_manual"
+                st.warning("No se encontraron CSVs de tipo de cambio generados por Airflow.")
 
-        tipo_cambio_default = st.number_input(
-            "TC USD → PEN (defecto/manual)",
-            min_value=1.0, step=0.01,
-            value=round(float(_tc_val_default), 4),
-            format="%.4f",
-            key=_tc_widget_key,
-            help="Se auto-rellena desde Airflow si hay datos. Puedes ajustarlo manualmente."
+            tipo_cambio_default = st.number_input(
+                "TC USD → PEN (defecto/manual)",
+                min_value=1.0, step=0.01,
+                value=round(float(_tc_val_default), 4),
+                format="%.4f",
+                key=_tc_widget_key,
+                help="Se auto-rellena desde Airflow si hay datos. Puedes ajustarlo manualmente."
+            )
+
+        st.session_state["configuracion"] = {
+            "fecha_inicio_sim": fecha_inicio_sim.isoformat(),
+            "fecha_fin_sim": fecha_fin_sim.isoformat(),
+            "ahorro_inicial": ahorro_inicial,
+            "nombre_cuenta_principal": nombre_cuenta_principal,
+            "tipo_cambio_default": tipo_cambio_default,
+            "fuente_tipo_cambio_default": _fuente_tc_cfg
+        }
+        guardar("configuracion")
+
+        st.divider()
+
+        # ── Cuentas de ahorro secundarias ───────────────────
+    with st.expander("💰 Cuentas de ahorro secundarias", expanded=False):
+
+        with st.form("form_cuenta_ahorro"):
+            col_ca1, col_ca2, col_ca3, col_ca4 = st.columns(4)
+            with col_ca1:
+                nombre = st.text_input("Nombre de la cuenta", "Ahorro Viajes")
+            with col_ca2:
+                saldo_ini = st.number_input("Saldo inicial (S/)", min_value=0.0)
+            with col_ca3:
+                tea = st.number_input("TEA anual (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
+            with col_ca4:
+                aplica_interes_diario = st.checkbox("Interés diario", value=False)
+            if st.form_submit_button("➕ Agregar cuenta"):
+                st.session_state["cuentas_ahorro"].append({
+                    "id": str(uuid.uuid4()),
+                    "nombre": nombre,
+                    "saldo_inicial": float(saldo_ini),
+                    "tea": float(tea),
+                    "aplica_interes_diario": bool(aplica_interes_diario)
+                })
+                guardar("cuentas_ahorro")
+                st.rerun()
+
+        saldo_principal = st.session_state["configuracion"].get("ahorro_inicial", 0)
+        cuentas_resumen = [{"id": "principal", "Cuenta": nombre_cuenta_principal,
+                            "Saldo inicial": saldo_principal, "TEA (%)": 0.0,
+                            "Interés diario": False, "Tipo": "Principal", "Eliminar": False}]
+        for c in st.session_state["cuentas_ahorro"]:
+            cuentas_resumen.append({"id": c["id"], "Cuenta": c["nombre"],
+                                     "Saldo inicial": c.get("saldo_inicial", 0.0),
+                                     "TEA (%)": c.get("tea", 0.0),
+                                     "Interés diario": c.get("aplica_interes_diario", False),
+                                     "Tipo": "Secundaria", "Eliminar": False})
+        df_cuentas_resumen = pd.DataFrame(cuentas_resumen)
+
+        ed_cuentas = st.data_editor(
+            df_cuentas_resumen.drop(columns=["id"]),
+            use_container_width=True, hide_index=True,
+            disabled=["Cuenta", "Saldo inicial", "Tipo"],
+            column_config={
+                "TEA (%)":        st.column_config.NumberColumn("TEA (%)", min_value=0.0, max_value=100.0, step=0.1),
+                "Interés diario": st.column_config.CheckboxColumn("Interés diario"),
+                "Eliminar":       st.column_config.CheckboxColumn("🗑")
+            },
+            key="editor_cuentas_ahorro_resumen"
         )
-
-    st.session_state["configuracion"] = {
-        "fecha_inicio_sim": fecha_inicio_sim.isoformat(),
-        "fecha_fin_sim": fecha_fin_sim.isoformat(),
-        "ahorro_inicial": ahorro_inicial,
-        "nombre_cuenta_principal": nombre_cuenta_principal,
-        "tipo_cambio_default": tipo_cambio_default,
-        "fuente_tipo_cambio_default": _fuente_tc_cfg
-    }
-    guardar("configuracion")
-
-    st.divider()
-
-    # ── Cuentas de ahorro secundarias ───────────────────
-    st.markdown("#### 💰 Cuentas de ahorro secundarias")
-
-    with st.form("form_cuenta_ahorro"):
-        col_ca1, col_ca2, col_ca3, col_ca4 = st.columns(4)
-        with col_ca1:
-            nombre = st.text_input("Nombre de la cuenta", "Ahorro Viajes")
-        with col_ca2:
-            saldo_ini = st.number_input("Saldo inicial (S/)", min_value=0.0)
-        with col_ca3:
-            tea = st.number_input("TEA anual (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
-        with col_ca4:
-            aplica_interes_diario = st.checkbox("Interés diario", value=False)
-        if st.form_submit_button("➕ Agregar cuenta"):
-            st.session_state["cuentas_ahorro"].append({
-                "id": str(uuid.uuid4()),
-                "nombre": nombre,
-                "saldo_inicial": float(saldo_ini),
-                "tea": float(tea),
-                "aplica_interes_diario": bool(aplica_interes_diario)
-            })
+        if st.button("💾 Guardar cuentas de ahorro"):
+            df_original = df_cuentas_resumen.copy()
+            df_original["TEA (%)"]        = ed_cuentas["TEA (%)"].values
+            df_original["Interés diario"] = ed_cuentas["Interés diario"].values
+            df_original["Eliminar"]       = ed_cuentas["Eliminar"].values
+            cuentas_actualizadas = []
+            for _, row in df_original.iterrows():
+                if row["Tipo"] == "Secundaria" and not row["Eliminar"]:
+                    cuentas_actualizadas.append({
+                        "id": row["id"], "nombre": row["Cuenta"],
+                        "saldo_inicial": float(row["Saldo inicial"]),
+                        "tea": float(row["TEA (%)"]),
+                        "aplica_interes_diario": bool(row["Interés diario"])
+                    })
+            st.session_state["cuentas_ahorro"] = cuentas_actualizadas
             guardar("cuentas_ahorro")
             st.rerun()
 
-    saldo_principal = st.session_state["configuracion"].get("ahorro_inicial", 0)
-    cuentas_resumen = [{"id": "principal", "Cuenta": nombre_cuenta_principal,
-                        "Saldo inicial": saldo_principal, "TEA (%)": 0.0,
-                        "Interés diario": False, "Tipo": "Principal", "Eliminar": False}]
-    for c in st.session_state["cuentas_ahorro"]:
-        cuentas_resumen.append({"id": c["id"], "Cuenta": c["nombre"],
-                                 "Saldo inicial": c.get("saldo_inicial", 0.0),
-                                 "TEA (%)": c.get("tea", 0.0),
-                                 "Interés diario": c.get("aplica_interes_diario", False),
-                                 "Tipo": "Secundaria", "Eliminar": False})
-    df_cuentas_resumen = pd.DataFrame(cuentas_resumen)
+        st.divider()
 
-    ed_cuentas = st.data_editor(
-        df_cuentas_resumen.drop(columns=["id"]),
-        use_container_width=True, hide_index=True,
-        disabled=["Cuenta", "Saldo inicial", "Tipo"],
-        column_config={
-            "TEA (%)":        st.column_config.NumberColumn("TEA (%)", min_value=0.0, max_value=100.0, step=0.1),
-            "Interés diario": st.column_config.CheckboxColumn("Interés diario"),
-            "Eliminar":       st.column_config.CheckboxColumn("🗑")
-        },
-        key="editor_cuentas_ahorro_resumen"
-    )
-    if st.button("💾 Guardar cuentas de ahorro"):
-        df_original = df_cuentas_resumen.copy()
-        df_original["TEA (%)"]        = ed_cuentas["TEA (%)"].values
-        df_original["Interés diario"] = ed_cuentas["Interés diario"].values
-        df_original["Eliminar"]       = ed_cuentas["Eliminar"].values
-        cuentas_actualizadas = []
-        for _, row in df_original.iterrows():
-            if row["Tipo"] == "Secundaria" and not row["Eliminar"]:
-                cuentas_actualizadas.append({
-                    "id": row["id"], "nombre": row["Cuenta"],
-                    "saldo_inicial": float(row["Saldo inicial"]),
-                    "tea": float(row["TEA (%)"]),
-                    "aplica_interes_diario": bool(row["Interés diario"])
-                })
-        st.session_state["cuentas_ahorro"] = cuentas_actualizadas
-        guardar("cuentas_ahorro")
-        st.rerun()
+        # ── Tarjetas de crédito ──────────────────────────────
+    with st.expander("💳 Tarjetas de crédito", expanded=False):
 
-    st.divider()
+        # Mapa cuentas débito disponibles para pagar tarjeta
+        _cuentas_pago_map = {nombre_cuenta_principal: "principal"}
+        for _c in st.session_state["cuentas_ahorro"]:
+            _cuentas_pago_map[_c["nombre"]] = _c["id"]
 
-    # ── Tarjetas de crédito ──────────────────────────────
-    st.markdown("#### 💳 Tarjetas de crédito")
-
-    # Mapa cuentas débito disponibles para pagar tarjeta
-    _cuentas_pago_map = {nombre_cuenta_principal: "principal"}
-    for _c in st.session_state["cuentas_ahorro"]:
-        _cuentas_pago_map[_c["nombre"]] = _c["id"]
-
-    with st.form("form_tarjeta"):
-        col_t1, col_t2, col_t3, col_t4 = st.columns(4)
-        with col_t1:
-            tar_nombre = st.text_input("Nombre tarjeta", "Visa")
-        with col_t2:
-            tar_dia_cierre = st.number_input("Día de cierre", 1, 31, 20)
-        with col_t3:
-            tar_dia_pago = st.number_input(
-                "Día de pago",
-                1, 31, 10,
-                help="Día en que se debita de tu cuenta para pagar la tarjeta"
-            )
-        with col_t4:
-            tar_cuenta_pago_nombre = st.selectbox(
-                "Cuenta que paga",
-                list(_cuentas_pago_map.keys()),
-                help="Cuenta débito desde la que se realiza el pago mensual"
-            )
-        if st.form_submit_button("➕ Agregar tarjeta"):
-            st.session_state["tarjetas"].append({
-                "id": str(uuid.uuid4()),
-                "nombre": tar_nombre,
-                "dia_cierre": int(tar_dia_cierre),
-                "dia_pago": int(tar_dia_pago),
-                "cuenta_pago_id": _cuentas_pago_map[tar_cuenta_pago_nombre],
-                "cuenta_pago_nombre": tar_cuenta_pago_nombre
-            })
-            guardar("tarjetas")
-            st.rerun()
-
-    df_tar = pd.DataFrame(st.session_state["tarjetas"])
-    if not df_tar.empty:
-        # Asegurar que tarjetas viejas tengan cuenta_pago_id
-        if "cuenta_pago_id" not in df_tar.columns:
-            df_tar["cuenta_pago_id"] = "principal"
-            df_tar["cuenta_pago_nombre"] = nombre_cuenta_principal
-        df_tar["cuenta_pago_id"]     = df_tar["cuenta_pago_id"].fillna("principal")
-        df_tar["cuenta_pago_nombre"] = df_tar["cuenta_pago_nombre"].fillna(nombre_cuenta_principal)
-        df_tar["Eliminar"] = False
-
-        ed_tar = st.data_editor(
-            df_tar.drop(columns=[c for c in ["id", "cuenta_pago_id"] if c in df_tar.columns]),
-            use_container_width=True, hide_index=True,
-            column_config={
-                "nombre":             st.column_config.TextColumn("Tarjeta"),
-                "dia_cierre":         st.column_config.NumberColumn("Día cierre", min_value=1, max_value=31),
-                "dia_pago":           st.column_config.NumberColumn("Día de pago (débito)", min_value=1, max_value=31),
-                "cuenta_pago_nombre": st.column_config.SelectboxColumn(
-                    "Cuenta que paga", options=list(_cuentas_pago_map.keys())
-                ),
-                "Eliminar": st.column_config.CheckboxColumn("🗑")
-            },
-            key="editor_tarjetas_credito"
-        )
-        if st.button("💾 Guardar tarjetas"):
-            _df_ed = ed_tar.copy()
-            _df_ed["id"] = df_tar["id"].values
-            # Reconstruir cuenta_pago_id desde nombre seleccionado
-            _df_ed["cuenta_pago_id"] = _df_ed["cuenta_pago_nombre"].apply(
-                lambda n: _cuentas_pago_map.get(str(n), "principal")
-            )
-            _df_ed = _df_ed[_df_ed["Eliminar"] == False].copy()
-            _df_ed["dia_cierre"] = pd.to_numeric(_df_ed["dia_cierre"], errors="coerce").fillna(20).astype(int)
-            _df_ed["dia_pago"]   = pd.to_numeric(_df_ed["dia_pago"],   errors="coerce").fillna(10).astype(int)
-            st.session_state["tarjetas"] = _df_ed.drop(columns=["Eliminar"]).to_dict("records")
-            guardar("tarjetas")
-            st.rerun()
-    else:
-        st.info("No hay tarjetas registradas.")
-
-    st.divider()
-
-    # ── Tipo de cambio mensual por tarjeta ───────────────
-    st.markdown("#### 💱 Tipo de cambio USD → PEN por mes y tarjeta")
-    st.caption("Registra el tipo de cambio del mes en que se realiza el pago de cada tarjeta. "
-               "Si no registras un mes, se usa el valor por defecto de arriba.")
-
-    if st.session_state["tarjetas"]:
-        _mapa_tar_tc = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
-
-        # Meses dentro del rango de simulación
-        _meses_sim = pd.period_range(fecha_inicio_sim, fecha_fin_sim, freq="M")
-        _meses_opts = {str(m): str(m) for m in _meses_sim}  # "2026-05" -> "2026-05"
-
-        with st.form("form_tipo_cambio"):
-            col_tc1, col_tc2, col_tc3 = st.columns(3)
-            with col_tc1:
-                tc_tarjeta = st.selectbox("Tarjeta", list(_mapa_tar_tc.keys()), key="sel_tc_tarjeta")
-            with col_tc2:
-                tc_mes = st.selectbox("Mes de pago", list(_meses_opts.keys()), key="sel_tc_mes")
-            with col_tc3:
-                tc_valor = st.number_input(
-                    "TC USD/PEN", min_value=1.0, step=0.01,
-                    value=float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85)),
-                    key="inp_tc_valor"
+        with st.form("form_tarjeta"):
+            col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+            with col_t1:
+                tar_nombre = st.text_input("Nombre tarjeta", "Visa")
+            with col_t2:
+                tar_dia_cierre = st.number_input("Día de cierre", 1, 31, 20)
+            with col_t3:
+                tar_dia_pago = st.number_input(
+                    "Día de pago",
+                    1, 31, 10,
+                    help="Día en que se debita de tu cuenta para pagar la tarjeta"
                 )
-            if st.form_submit_button("➕ Registrar tipo de cambio"):
-                # Upsert: si ya existe para esa tarjeta+mes, actualizar
-                _tarjeta_id_tc = _mapa_tar_tc[tc_tarjeta]
-                _existing = [r for r in st.session_state["tipos_cambio"]
-                             if r["tarjeta_id"] == _tarjeta_id_tc and r["anio_mes"] == tc_mes]
-                if _existing:
-                    for r in st.session_state["tipos_cambio"]:
-                        if r["tarjeta_id"] == _tarjeta_id_tc and r["anio_mes"] == tc_mes:
-                            r["tipo_de_cambio"] = float(tc_valor)
-                else:
-                    st.session_state["tipos_cambio"].append({
-                        "id": str(uuid.uuid4()),
-                        "tarjeta_id": _tarjeta_id_tc,
-                        "tarjeta_nombre": tc_tarjeta,
-                        "anio_mes": tc_mes,
-                        "tipo_de_cambio": float(tc_valor)
-                    })
-                guardar("tipos_cambio")
+            with col_t4:
+                tar_cuenta_pago_nombre = st.selectbox(
+                    "Cuenta que paga",
+                    list(_cuentas_pago_map.keys()),
+                    help="Cuenta débito desde la que se realiza el pago mensual"
+                )
+            if st.form_submit_button("➕ Agregar tarjeta"):
+                st.session_state["tarjetas"].append({
+                    "id": str(uuid.uuid4()),
+                    "nombre": tar_nombre,
+                    "dia_cierre": int(tar_dia_cierre),
+                    "dia_pago": int(tar_dia_pago),
+                    "cuenta_pago_id": _cuentas_pago_map[tar_cuenta_pago_nombre],
+                    "cuenta_pago_nombre": tar_cuenta_pago_nombre
+                })
+                guardar("tarjetas")
                 st.rerun()
 
-        _df_tc = pd.DataFrame(st.session_state["tipos_cambio"])
-        if not _df_tc.empty:
-            _df_tc_show = _df_tc.drop(columns=[c for c in ["id", "tarjeta_id"] if c in _df_tc.columns])
-            _df_tc_show["Eliminar"] = False
-            _ed_tc = st.data_editor(
-                _df_tc_show,
+        df_tar = pd.DataFrame(st.session_state["tarjetas"])
+        if not df_tar.empty:
+            # Asegurar que tarjetas viejas tengan cuenta_pago_id
+            if "cuenta_pago_id" not in df_tar.columns:
+                df_tar["cuenta_pago_id"] = "principal"
+                df_tar["cuenta_pago_nombre"] = nombre_cuenta_principal
+            df_tar["cuenta_pago_id"]     = df_tar["cuenta_pago_id"].fillna("principal")
+            df_tar["cuenta_pago_nombre"] = df_tar["cuenta_pago_nombre"].fillna(nombre_cuenta_principal)
+            df_tar["Eliminar"] = False
+
+            ed_tar = st.data_editor(
+                df_tar.drop(columns=[c for c in ["id", "cuenta_pago_id"] if c in df_tar.columns]),
                 use_container_width=True, hide_index=True,
                 column_config={
-                    "tarjeta_nombre": st.column_config.TextColumn("Tarjeta"),
-                    "anio_mes":       st.column_config.TextColumn("Mes (YYYY-MM)"),
-                    "tipo_de_cambio": st.column_config.NumberColumn("TC USD/PEN", step=0.01),
-                    "Eliminar":       st.column_config.CheckboxColumn("🗑")
+                    "nombre":             st.column_config.TextColumn("Tarjeta"),
+                    "dia_cierre":         st.column_config.NumberColumn("Día cierre", min_value=1, max_value=31),
+                    "dia_pago":           st.column_config.NumberColumn("Día de pago (débito)", min_value=1, max_value=31),
+                    "cuenta_pago_nombre": st.column_config.SelectboxColumn(
+                        "Cuenta que paga", options=list(_cuentas_pago_map.keys())
+                    ),
+                    "Eliminar": st.column_config.CheckboxColumn("🗑")
                 },
-                key="editor_tipos_cambio"
+                key="editor_tarjetas_credito"
             )
-            if st.button("💾 Guardar tipos de cambio"):
-                _df_tc_orig = _df_tc.copy()
-                _ed_tc2 = _ed_tc.copy()
-                for _col in ["id", "tarjeta_id"]:
-                    if _col in _df_tc_orig.columns:
-                        _ed_tc2[_col] = _df_tc_orig[_col].values
-                _df_tc_save = _ed_tc2[_ed_tc2["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-                _df_tc_save["tipo_de_cambio"] = pd.to_numeric(
-                    _df_tc_save["tipo_de_cambio"], errors="coerce"
-                ).fillna(tipo_cambio_default)
-                st.session_state["tipos_cambio"] = _df_tc_save.to_dict("records")
-                guardar("tipos_cambio")
+            if st.button("💾 Guardar tarjetas"):
+                _df_ed = ed_tar.copy()
+                _df_ed["id"] = df_tar["id"].values
+                # Reconstruir cuenta_pago_id desde nombre seleccionado
+                _df_ed["cuenta_pago_id"] = _df_ed["cuenta_pago_nombre"].apply(
+                    lambda n: _cuentas_pago_map.get(str(n), "principal")
+                )
+                _df_ed = _df_ed[_df_ed["Eliminar"] == False].copy()
+                _df_ed["dia_cierre"] = pd.to_numeric(_df_ed["dia_cierre"], errors="coerce").fillna(20).astype(int)
+                _df_ed["dia_pago"]   = pd.to_numeric(_df_ed["dia_pago"],   errors="coerce").fillna(10).astype(int)
+                st.session_state["tarjetas"] = _df_ed.drop(columns=["Eliminar"]).to_dict("records")
+                guardar("tarjetas")
                 st.rerun()
         else:
-            st.info("Sin tipos de cambio registrados. Se usará el valor por defecto.")
-    else:
-        st.info("Primero agrega una tarjeta de crédito.")
+            st.info("No hay tarjetas registradas.")
 
-# TC global de trabajo para cálculos que ocurren antes del bloque de simulación.
-# Sale de la configuración guardada arriba, que a su vez se auto-rellena desde Airflow.
-_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+        st.divider()
 
-# ==================================================
-# 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
-# ==================================================
+        # ── Tipo de cambio mensual por tarjeta ───────────────
+    with st.expander("💱 Tipo de cambio USD → PEN", expanded=False):
+        st.caption("Registra el tipo de cambio del mes en que se realiza el pago de cada tarjeta. "
+                   "Si no registras un mes, se usa el valor por defecto de arriba.")
+
+        if st.session_state["tarjetas"]:
+            _mapa_tar_tc = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+
+            # Meses dentro del rango de simulación
+            _meses_sim = pd.period_range(fecha_inicio_sim, fecha_fin_sim, freq="M")
+            _meses_opts = {str(m): str(m) for m in _meses_sim}  # "2026-05" -> "2026-05"
+
+            with st.form("form_tipo_cambio"):
+                col_tc1, col_tc2, col_tc3 = st.columns(3)
+                with col_tc1:
+                    tc_tarjeta = st.selectbox("Tarjeta", list(_mapa_tar_tc.keys()), key="sel_tc_tarjeta")
+                with col_tc2:
+                    tc_mes = st.selectbox("Mes de pago", list(_meses_opts.keys()), key="sel_tc_mes")
+                with col_tc3:
+                    tc_valor = st.number_input(
+                        "TC USD/PEN", min_value=1.0, step=0.01,
+                        value=float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85)),
+                        key="inp_tc_valor"
+                    )
+                if st.form_submit_button("➕ Registrar tipo de cambio"):
+                    # Upsert: si ya existe para esa tarjeta+mes, actualizar
+                    _tarjeta_id_tc = _mapa_tar_tc[tc_tarjeta]
+                    _existing = [r for r in st.session_state["tipos_cambio"]
+                                 if r["tarjeta_id"] == _tarjeta_id_tc and r["anio_mes"] == tc_mes]
+                    if _existing:
+                        for r in st.session_state["tipos_cambio"]:
+                            if r["tarjeta_id"] == _tarjeta_id_tc and r["anio_mes"] == tc_mes:
+                                r["tipo_de_cambio"] = float(tc_valor)
+                    else:
+                        st.session_state["tipos_cambio"].append({
+                            "id": str(uuid.uuid4()),
+                            "tarjeta_id": _tarjeta_id_tc,
+                            "tarjeta_nombre": tc_tarjeta,
+                            "anio_mes": tc_mes,
+                            "tipo_de_cambio": float(tc_valor)
+                        })
+                    guardar("tipos_cambio")
+                    st.rerun()
+
+            _df_tc = pd.DataFrame(st.session_state["tipos_cambio"])
+            if not _df_tc.empty:
+                _df_tc_show = _df_tc.drop(columns=[c for c in ["id", "tarjeta_id"] if c in _df_tc.columns])
+                _df_tc_show["Eliminar"] = False
+                _ed_tc = st.data_editor(
+                    _df_tc_show,
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "tarjeta_nombre": st.column_config.TextColumn("Tarjeta"),
+                        "anio_mes":       st.column_config.TextColumn("Mes (YYYY-MM)"),
+                        "tipo_de_cambio": st.column_config.NumberColumn("TC USD/PEN", step=0.01),
+                        "Eliminar":       st.column_config.CheckboxColumn("🗑")
+                    },
+                    key="editor_tipos_cambio"
+                )
+                if st.button("💾 Guardar tipos de cambio"):
+                    _df_tc_orig = _df_tc.copy()
+                    _ed_tc2 = _ed_tc.copy()
+                    for _col in ["id", "tarjeta_id"]:
+                        if _col in _df_tc_orig.columns:
+                            _ed_tc2[_col] = _df_tc_orig[_col].values
+                    _df_tc_save = _ed_tc2[_ed_tc2["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+                    _df_tc_save["tipo_de_cambio"] = pd.to_numeric(
+                        _df_tc_save["tipo_de_cambio"], errors="coerce"
+                    ).fillna(tipo_cambio_default)
+                    st.session_state["tipos_cambio"] = _df_tc_save.to_dict("records")
+                    guardar("tipos_cambio")
+                    st.rerun()
+            else:
+                st.info("Sin tipos de cambio registrados. Se usará el valor por defecto.")
+        else:
+            st.info("Primero agrega una tarjeta de crédito.")
+
+    # TC global de trabajo para cálculos que ocurren antes del bloque de simulación.
+    # Sale de la configuración guardada arriba, que a su vez se auto-rellena desde Airflow.
+    _tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+
+    # ==================================================
+    # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
+    # ==================================================
 with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False):
 
     with st.expander("💰 Ingresos recurrentes", expanded=False):
@@ -2769,177 +2769,177 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
 
         # ── Formulario nueva simulación ───────────────────────────────
         with st.form("form_prestamo", clear_on_submit=True):
-            st.markdown("#### ➕ Nueva simulación")
+            with st.expander("➕ Nueva simulación", expanded=True):
 
-            st.markdown("**🏦 Préstamo**")
-            _fp1, _fp2 = st.columns(2)
-            with _fp1:
-                _p_nombre    = st.text_input("📝 Nombre", placeholder="ej: Préstamo vehículo")
-                _p_monto_pre = st.number_input("💰 Monto del préstamo (S/)", min_value=0.0, step=1000.0)
-                _p_cta_desembolso = st.selectbox(
-                    "🏦 Cuenta que recibe el préstamo",
-                    list(_p_ctas.keys()), key="prestamo_cta_desembolso"
-                )
-            with _fp2:
-                _p_fecha_desembolso = st.date_input("📅 Fecha de desembolso", value=hoy_peru, key="prestamo_fecha_desembolso")
-                _p_desc = st.text_area("📝 Notas", placeholder="Condiciones, banco, tasa, etc.", height=80)
+                st.markdown("**🏦 Préstamo**")
+                _fp1, _fp2 = st.columns(2)
+                with _fp1:
+                    _p_nombre    = st.text_input("📝 Nombre", placeholder="ej: Préstamo vehículo")
+                    _p_monto_pre = st.number_input("💰 Monto del préstamo (S/)", min_value=0.0, step=1000.0)
+                    _p_cta_desembolso = st.selectbox(
+                        "🏦 Cuenta que recibe el préstamo",
+                        list(_p_ctas.keys()), key="prestamo_cta_desembolso"
+                    )
+                with _fp2:
+                    _p_fecha_desembolso = st.date_input("📅 Fecha de desembolso", value=hoy_peru, key="prestamo_fecha_desembolso")
+                    _p_desc = st.text_area("📝 Notas", placeholder="Condiciones, banco, tasa, etc.", height=80)
 
-            st.markdown("**🛒 Compra del bien**")
-            _fg1, _fg2 = st.columns(2)
-            with _fg1:
-                _p_monto_tot = st.number_input(
-                    "🏷️ Costo total del bien (S/)", min_value=0.0, step=1000.0,
-                    help="Si es mayor al préstamo, la diferencia sale de la cuenta seleccionada"
-                )
-                _p_cta_pago_bien = st.selectbox(
-                    "💳 Cuenta que paga el bien",
-                    list(_p_ctas.keys()), key="prestamo_cta_pago_bien"
-                )
-            with _fg2:
-                _p_fecha_compra = st.date_input("📅 Fecha de compra del bien", value=hoy_peru, key="prestamo_fecha_compra")
+                st.markdown("**🛒 Compra del bien**")
+                _fg1, _fg2 = st.columns(2)
+                with _fg1:
+                    _p_monto_tot = st.number_input(
+                        "🏷️ Costo total del bien (S/)", min_value=0.0, step=1000.0,
+                        help="Si es mayor al préstamo, la diferencia sale de la cuenta seleccionada"
+                    )
+                    _p_cta_pago_bien = st.selectbox(
+                        "💳 Cuenta que paga el bien",
+                        list(_p_ctas.keys()), key="prestamo_cta_pago_bien"
+                    )
+                with _fg2:
+                    _p_fecha_compra = st.date_input("📅 Fecha de compra del bien", value=hoy_peru, key="prestamo_fecha_compra")
 
-            st.markdown("**📆 Cuotas mensuales**")
-            _fq1, _fq2, _fq3, _fq4 = st.columns(4)
-            with _fq1:
-                _p_cuota = st.number_input("💰 Cuota mensual (S/)", min_value=0.0, step=100.0)
-            with _fq2:
-                _p_medio_pago = st.selectbox("💳 Cuenta/tarjeta de cuotas", _p_medios, key="prestamo_medio")
-            with _fq3:
-                _p_fecha_primera_cuota = st.date_input("📅 Primera cuota", value=hoy_peru, key="prestamo_fecha_primera")
-                _p_dia_cuota = st.number_input("📆 Día del mes", min_value=1, max_value=31, value=5, key="prestamo_dia")
-            with _fq4:
-                _p_anios = st.number_input("📅 Plazo (años)", min_value=1, max_value=30, value=5, step=1, key="prestamo_anios",
-                    help="Las cuotas se pagan el mismo día del mes durante N años a partir de la primera cuota")
-                # Calcular fecha fin automáticamente: misma fecha de primera cuota + N años, día ajustado
-                _p_fecha_ultima_cuota = (
-                    pd.to_datetime(_p_fecha_primera_cuota) + pd.DateOffset(years=int(_p_anios)) - pd.DateOffset(months=1)
-                ).date()
-                st.caption(f"🗓 Última cuota estimada: **{_p_fecha_ultima_cuota.strftime('%d/%m/%Y')}**")
+                st.markdown("**📆 Cuotas mensuales**")
+                _fq1, _fq2, _fq3, _fq4 = st.columns(4)
+                with _fq1:
+                    _p_cuota = st.number_input("💰 Cuota mensual (S/)", min_value=0.0, step=100.0)
+                with _fq2:
+                    _p_medio_pago = st.selectbox("💳 Cuenta/tarjeta de cuotas", _p_medios, key="prestamo_medio")
+                with _fq3:
+                    _p_fecha_primera_cuota = st.date_input("📅 Primera cuota", value=hoy_peru, key="prestamo_fecha_primera")
+                    _p_dia_cuota = st.number_input("📆 Día del mes", min_value=1, max_value=31, value=5, key="prestamo_dia")
+                with _fq4:
+                    _p_anios = st.number_input("📅 Plazo (años)", min_value=1, max_value=30, value=5, step=1, key="prestamo_anios",
+                        help="Las cuotas se pagan el mismo día del mes durante N años a partir de la primera cuota")
+                    # Calcular fecha fin automáticamente: misma fecha de primera cuota + N años, día ajustado
+                    _p_fecha_ultima_cuota = (
+                        pd.to_datetime(_p_fecha_primera_cuota) + pd.DateOffset(years=int(_p_anios)) - pd.DateOffset(months=1)
+                    ).date()
+                    st.caption(f"🗓 Última cuota estimada: **{_p_fecha_ultima_cuota.strftime('%d/%m/%Y')}**")
 
-            st.markdown("**💥 Pago de cierre anticipado** *(opcional)*")
-            _fc1, _fc2 = st.columns(2)
-            with _fc1:
-                _p_monto_cierre = st.number_input(
-                    "💰 Monto de cierre (S/)", min_value=0.0, step=1000.0,
-                    help="Pago único que cancela el préstamo. Después de esta fecha no se generan más cuotas."
-                )
-            with _fc2:
-                _p_fecha_cierre = st.date_input("📅 Fecha de pago de cierre", value=hoy_peru, key="prestamo_fecha_cierre")
+                st.markdown("**💥 Pago de cierre anticipado** *(opcional)*")
+                _fc1, _fc2 = st.columns(2)
+                with _fc1:
+                    _p_monto_cierre = st.number_input(
+                        "💰 Monto de cierre (S/)", min_value=0.0, step=1000.0,
+                        help="Pago único que cancela el préstamo. Después de esta fecha no se generan más cuotas."
+                    )
+                with _fc2:
+                    _p_fecha_cierre = st.date_input("📅 Fecha de pago de cierre", value=hoy_peru, key="prestamo_fecha_cierre")
 
-            if st.form_submit_button("💾 Guardar simulación", use_container_width=True, type="primary"):
-                if _p_nombre.strip() and _p_monto_pre > 0 and _p_cuota > 0:
-                    if _p_medio_pago.startswith("Tarjeta: "):
-                        _tarj_name  = _p_medio_pago.replace("Tarjeta: ", "")
-                        _medio_id   = _p_tarjs.get(_tarj_name, "")
-                        _medio_tipo = "tarjeta"
+                if st.form_submit_button("💾 Guardar simulación", use_container_width=True, type="primary"):
+                    if _p_nombre.strip() and _p_monto_pre > 0 and _p_cuota > 0:
+                        if _p_medio_pago.startswith("Tarjeta: "):
+                            _tarj_name  = _p_medio_pago.replace("Tarjeta: ", "")
+                            _medio_id   = _p_tarjs.get(_tarj_name, "")
+                            _medio_tipo = "tarjeta"
+                        else:
+                            _medio_id   = _p_ctas.get(_p_medio_pago, "principal")
+                            _medio_tipo = "cuenta"
+                        st.session_state["simulaciones_prestamo"].append({
+                            "id":                    str(uuid.uuid4()),
+                            "nombre":                _p_nombre.strip(),
+                            "monto_prestamo":        float(_p_monto_pre),
+                            "monto_total":           float(_p_monto_tot) if _p_monto_tot > 0 else float(_p_monto_pre),
+                            "cta_desembolso":        _p_cta_desembolso,
+                            "cta_desembolso_id":     _p_ctas.get(_p_cta_desembolso, "principal"),
+                            "fecha_desembolso":      _p_fecha_desembolso.isoformat(),
+                            "cta_pago_bien":         _p_cta_pago_bien,
+                            "cta_pago_bien_id":      _p_ctas.get(_p_cta_pago_bien, "principal"),
+                            "fecha_compra":          _p_fecha_compra.isoformat(),
+                            "cuota":                 float(_p_cuota),
+                            "medio_pago":            _p_medio_pago,
+                            "medio_id":              _medio_id,
+                            "medio_tipo":            _medio_tipo,
+                            "fecha_primera_cuota":   _p_fecha_primera_cuota.isoformat(),
+                            "dia_cuota":             int(_p_dia_cuota),
+                            "plazo_anios":           int(_p_anios),
+                            "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
+                            "descripcion":           _p_desc.strip(),
+                            "monto_cierre":          float(_p_monto_cierre) if _p_monto_cierre > 0 else 0.0,
+                            "fecha_cierre":          _p_fecha_cierre.isoformat() if _p_monto_cierre > 0 else None,
+                            "activo":                True,
+                        })
+                        guardar("simulaciones_prestamo")
+                        st.success("✅ Simulación guardada.")
+                        st.rerun()
                     else:
-                        _medio_id   = _p_ctas.get(_p_medio_pago, "principal")
-                        _medio_tipo = "cuenta"
-                    st.session_state["simulaciones_prestamo"].append({
-                        "id":                    str(uuid.uuid4()),
-                        "nombre":                _p_nombre.strip(),
-                        "monto_prestamo":        float(_p_monto_pre),
-                        "monto_total":           float(_p_monto_tot) if _p_monto_tot > 0 else float(_p_monto_pre),
-                        "cta_desembolso":        _p_cta_desembolso,
-                        "cta_desembolso_id":     _p_ctas.get(_p_cta_desembolso, "principal"),
-                        "fecha_desembolso":      _p_fecha_desembolso.isoformat(),
-                        "cta_pago_bien":         _p_cta_pago_bien,
-                        "cta_pago_bien_id":      _p_ctas.get(_p_cta_pago_bien, "principal"),
-                        "fecha_compra":          _p_fecha_compra.isoformat(),
-                        "cuota":                 float(_p_cuota),
-                        "medio_pago":            _p_medio_pago,
-                        "medio_id":              _medio_id,
-                        "medio_tipo":            _medio_tipo,
-                        "fecha_primera_cuota":   _p_fecha_primera_cuota.isoformat(),
-                        "dia_cuota":             int(_p_dia_cuota),
-                        "plazo_anios":           int(_p_anios),
-                        "fecha_fin":             _p_fecha_ultima_cuota.isoformat(),
-                        "descripcion":           _p_desc.strip(),
-                        "monto_cierre":          float(_p_monto_cierre) if _p_monto_cierre > 0 else 0.0,
-                        "fecha_cierre":          _p_fecha_cierre.isoformat() if _p_monto_cierre > 0 else None,
-                        "activo":                True,
-                    })
-                    guardar("simulaciones_prestamo")
-                    st.success("✅ Simulación guardada.")
-                    st.rerun()
-                else:
-                    st.warning("Completa nombre, monto del préstamo y cuota.")
+                        st.warning("Completa nombre, monto del préstamo y cuota.")
 
-        # ── Lista de simulaciones guardadas ───────────────────────────
-        _sims = st.session_state.get("simulaciones_prestamo", [])
-        if _sims:
-            st.markdown("#### 📋 Simulaciones guardadas")
-            for _sim in _sims:
-                _s_activo = _sim.get("activo", True)
-                with st.container(border=True):
-                    _sc1, _sc2, _sc3, _sc4 = st.columns([3, 2, 1, 1])
-                    _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
-                    _sc1.markdown(f"**{_sim['nombre']}**")
-                    _sc1.caption(
-                        f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
-                        f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
-                    )
-                    _sc1.caption(
-                        f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
-                        f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
-                        f"De tus ahorros: S/ {_gasto_propio:,.0f}"
-                    )
-                    _plazo_txt = (
-                        f"{_sim['plazo_anios']} año{'s' if _sim['plazo_anios'] != 1 else ''}"
-                        if _sim.get("plazo_anios")
-                        else f"hasta {_sim['fecha_fin']}"
-                    )
-                    _sc1.caption(
-                        f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
-                        f"{_sim['medio_pago']}  ·  "
-                        f"Desde {_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} · Plazo: {_plazo_txt}  ·  Última cuota: {_sim['fecha_fin']}"
-                    )
-                    if _sim.get("descripcion"):
-                        _sc1.caption(f"📝 {_sim['descripcion']}")
-                    if _sim.get("monto_cierre", 0) > 0:
+            # ── Lista de simulaciones guardadas ───────────────────────────
+            with st.expander("📋 Simulaciones guardadas", expanded=False):
+              _sims = st.session_state.get("simulaciones_prestamo", [])
+              if _sims:
+                for _sim in _sims:
+                    _s_activo = _sim.get("activo", True)
+                    with st.container(border=True):
+                        _sc1, _sc2, _sc3, _sc4 = st.columns([3, 2, 1, 1])
+                        _gasto_propio = max(0, float(_sim["monto_total"]) - float(_sim["monto_prestamo"]))
+                        _sc1.markdown(f"**{_sim['nombre']}**")
                         _sc1.caption(
-                            f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
-                            f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
+                            f"Préstamo: S/ {_sim['monto_prestamo']:,.0f}  →  "
+                            f"{_sim.get('cta_desembolso','—')} el {_sim.get('fecha_desembolso', _sim.get('fecha_inicio','—'))}"
                         )
-                    # Calcular cuotas totales y monto pagado/restante
-                    _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
-                    _f_ini = pd.to_datetime(_f_ini_ref)
-                    _f_fin = pd.to_datetime(_sim["fecha_fin"])
-                    _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
-                    _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
-                    _pagado      = min(_meses_pag, _meses_total) * float(_sim["cuota"])
-                    _pendiente   = max(0, _meses_total - _meses_pag) * float(_sim["cuota"])
-                    _sc2.metric("Total cuotas", f"S/ {_meses_total * _sim['cuota']:,.0f}")
-                    _sc2.caption(f"Pagado: S/ {_pagado:,.0f}  |  Pendiente: S/ {_pendiente:,.0f}")
-                    with _sc3:
-                        _tog_key = f"tog_sim_{_sim['id']}"
-                        _nuevo_estado = st.toggle(
-                            "Simular",
-                            value=_s_activo,
-                            key=_tog_key,
-                            help="Activa para ver el impacto en los gráficos de ahorros"
+                        _sc1.caption(
+                            f"Bien: S/ {_sim['monto_total']:,.0f}  ·  "
+                            f"Paga: {_sim.get('cta_pago_bien','—')} el {_sim.get('fecha_compra', _sim.get('fecha_inicio','—'))}  ·  "
+                            f"De tus ahorros: S/ {_gasto_propio:,.0f}"
                         )
-                        if _nuevo_estado != _s_activo:
-                            _sim["activo"] = _nuevo_estado
-                            guardar("simulaciones_prestamo")
-                            st.rerun()
-                    with _sc4:
-                        st.write("")
-                        if st.button("🗑️", key=f"del_sim_{_sim['id']}", help="Eliminar simulación"):
-                            st.session_state["simulaciones_prestamo"] = [
-                                s for s in st.session_state["simulaciones_prestamo"]
-                                if s["id"] != _sim["id"]
-                            ]
-                            guardar("simulaciones_prestamo")
-                            st.rerun()
-        else:
-            st.info("No hay simulaciones de préstamo guardadas.")
+                        _plazo_txt = (
+                            f"{_sim['plazo_anios']} año{'s' if _sim['plazo_anios'] != 1 else ''}"
+                            if _sim.get("plazo_anios")
+                            else f"hasta {_sim['fecha_fin']}"
+                        )
+                        _sc1.caption(
+                            f"Cuota: S/ {_sim['cuota']:,.0f}/mes día {_sim.get('dia_cuota','?')}  ·  "
+                            f"{_sim['medio_pago']}  ·  "
+                            f"Desde {_sim.get('fecha_primera_cuota', _sim.get('fecha_inicio','—'))} · Plazo: {_plazo_txt}  ·  Última cuota: {_sim['fecha_fin']}"
+                        )
+                        if _sim.get("descripcion"):
+                            _sc1.caption(f"📝 {_sim['descripcion']}")
+                        if _sim.get("monto_cierre", 0) > 0:
+                            _sc1.caption(
+                                f"💥 Cierre anticipado: S/ {_sim['monto_cierre']:,.0f} "
+                                f"el {_sim.get('fecha_cierre','—')} → cuotas se detienen ahí"
+                            )
+                        # Calcular cuotas totales y monto pagado/restante
+                        _f_ini_ref = _sim.get("fecha_primera_cuota") or _sim.get("fecha_desembolso") or _sim.get("fecha_inicio") or hoy_peru.isoformat()
+                        _f_ini = pd.to_datetime(_f_ini_ref)
+                        _f_fin = pd.to_datetime(_sim["fecha_fin"])
+                        _meses_total = max(1, (_f_fin.year - _f_ini.year) * 12 + (_f_fin.month - _f_ini.month) + 1)
+                        _meses_pag   = max(0, (hoy_peru.year - _f_ini.year) * 12 + (hoy_peru.month - _f_ini.month))
+                        _pagado      = min(_meses_pag, _meses_total) * float(_sim["cuota"])
+                        _pendiente   = max(0, _meses_total - _meses_pag) * float(_sim["cuota"])
+                        _sc2.metric("Total cuotas", f"S/ {_meses_total * _sim['cuota']:,.0f}")
+                        _sc2.caption(f"Pagado: S/ {_pagado:,.0f}  |  Pendiente: S/ {_pendiente:,.0f}")
+                        with _sc3:
+                            _tog_key = f"tog_sim_{_sim['id']}"
+                            _nuevo_estado = st.toggle(
+                                "Simular",
+                                value=_s_activo,
+                                key=_tog_key,
+                                help="Activa para ver el impacto en los gráficos de ahorros"
+                            )
+                            if _nuevo_estado != _s_activo:
+                                _sim["activo"] = _nuevo_estado
+                                guardar("simulaciones_prestamo")
+                                st.rerun()
+                        with _sc4:
+                            st.write("")
+                            if st.button("🗑️", key=f"del_sim_{_sim['id']}", help="Eliminar simulación"):
+                                st.session_state["simulaciones_prestamo"] = [
+                                    s for s in st.session_state["simulaciones_prestamo"]
+                                    if s["id"] != _sim["id"]
+                                ]
+                                guardar("simulaciones_prestamo")
+                                st.rerun()
+              else:
+                  st.info("No hay simulaciones de préstamo guardadas.")
 
 
 
-    # ==================================================
-    # 4.2 PORTAFOLIO IBKR
-    # ==================================================
+        # ==================================================
+        # 4.2 PORTAFOLIO IBKR
+        # ==================================================
     with st.expander("📈 4.2 IBKR: cash e inversiones", expanded=False):
         st.caption(
             "Primero agrega cash a IBKR desde una cuenta local; luego usa ese cash para comprar acciones o ETFs. Si compras un ticker nuevo, "
@@ -2985,999 +2985,999 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
         # ──────────────────────────────────────────────
         # Paso 1: Transferir fondos desde cuentas locales hacia IBKR
         # ──────────────────────────────────────────────
-        st.markdown("#### 1️⃣ Agregar cash a IBKR desde una cuenta")
-        st.caption(
-            "Primero registra el dinero que sale de una cuenta local y llega como cash USD a IBKR. "
-            "Puedes ingresar el monto enviado en soles o dólares, y la comisión en soles o dólares."
-        )
-
-        _tf_ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-        _tf_ctas = {_tf_ncp: "principal"}
-        for _tf_c in st.session_state.get("cuentas_ahorro", []):
-            _tf_nombre = str(_tf_c.get("nombre", "")).strip()
-            if _tf_nombre and "IBKR" not in _tf_nombre.upper():
-                _tf_ctas[_tf_nombre] = _tf_c.get("id")
-
-        _tf_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
-
-        with st.form("form_transferencia_a_ibkr", clear_on_submit=True):
-            st.markdown("##### ➕ Nueva transferencia / depósito a IBKR")
-            _tf1, _tf2, _tf3 = st.columns(3)
-
-            with _tf1:
-                _tf_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_transferencia_ibkr")
-                _tf_origen_nombre = st.selectbox(
-                    "Cuenta origen",
-                    list(_tf_ctas.keys()),
-                    key="cuenta_origen_transferencia_ibkr"
-                )
-
-            with _tf2:
-                _tf_moneda_monto = st.selectbox(
-                    "Moneda del monto enviado",
-                    ["PEN", "USD"],
-                    key="moneda_monto_transferencia_ibkr",
-                    help="Elige PEN si retiras soles de tu cuenta; elige USD si ya envías dólares."
-                )
-                _tf_monto_origen = st.number_input(
-                    "Monto enviado a IBKR",
-                    min_value=0.0,
-                    step=100.0,
-                    format="%.2f",
-                    key="monto_origen_transferencia_ibkr",
-                    help="Monto bruto que llegará a IBKR como cash, antes de registrar la comisión."
-                )
-                _tf_tc = st.number_input(
-                    "TC USD → PEN usado",
-                    min_value=1.0,
-                    step=0.01,
-                    value=round(_tf_tc_default, 4),
-                    format="%.4f",
-                    key="tc_transferencia_ibkr"
-                )
-
-            with _tf3:
-                _tf_comision_monto = st.number_input(
-                    "Comisión",
-                    min_value=0.0,
-                    step=1.0,
-                    format="%.2f",
-                    key="comision_transferencia_ibkr"
-                )
-                _tf_comision_moneda = st.selectbox(
-                    "Moneda comisión",
-                    ["PEN", "USD"],
-                    key="moneda_comision_transferencia_ibkr"
-                )
-
-            _tf_desc = st.text_input(
-                "Descripción / referencia",
-                placeholder="Ej.: Transferencia BCP → IBKR, wire fee, depósito para invertir",
-                key="descripcion_transferencia_ibkr"
-            )
-
-            if _tf_moneda_monto == "PEN":
-                _tf_monto_pen = float(_tf_monto_origen)
-                _tf_monto_usd = float(_tf_monto_origen) / float(_tf_tc) if _tf_tc > 0 else 0.0
-            else:
-                _tf_monto_usd = float(_tf_monto_origen)
-                _tf_monto_pen = float(_tf_monto_origen) * float(_tf_tc)
-
-            _tf_comision_pen = float(_tf_comision_monto) if _tf_comision_moneda == "PEN" else float(_tf_comision_monto) * float(_tf_tc)
-            _tf_total_debitado_pen = float(_tf_monto_pen) + float(_tf_comision_pen)
-
-            st.info(
-                f"Vista previa: se descontará **S/ {_tf_total_debitado_pen:,.2f}** de {_tf_origen_nombre} "
-                f"y se agregará **US$ {_tf_monto_usd:,.2f}** al cash IBKR. "
-                f"Comisión equivalente: S/ {_tf_comision_pen:,.2f}."
-            )
-
-            if st.form_submit_button("➕ Registrar cash en IBKR", use_container_width=True, type="primary"):
-                if _tf_monto_origen <= 0:
-                    st.warning("Ingresa un monto enviado a IBKR mayor a cero.")
-                elif _tf_tc <= 0:
-                    st.warning("El tipo de cambio debe ser mayor a cero.")
-                else:
-                    st.session_state["ibkr_transferencias"].append({
-                        "id": str(uuid.uuid4()),
-                        "fecha": _tf_fecha.isoformat(),
-                        "cuenta_origen_id": _tf_ctas.get(_tf_origen_nombre, "principal"),
-                        "cuenta_origen_nombre": _tf_origen_nombre,
-                        "monto_origen": float(_tf_monto_origen),
-                        "moneda_monto": _tf_moneda_monto,
-                        "monto_pen": float(_tf_monto_pen),
-                        "tc_usd_pen": float(_tf_tc),
-                        "monto_usd": float(_tf_monto_usd),
-                        "comision_monto": float(_tf_comision_monto),
-                        "comision_moneda": _tf_comision_moneda,
-                        "comision_pen": float(_tf_comision_pen),
-                        "total_debitado_pen": float(_tf_total_debitado_pen),
-                        "descripcion": _tf_desc,
-                    })
-                    guardar("ibkr_transferencias")
-                    st.success("✅ Cash registrado. El monto USD ya se suma al cash IBKR y el total debitado se descuenta de la cuenta origen.")
-                    st.rerun()
-
-        _df_tf_ibkr = pd.DataFrame(st.session_state.get("ibkr_transferencias", []))
-        if not _df_tf_ibkr.empty:
-            for _col, _default in {
-                "id": "",
-                "fecha": hoy_peru.isoformat(),
-                "cuenta_origen_id": "principal",
-                "cuenta_origen_nombre": _tf_ncp,
-                "monto_origen": 0.0,
-                "moneda_monto": "PEN",
-                "monto_pen": 0.0,
-                "tc_usd_pen": _tf_tc_default,
-                "monto_usd": 0.0,
-                "comision_monto": 0.0,
-                "comision_moneda": "PEN",
-                "comision_pen": 0.0,
-                "total_debitado_pen": 0.0,
-                "descripcion": "",
-            }.items():
-                if _col not in _df_tf_ibkr.columns:
-                    _df_tf_ibkr[_col] = _default
-
-            # Compatibilidad con transferencias antiguas registradas solo en PEN.
-            _df_tf_ibkr["monto_origen"] = pd.to_numeric(_df_tf_ibkr["monto_origen"], errors="coerce")
-            _df_tf_ibkr["monto_pen"] = pd.to_numeric(_df_tf_ibkr["monto_pen"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["monto_origen"] = _df_tf_ibkr["monto_origen"].fillna(_df_tf_ibkr["monto_pen"])
-            _mask_monto_origen_vacio = (_df_tf_ibkr["monto_origen"] <= 0) & (_df_tf_ibkr["monto_pen"] > 0)
-            _df_tf_ibkr.loc[_mask_monto_origen_vacio, "monto_origen"] = _df_tf_ibkr.loc[_mask_monto_origen_vacio, "monto_pen"]
-            _df_tf_ibkr["moneda_monto"] = _df_tf_ibkr["moneda_monto"].fillna("PEN").astype(str).str.upper()
-            _df_tf_ibkr.loc[~_df_tf_ibkr["moneda_monto"].isin(["PEN", "USD"]), "moneda_monto"] = "PEN"
-
-            _df_tf_ibkr["id"] = _df_tf_ibkr["id"].apply(
-                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-            )
-            _df_tf_ibkr["fecha"] = pd.to_datetime(_df_tf_ibkr["fecha"], errors="coerce").dt.date
-            _df_tf_ibkr["tc_usd_pen"] = pd.to_numeric(_df_tf_ibkr["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
-            _df_tf_ibkr["tc_usd_pen"] = _df_tf_ibkr["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
-            _df_tf_ibkr["monto_usd"] = _df_tf_ibkr.apply(
-                lambda r: float(r["monto_origen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]) / float(r["tc_usd_pen"]),
-                axis=1
-            )
-            _df_tf_ibkr["monto_pen"] = _df_tf_ibkr.apply(
-                lambda r: float(r["monto_origen"]) * float(r["tc_usd_pen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]),
-                axis=1
-            )
-            _df_tf_ibkr["comision_monto"] = pd.to_numeric(_df_tf_ibkr["comision_monto"], errors="coerce").fillna(0.0)
-            _df_tf_ibkr["comision_moneda"] = _df_tf_ibkr["comision_moneda"].fillna("PEN").astype(str).str.upper()
-            _df_tf_ibkr.loc[~_df_tf_ibkr["comision_moneda"].isin(["PEN", "USD"]), "comision_moneda"] = "PEN"
-            _df_tf_ibkr["comision_pen"] = _df_tf_ibkr.apply(
-                lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
-                axis=1
-            )
-            _df_tf_ibkr["total_debitado_pen"] = _df_tf_ibkr["monto_pen"] + _df_tf_ibkr["comision_pen"]
-            _df_tf_ibkr["descripcion"] = _df_tf_ibkr["descripcion"].fillna("").astype(str)
-            _df_tf_ibkr["Eliminar"] = False
-
-            _df_tf_ibkr = _df_tf_ibkr[[
-                "id", "fecha", "cuenta_origen_id", "cuenta_origen_nombre",
-                "monto_origen", "moneda_monto", "tc_usd_pen", "monto_usd", "monto_pen",
-                "comision_monto", "comision_moneda", "comision_pen", "total_debitado_pen",
-                "descripcion", "Eliminar"
-            ]]
-
-            _cash_tf_usd = float(_df_tf_ibkr["monto_usd"].sum())
-            _debito_tf_pen = float(_df_tf_ibkr["total_debitado_pen"].sum())
-            _metric_tf1, _metric_tf2, _metric_tf3 = st.columns(3)
-            _metric_tf1.metric("Cash agregado por transferencias", f"US$ {_cash_tf_usd:,.2f}")
-            _metric_tf2.metric("Total debitado de cuentas", f"S/ {_debito_tf_pen:,.0f}")
-            _metric_tf3.metric("TC actual configuración", f"{_tf_tc_default:.4f}")
-
-            with st.expander("🧾 Historial de cash agregado desde cuentas", expanded=False):
-                st.caption("Puedes editar una transferencia; al guardar se recalculan USD, comisión equivalente y total debitado.")
-                _ed_tf_ibkr = st.data_editor(
-                    _df_tf_ibkr,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    height=min(38 * len(_df_tf_ibkr) + 46, 320),
-                    column_config={
-                        "id": None,
-                        "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
-                        "cuenta_origen_id": None,
-                        "cuenta_origen_nombre": st.column_config.SelectboxColumn("Cuenta origen", options=list(_tf_ctas.keys()), width="medium"),
-                        "monto_origen": st.column_config.NumberColumn("Monto enviado", min_value=0.0, step=100.0, format="%.2f", width="small"),
-                        "moneda_monto": st.column_config.SelectboxColumn("Moneda monto", options=["PEN", "USD"], width="small"),
-                        "tc_usd_pen": st.column_config.NumberColumn("TC", min_value=1.0, step=0.01, format="%.4f", width="small"),
-                        "monto_usd": st.column_config.NumberColumn("Cash IBKR USD", format="US$ %.2f", width="small", disabled=True),
-                        "monto_pen": st.column_config.NumberColumn("Monto equiv. PEN", format="S/ %.2f", width="small", disabled=True),
-                        "comision_monto": st.column_config.NumberColumn("Comisión", min_value=0.0, step=1.0, format="%.2f", width="small"),
-                        "comision_moneda": st.column_config.SelectboxColumn("Moneda comisión", options=["PEN", "USD"], width="small"),
-                        "comision_pen": st.column_config.NumberColumn("Comisión PEN", format="S/ %.2f", width="small", disabled=True),
-                        "total_debitado_pen": st.column_config.NumberColumn("Total debitado PEN", format="S/ %.2f", width="small", disabled=True),
-                        "descripcion": st.column_config.TextColumn("Descripción", width="large"),
-                        "Eliminar": st.column_config.CheckboxColumn("🗑"),
-                    },
-                    key="editor_transferencias_ibkr"
-                )
-
-                if st.button("💾 Guardar transferencias a IBKR", type="primary"):
-                    _df_tf_save = _ed_tf_ibkr.copy()
-                    _df_tf_save = _df_tf_save[_df_tf_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-
-                    if not _df_tf_save.empty:
-                        _df_tf_save["id"] = _df_tf_save["id"].apply(
-                            lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-                        )
-                        _df_tf_save["fecha"] = pd.to_datetime(_df_tf_save["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                        _df_tf_save["cuenta_origen_nombre"] = _df_tf_save["cuenta_origen_nombre"].fillna(_tf_ncp).astype(str)
-                        _df_tf_save["cuenta_origen_id"] = _df_tf_save["cuenta_origen_nombre"].map(lambda n: _tf_ctas.get(str(n), "principal"))
-                        _df_tf_save["monto_origen"] = pd.to_numeric(_df_tf_save["monto_origen"], errors="coerce").fillna(0.0)
-                        _df_tf_save["moneda_monto"] = _df_tf_save["moneda_monto"].fillna("PEN").astype(str).str.upper()
-                        _df_tf_save.loc[~_df_tf_save["moneda_monto"].isin(["PEN", "USD"]), "moneda_monto"] = "PEN"
-                        _df_tf_save["tc_usd_pen"] = pd.to_numeric(_df_tf_save["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
-                        _df_tf_save["tc_usd_pen"] = _df_tf_save["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
-                        _df_tf_save["monto_usd"] = _df_tf_save.apply(
-                            lambda r: float(r["monto_origen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]) / float(r["tc_usd_pen"]),
-                            axis=1
-                        )
-                        _df_tf_save["monto_pen"] = _df_tf_save.apply(
-                            lambda r: float(r["monto_origen"]) * float(r["tc_usd_pen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]),
-                            axis=1
-                        )
-                        _df_tf_save["comision_monto"] = pd.to_numeric(_df_tf_save["comision_monto"], errors="coerce").fillna(0.0)
-                        _df_tf_save["comision_moneda"] = _df_tf_save["comision_moneda"].fillna("PEN").astype(str).str.upper()
-                        _df_tf_save.loc[~_df_tf_save["comision_moneda"].isin(["PEN", "USD"]), "comision_moneda"] = "PEN"
-                        _df_tf_save["comision_pen"] = _df_tf_save.apply(
-                            lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
-                            axis=1
-                        )
-                        _df_tf_save["total_debitado_pen"] = _df_tf_save["monto_pen"] + _df_tf_save["comision_pen"]
-                        _df_tf_save["descripcion"] = _df_tf_save["descripcion"].fillna("").astype(str)
-                        _df_tf_save = _df_tf_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                        st.session_state["ibkr_transferencias"] = _df_tf_save.to_dict("records")
-                    else:
-                        st.session_state["ibkr_transferencias"] = []
-
-                    guardar("ibkr_transferencias")
-                    st.success("✅ Transferencias a IBKR actualizadas.")
-                    st.rerun()
-        else:
-            st.info("Todavía no hay cash agregado a IBKR desde cuentas locales.")
-
-        # Recalcular cash después de normalizar transferencias y movimientos anteriores.
-        _df_cash_ibkr = _normalizar_cash_ibkr()
-        _total_cash_manual_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
-        _total_cash_transferencias_ibkr_usd = calcular_total_transferencias_ibkr_usd()
-        _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
-        st.markdown("#### 2️⃣ Comprar acciones o ETFs usando el cash IBKR")
-        st.info(f"Cash IBKR disponible para invertir: **US$ {_total_cash_ibkr_usd:,.2f}**")
-# Paso 2: compra de acciones o ETFs
-        # ──────────────────────────────────────────────
-        with st.form("form_inversion_ibkr_portfolio", clear_on_submit=True):
-            st.markdown("##### ➕ Nueva compra usando cash IBKR")
-
-            _iv1, _iv2, _iv3 = st.columns(3)
-
-            with _iv1:
-                _inv_fecha = st.date_input(
-                    "📅 Fecha de compra",
-                    value=hoy_peru,
-                    key="fecha_compra_ibkr_portfolio"
-                )
-                _inv_ticker_raw = st.text_input(
-                    "Ticker",
-                    placeholder="Ej.: VOO, SCCO, GLD, CCOEY, MSFT",
-                    key="ticker_compra_ibkr_portfolio"
-                )
-                _inv_broker = st.selectbox(
-                    "Broker",
-                    ["IBKR"],
-                    key="broker_compra_ibkr_portfolio"
-                )
-
-            with _iv2:
-                _inv_nombre_raw = st.text_input(
-                    "Nombre del activo",
-                    placeholder="Ej.: Vanguard S&P 500 ETF",
-                    key="nombre_compra_ibkr_portfolio"
-                )
-                _inv_tipo = st.selectbox(
-                    "Tipo",
-                    ["ETF", "Accion", "ADR", "Fondo", "Otro"],
-                    key="tipo_compra_ibkr_portfolio"
-                )
-                _inv_source_symbol_raw = st.text_input(
-                    "Source symbol Yahoo",
-                    placeholder="Déjalo vacío si es igual al ticker",
-                    key="source_symbol_compra_ibkr_portfolio"
-                )
-
-            with _iv3:
-                _inv_cantidad = st.number_input(
-                    "Cantidad de acciones/participaciones",
-                    min_value=0.0,
-                    step=0.0001,
-                    format="%.4f",
-                    key="cantidad_compra_ibkr_portfolio"
-                )
-                _inv_monto_usd = st.number_input(
-                    "Monto invertido total (USD)",
-                    min_value=0.0,
-                    step=10.0,
-                    format="%.2f",
-                    key="monto_compra_ibkr_portfolio"
-                )
-                _inv_moneda = st.selectbox(
-                    "Moneda",
-                    ["USD"],
-                    key="moneda_compra_ibkr_portfolio"
-                )
-                st.caption("Esta compra se descontará automáticamente del cash IBKR para evitar doble conteo.")
-                _inv_descontar_cash = True
-
-            if st.form_submit_button("➕ Registrar compra IBKR", use_container_width=True, type="primary"):
-                _inv_ticker = str(_inv_ticker_raw or "").upper().strip()
-                _inv_nombre = str(_inv_nombre_raw or "").strip()
-                _inv_source_symbol = str(_inv_source_symbol_raw or "").strip()
-
-                if not _inv_ticker:
-                    st.warning("Debes ingresar un ticker.")
-                elif _inv_cantidad <= 0 or _inv_monto_usd <= 0:
-                    st.warning("Debes ingresar una cantidad y un monto invertido mayor a cero.")
-                elif _inv_monto_usd > (_total_cash_ibkr_usd + 0.01):
-                    st.warning(
-                        f"Cash IBKR insuficiente. Tienes US$ {_total_cash_ibkr_usd:,.2f} disponibles "
-                        f"y la compra requiere US$ {_inv_monto_usd:,.2f}. Primero agrega cash en el paso 1."
-                    )
-                else:
-                    _nombre_catalogo = obtener_nombre_instrumento_ibkr(_inv_ticker, _df_catalogo_ibkr)
-                    _symbol_catalogo = obtener_source_symbol_ibkr(_inv_ticker, _df_catalogo_ibkr)
-
-                    if not _inv_nombre:
-                        _inv_nombre = _nombre_catalogo if _nombre_catalogo != _inv_ticker else _inv_ticker
-
-                    if not _inv_source_symbol:
-                        _inv_source_symbol = _symbol_catalogo if _symbol_catalogo else _inv_ticker
-
-                    try:
-                        upsert_instrumento_ibkr(
-                            ticker=_inv_ticker,
-                            nombre=_inv_nombre,
-                            tipo=_inv_tipo,
-                            moneda=_inv_moneda,
-                            source_symbol=_inv_source_symbol,
-                            fuente_precio="Yahoo Finance",
-                            activo=True,
-                        )
-                    except Exception as _e:
-                        st.warning(
-                            "La compra se registrará, pero no se pudo actualizar el catálogo CSV "
-                            f"para Airflow: {_e}"
-                        )
-
-                    _precio_promedio = _inv_monto_usd / _inv_cantidad
-
-                    st.session_state["inversiones_ibkr"].append({
-                        "id": str(uuid.uuid4()),
-                        "fecha_compra": _inv_fecha.isoformat(),
-                        "ticker": _inv_ticker,
-                        "nombre": _inv_nombre,
-                        "broker": _inv_broker,
-                        "cantidad": float(_inv_cantidad),
-                        "monto_invertido_usd": float(_inv_monto_usd),
-                        "precio_promedio_compra_usd": float(_precio_promedio),
-                        "moneda": _inv_moneda,
-                    })
-
-                    guardar("inversiones_ibkr")
-
-                    if _inv_descontar_cash:
-                        st.session_state["ibkr_cash_movimientos"].append({
-                            "id": str(uuid.uuid4()),
-                            "fecha": _inv_fecha.isoformat(),
-                            "tipo_movimiento": "Retiro / uso de cash",
-                            "descripcion": f"Uso de cash para compra {_inv_ticker}",
-                            "monto_usd": -float(_inv_monto_usd),
-                        })
-                        guardar("ibkr_cash_movimientos")
-
-                    st.success(
-                        f"✅ Compra registrada. {_inv_ticker} quedó agregado al catálogo si era nuevo. "
-                        "El monto invertido fue descontado automáticamente del cash IBKR. "
-                        "La app intentará mostrar precio vía Yahoo; ejecuta ./run_daily_finance_dags.sh para consolidarlo por Airflow."
-                    )
-                    st.rerun()
-
-        # ──────────────────────────────────────────────
-        # Paso 3: historial y ajustes de cash IBKR
-        # ──────────────────────────────────────────────
-        with st.expander("🧾 3️⃣ Historial y ajustes de cash IBKR", expanded=False):
+        with st.expander("1️⃣ Agregar cash a IBKR", expanded=False):
             st.caption(
-                "Aquí puedes revisar el cash generado por transferencias, los descuentos automáticos por compras "
-                "y hacer ajustes manuales solo si necesitas cuadrar con el saldo real de IBKR."
+                "Primero registra el dinero que sale de una cuenta local y llega como cash USD a IBKR. "
+                "Puedes ingresar el monto enviado en soles o dólares, y la comisión en soles o dólares."
             )
 
-            with st.form("form_cash_ibkr", clear_on_submit=True):
-                _cash_c1, _cash_c2, _cash_c3 = st.columns(3)
+            _tf_ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+            _tf_ctas = {_tf_ncp: "principal"}
+            for _tf_c in st.session_state.get("cuentas_ahorro", []):
+                _tf_nombre = str(_tf_c.get("nombre", "")).strip()
+                if _tf_nombre and "IBKR" not in _tf_nombre.upper():
+                    _tf_ctas[_tf_nombre] = _tf_c.get("id")
 
-                with _cash_c1:
-                    _cash_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_cash_ibkr")
-                    _cash_tipo = st.selectbox(
-                        "Tipo de movimiento",
-                        ["Depósito", "Retiro / uso de cash"],
-                        key="tipo_cash_ibkr"
+            _tf_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", _tc_default))
+
+            with st.form("form_transferencia_a_ibkr", clear_on_submit=True):
+                st.markdown("##### ➕ Nueva transferencia / depósito a IBKR")
+                _tf1, _tf2, _tf3 = st.columns(3)
+
+                with _tf1:
+                    _tf_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_transferencia_ibkr")
+                    _tf_origen_nombre = st.selectbox(
+                        "Cuenta origen",
+                        list(_tf_ctas.keys()),
+                        key="cuenta_origen_transferencia_ibkr"
                     )
 
-                with _cash_c2:
-                    _cash_monto = st.number_input(
-                        "Monto USD",
+                with _tf2:
+                    _tf_moneda_monto = st.selectbox(
+                        "Moneda del monto enviado",
+                        ["PEN", "USD"],
+                        key="moneda_monto_transferencia_ibkr",
+                        help="Elige PEN si retiras soles de tu cuenta; elige USD si ya envías dólares."
+                    )
+                    _tf_monto_origen = st.number_input(
+                        "Monto enviado a IBKR",
                         min_value=0.0,
-                        step=10.0,
+                        step=100.0,
                         format="%.2f",
-                        key="monto_cash_ibkr"
+                        key="monto_origen_transferencia_ibkr",
+                        help="Monto bruto que llegará a IBKR como cash, antes de registrar la comisión."
+                    )
+                    _tf_tc = st.number_input(
+                        "TC USD → PEN usado",
+                        min_value=1.0,
+                        step=0.01,
+                        value=round(_tf_tc_default, 4),
+                        format="%.4f",
+                        key="tc_transferencia_ibkr"
                     )
 
-                with _cash_c3:
-                    _cash_desc = st.text_input(
-                        "Descripción",
-                        placeholder="Ej.: Depósito IBKR, cash pendiente de invertir",
-                        key="descripcion_cash_ibkr"
+                with _tf3:
+                    _tf_comision_monto = st.number_input(
+                        "Comisión",
+                        min_value=0.0,
+                        step=1.0,
+                        format="%.2f",
+                        key="comision_transferencia_ibkr"
+                    )
+                    _tf_comision_moneda = st.selectbox(
+                        "Moneda comisión",
+                        ["PEN", "USD"],
+                        key="moneda_comision_transferencia_ibkr"
                     )
 
-                if st.form_submit_button("➕ Registrar ajuste manual de cash", use_container_width=True, type="primary"):
-                    if _cash_monto <= 0:
-                        st.warning("Ingresa un monto mayor a cero.")
+                _tf_desc = st.text_input(
+                    "Descripción / referencia",
+                    placeholder="Ej.: Transferencia BCP → IBKR, wire fee, depósito para invertir",
+                    key="descripcion_transferencia_ibkr"
+                )
+
+                if _tf_moneda_monto == "PEN":
+                    _tf_monto_pen = float(_tf_monto_origen)
+                    _tf_monto_usd = float(_tf_monto_origen) / float(_tf_tc) if _tf_tc > 0 else 0.0
+                else:
+                    _tf_monto_usd = float(_tf_monto_origen)
+                    _tf_monto_pen = float(_tf_monto_origen) * float(_tf_tc)
+
+                _tf_comision_pen = float(_tf_comision_monto) if _tf_comision_moneda == "PEN" else float(_tf_comision_monto) * float(_tf_tc)
+                _tf_total_debitado_pen = float(_tf_monto_pen) + float(_tf_comision_pen)
+
+                st.info(
+                    f"Vista previa: se descontará **S/ {_tf_total_debitado_pen:,.2f}** de {_tf_origen_nombre} "
+                    f"y se agregará **US$ {_tf_monto_usd:,.2f}** al cash IBKR. "
+                    f"Comisión equivalente: S/ {_tf_comision_pen:,.2f}."
+                )
+
+                if st.form_submit_button("➕ Registrar cash en IBKR", use_container_width=True, type="primary"):
+                    if _tf_monto_origen <= 0:
+                        st.warning("Ingresa un monto enviado a IBKR mayor a cero.")
+                    elif _tf_tc <= 0:
+                        st.warning("El tipo de cambio debe ser mayor a cero.")
                     else:
-                        _cash_monto_signed = float(_cash_monto)
-                        if _cash_tipo == "Retiro / uso de cash":
-                            _cash_monto_signed = -_cash_monto_signed
-
-                        st.session_state["ibkr_cash_movimientos"].append({
+                        st.session_state["ibkr_transferencias"].append({
                             "id": str(uuid.uuid4()),
-                            "fecha": _cash_fecha.isoformat(),
-                            "tipo_movimiento": _cash_tipo,
-                            "descripcion": _cash_desc,
-                            "monto_usd": _cash_monto_signed,
+                            "fecha": _tf_fecha.isoformat(),
+                            "cuenta_origen_id": _tf_ctas.get(_tf_origen_nombre, "principal"),
+                            "cuenta_origen_nombre": _tf_origen_nombre,
+                            "monto_origen": float(_tf_monto_origen),
+                            "moneda_monto": _tf_moneda_monto,
+                            "monto_pen": float(_tf_monto_pen),
+                            "tc_usd_pen": float(_tf_tc),
+                            "monto_usd": float(_tf_monto_usd),
+                            "comision_monto": float(_tf_comision_monto),
+                            "comision_moneda": _tf_comision_moneda,
+                            "comision_pen": float(_tf_comision_pen),
+                            "total_debitado_pen": float(_tf_total_debitado_pen),
+                            "descripcion": _tf_desc,
                         })
-                        guardar("ibkr_cash_movimientos")
-                        st.success("✅ Movimiento de cash IBKR registrado.")
+                        guardar("ibkr_transferencias")
+                        st.success("✅ Cash registrado. El monto USD ya se suma al cash IBKR y el total debitado se descuenta de la cuenta origen.")
                         st.rerun()
 
+            _df_tf_ibkr = pd.DataFrame(st.session_state.get("ibkr_transferencias", []))
+            if not _df_tf_ibkr.empty:
+                for _col, _default in {
+                    "id": "",
+                    "fecha": hoy_peru.isoformat(),
+                    "cuenta_origen_id": "principal",
+                    "cuenta_origen_nombre": _tf_ncp,
+                    "monto_origen": 0.0,
+                    "moneda_monto": "PEN",
+                    "monto_pen": 0.0,
+                    "tc_usd_pen": _tf_tc_default,
+                    "monto_usd": 0.0,
+                    "comision_monto": 0.0,
+                    "comision_moneda": "PEN",
+                    "comision_pen": 0.0,
+                    "total_debitado_pen": 0.0,
+                    "descripcion": "",
+                }.items():
+                    if _col not in _df_tf_ibkr.columns:
+                        _df_tf_ibkr[_col] = _default
+
+                # Compatibilidad con transferencias antiguas registradas solo en PEN.
+                _df_tf_ibkr["monto_origen"] = pd.to_numeric(_df_tf_ibkr["monto_origen"], errors="coerce")
+                _df_tf_ibkr["monto_pen"] = pd.to_numeric(_df_tf_ibkr["monto_pen"], errors="coerce").fillna(0.0)
+                _df_tf_ibkr["monto_origen"] = _df_tf_ibkr["monto_origen"].fillna(_df_tf_ibkr["monto_pen"])
+                _mask_monto_origen_vacio = (_df_tf_ibkr["monto_origen"] <= 0) & (_df_tf_ibkr["monto_pen"] > 0)
+                _df_tf_ibkr.loc[_mask_monto_origen_vacio, "monto_origen"] = _df_tf_ibkr.loc[_mask_monto_origen_vacio, "monto_pen"]
+                _df_tf_ibkr["moneda_monto"] = _df_tf_ibkr["moneda_monto"].fillna("PEN").astype(str).str.upper()
+                _df_tf_ibkr.loc[~_df_tf_ibkr["moneda_monto"].isin(["PEN", "USD"]), "moneda_monto"] = "PEN"
+
+                _df_tf_ibkr["id"] = _df_tf_ibkr["id"].apply(
+                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                )
+                _df_tf_ibkr["fecha"] = pd.to_datetime(_df_tf_ibkr["fecha"], errors="coerce").dt.date
+                _df_tf_ibkr["tc_usd_pen"] = pd.to_numeric(_df_tf_ibkr["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
+                _df_tf_ibkr["tc_usd_pen"] = _df_tf_ibkr["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
+                _df_tf_ibkr["monto_usd"] = _df_tf_ibkr.apply(
+                    lambda r: float(r["monto_origen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]) / float(r["tc_usd_pen"]),
+                    axis=1
+                )
+                _df_tf_ibkr["monto_pen"] = _df_tf_ibkr.apply(
+                    lambda r: float(r["monto_origen"]) * float(r["tc_usd_pen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]),
+                    axis=1
+                )
+                _df_tf_ibkr["comision_monto"] = pd.to_numeric(_df_tf_ibkr["comision_monto"], errors="coerce").fillna(0.0)
+                _df_tf_ibkr["comision_moneda"] = _df_tf_ibkr["comision_moneda"].fillna("PEN").astype(str).str.upper()
+                _df_tf_ibkr.loc[~_df_tf_ibkr["comision_moneda"].isin(["PEN", "USD"]), "comision_moneda"] = "PEN"
+                _df_tf_ibkr["comision_pen"] = _df_tf_ibkr.apply(
+                    lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
+                    axis=1
+                )
+                _df_tf_ibkr["total_debitado_pen"] = _df_tf_ibkr["monto_pen"] + _df_tf_ibkr["comision_pen"]
+                _df_tf_ibkr["descripcion"] = _df_tf_ibkr["descripcion"].fillna("").astype(str)
+                _df_tf_ibkr["Eliminar"] = False
+
+                _df_tf_ibkr = _df_tf_ibkr[[
+                    "id", "fecha", "cuenta_origen_id", "cuenta_origen_nombre",
+                    "monto_origen", "moneda_monto", "tc_usd_pen", "monto_usd", "monto_pen",
+                    "comision_monto", "comision_moneda", "comision_pen", "total_debitado_pen",
+                    "descripcion", "Eliminar"
+                ]]
+
+                _cash_tf_usd = float(_df_tf_ibkr["monto_usd"].sum())
+                _debito_tf_pen = float(_df_tf_ibkr["total_debitado_pen"].sum())
+                _metric_tf1, _metric_tf2, _metric_tf3 = st.columns(3)
+                _metric_tf1.metric("Cash agregado por transferencias", f"US$ {_cash_tf_usd:,.2f}")
+                _metric_tf2.metric("Total debitado de cuentas", f"S/ {_debito_tf_pen:,.0f}")
+                _metric_tf3.metric("TC actual configuración", f"{_tf_tc_default:.4f}")
+
+                with st.expander("🧾 Historial de cash agregado desde cuentas", expanded=False):
+                    st.caption("Puedes editar una transferencia; al guardar se recalculan USD, comisión equivalente y total debitado.")
+                    _ed_tf_ibkr = st.data_editor(
+                        _df_tf_ibkr,
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="dynamic",
+                        height=min(38 * len(_df_tf_ibkr) + 46, 320),
+                        column_config={
+                            "id": None,
+                            "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
+                            "cuenta_origen_id": None,
+                            "cuenta_origen_nombre": st.column_config.SelectboxColumn("Cuenta origen", options=list(_tf_ctas.keys()), width="medium"),
+                            "monto_origen": st.column_config.NumberColumn("Monto enviado", min_value=0.0, step=100.0, format="%.2f", width="small"),
+                            "moneda_monto": st.column_config.SelectboxColumn("Moneda monto", options=["PEN", "USD"], width="small"),
+                            "tc_usd_pen": st.column_config.NumberColumn("TC", min_value=1.0, step=0.01, format="%.4f", width="small"),
+                            "monto_usd": st.column_config.NumberColumn("Cash IBKR USD", format="US$ %.2f", width="small", disabled=True),
+                            "monto_pen": st.column_config.NumberColumn("Monto equiv. PEN", format="S/ %.2f", width="small", disabled=True),
+                            "comision_monto": st.column_config.NumberColumn("Comisión", min_value=0.0, step=1.0, format="%.2f", width="small"),
+                            "comision_moneda": st.column_config.SelectboxColumn("Moneda comisión", options=["PEN", "USD"], width="small"),
+                            "comision_pen": st.column_config.NumberColumn("Comisión PEN", format="S/ %.2f", width="small", disabled=True),
+                            "total_debitado_pen": st.column_config.NumberColumn("Total debitado PEN", format="S/ %.2f", width="small", disabled=True),
+                            "descripcion": st.column_config.TextColumn("Descripción", width="large"),
+                            "Eliminar": st.column_config.CheckboxColumn("🗑"),
+                        },
+                        key="editor_transferencias_ibkr"
+                    )
+
+                    if st.button("💾 Guardar transferencias a IBKR", type="primary"):
+                        _df_tf_save = _ed_tf_ibkr.copy()
+                        _df_tf_save = _df_tf_save[_df_tf_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+
+                        if not _df_tf_save.empty:
+                            _df_tf_save["id"] = _df_tf_save["id"].apply(
+                                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                            )
+                            _df_tf_save["fecha"] = pd.to_datetime(_df_tf_save["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                            _df_tf_save["cuenta_origen_nombre"] = _df_tf_save["cuenta_origen_nombre"].fillna(_tf_ncp).astype(str)
+                            _df_tf_save["cuenta_origen_id"] = _df_tf_save["cuenta_origen_nombre"].map(lambda n: _tf_ctas.get(str(n), "principal"))
+                            _df_tf_save["monto_origen"] = pd.to_numeric(_df_tf_save["monto_origen"], errors="coerce").fillna(0.0)
+                            _df_tf_save["moneda_monto"] = _df_tf_save["moneda_monto"].fillna("PEN").astype(str).str.upper()
+                            _df_tf_save.loc[~_df_tf_save["moneda_monto"].isin(["PEN", "USD"]), "moneda_monto"] = "PEN"
+                            _df_tf_save["tc_usd_pen"] = pd.to_numeric(_df_tf_save["tc_usd_pen"], errors="coerce").fillna(_tf_tc_default)
+                            _df_tf_save["tc_usd_pen"] = _df_tf_save["tc_usd_pen"].apply(lambda x: x if x > 0 else _tf_tc_default)
+                            _df_tf_save["monto_usd"] = _df_tf_save.apply(
+                                lambda r: float(r["monto_origen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]) / float(r["tc_usd_pen"]),
+                                axis=1
+                            )
+                            _df_tf_save["monto_pen"] = _df_tf_save.apply(
+                                lambda r: float(r["monto_origen"]) * float(r["tc_usd_pen"]) if r["moneda_monto"] == "USD" else float(r["monto_origen"]),
+                                axis=1
+                            )
+                            _df_tf_save["comision_monto"] = pd.to_numeric(_df_tf_save["comision_monto"], errors="coerce").fillna(0.0)
+                            _df_tf_save["comision_moneda"] = _df_tf_save["comision_moneda"].fillna("PEN").astype(str).str.upper()
+                            _df_tf_save.loc[~_df_tf_save["comision_moneda"].isin(["PEN", "USD"]), "comision_moneda"] = "PEN"
+                            _df_tf_save["comision_pen"] = _df_tf_save.apply(
+                                lambda r: float(r["comision_monto"]) if r["comision_moneda"] == "PEN" else float(r["comision_monto"]) * float(r["tc_usd_pen"]),
+                                axis=1
+                            )
+                            _df_tf_save["total_debitado_pen"] = _df_tf_save["monto_pen"] + _df_tf_save["comision_pen"]
+                            _df_tf_save["descripcion"] = _df_tf_save["descripcion"].fillna("").astype(str)
+                            _df_tf_save = _df_tf_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
+                            st.session_state["ibkr_transferencias"] = _df_tf_save.to_dict("records")
+                        else:
+                            st.session_state["ibkr_transferencias"] = []
+
+                        guardar("ibkr_transferencias")
+                        st.success("✅ Transferencias a IBKR actualizadas.")
+                        st.rerun()
+            else:
+                st.info("Todavía no hay cash agregado a IBKR desde cuentas locales.")
+
+            # Recalcular cash después de normalizar transferencias y movimientos anteriores.
             _df_cash_ibkr = _normalizar_cash_ibkr()
             _total_cash_manual_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
             _total_cash_transferencias_ibkr_usd = calcular_total_transferencias_ibkr_usd()
             _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
-            st.metric("Cash disponible IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-            st.caption(f"Transferencias a IBKR: US$ {_total_cash_transferencias_ibkr_usd:,.2f} | Movimientos manuales: US$ {_total_cash_manual_ibkr_usd:,.2f}")
+        with st.expander("2️⃣ Comprar acciones / ETFs", expanded=False):
+            st.info(f"Cash IBKR disponible para invertir: **US$ {_total_cash_ibkr_usd:,.2f}**")
+    # Paso 2: compra de acciones o ETFs
+            # ──────────────────────────────────────────────
+            with st.form("form_inversion_ibkr_portfolio", clear_on_submit=True):
+                st.markdown("##### ➕ Nueva compra usando cash IBKR")
 
-            if not _df_cash_ibkr.empty:
-                _df_cash_show = _df_cash_ibkr.copy()
-                _df_cash_show["Eliminar"] = False
+                _iv1, _iv2, _iv3 = st.columns(3)
 
-                _ed_cash = st.data_editor(
-                    _df_cash_show,
+                with _iv1:
+                    _inv_fecha = st.date_input(
+                        "📅 Fecha de compra",
+                        value=hoy_peru,
+                        key="fecha_compra_ibkr_portfolio"
+                    )
+                    _inv_ticker_raw = st.text_input(
+                        "Ticker",
+                        placeholder="Ej.: VOO, SCCO, GLD, CCOEY, MSFT",
+                        key="ticker_compra_ibkr_portfolio"
+                    )
+                    _inv_broker = st.selectbox(
+                        "Broker",
+                        ["IBKR"],
+                        key="broker_compra_ibkr_portfolio"
+                    )
+
+                with _iv2:
+                    _inv_nombre_raw = st.text_input(
+                        "Nombre del activo",
+                        placeholder="Ej.: Vanguard S&P 500 ETF",
+                        key="nombre_compra_ibkr_portfolio"
+                    )
+                    _inv_tipo = st.selectbox(
+                        "Tipo",
+                        ["ETF", "Accion", "ADR", "Fondo", "Otro"],
+                        key="tipo_compra_ibkr_portfolio"
+                    )
+                    _inv_source_symbol_raw = st.text_input(
+                        "Source symbol Yahoo",
+                        placeholder="Déjalo vacío si es igual al ticker",
+                        key="source_symbol_compra_ibkr_portfolio"
+                    )
+
+                with _iv3:
+                    _inv_cantidad = st.number_input(
+                        "Cantidad de acciones/participaciones",
+                        min_value=0.0,
+                        step=0.0001,
+                        format="%.4f",
+                        key="cantidad_compra_ibkr_portfolio"
+                    )
+                    _inv_monto_usd = st.number_input(
+                        "Monto invertido total (USD)",
+                        min_value=0.0,
+                        step=10.0,
+                        format="%.2f",
+                        key="monto_compra_ibkr_portfolio"
+                    )
+                    _inv_moneda = st.selectbox(
+                        "Moneda",
+                        ["USD"],
+                        key="moneda_compra_ibkr_portfolio"
+                    )
+                    st.caption("Esta compra se descontará automáticamente del cash IBKR para evitar doble conteo.")
+                    _inv_descontar_cash = True
+
+                if st.form_submit_button("➕ Registrar compra IBKR", use_container_width=True, type="primary"):
+                    _inv_ticker = str(_inv_ticker_raw or "").upper().strip()
+                    _inv_nombre = str(_inv_nombre_raw or "").strip()
+                    _inv_source_symbol = str(_inv_source_symbol_raw or "").strip()
+
+                    if not _inv_ticker:
+                        st.warning("Debes ingresar un ticker.")
+                    elif _inv_cantidad <= 0 or _inv_monto_usd <= 0:
+                        st.warning("Debes ingresar una cantidad y un monto invertido mayor a cero.")
+                    elif _inv_monto_usd > (_total_cash_ibkr_usd + 0.01):
+                        st.warning(
+                            f"Cash IBKR insuficiente. Tienes US$ {_total_cash_ibkr_usd:,.2f} disponibles "
+                            f"y la compra requiere US$ {_inv_monto_usd:,.2f}. Primero agrega cash en el paso 1."
+                        )
+                    else:
+                        _nombre_catalogo = obtener_nombre_instrumento_ibkr(_inv_ticker, _df_catalogo_ibkr)
+                        _symbol_catalogo = obtener_source_symbol_ibkr(_inv_ticker, _df_catalogo_ibkr)
+
+                        if not _inv_nombre:
+                            _inv_nombre = _nombre_catalogo if _nombre_catalogo != _inv_ticker else _inv_ticker
+
+                        if not _inv_source_symbol:
+                            _inv_source_symbol = _symbol_catalogo if _symbol_catalogo else _inv_ticker
+
+                        try:
+                            upsert_instrumento_ibkr(
+                                ticker=_inv_ticker,
+                                nombre=_inv_nombre,
+                                tipo=_inv_tipo,
+                                moneda=_inv_moneda,
+                                source_symbol=_inv_source_symbol,
+                                fuente_precio="Yahoo Finance",
+                                activo=True,
+                            )
+                        except Exception as _e:
+                            st.warning(
+                                "La compra se registrará, pero no se pudo actualizar el catálogo CSV "
+                                f"para Airflow: {_e}"
+                            )
+
+                        _precio_promedio = _inv_monto_usd / _inv_cantidad
+
+                        st.session_state["inversiones_ibkr"].append({
+                            "id": str(uuid.uuid4()),
+                            "fecha_compra": _inv_fecha.isoformat(),
+                            "ticker": _inv_ticker,
+                            "nombre": _inv_nombre,
+                            "broker": _inv_broker,
+                            "cantidad": float(_inv_cantidad),
+                            "monto_invertido_usd": float(_inv_monto_usd),
+                            "precio_promedio_compra_usd": float(_precio_promedio),
+                            "moneda": _inv_moneda,
+                        })
+
+                        guardar("inversiones_ibkr")
+
+                        if _inv_descontar_cash:
+                            st.session_state["ibkr_cash_movimientos"].append({
+                                "id": str(uuid.uuid4()),
+                                "fecha": _inv_fecha.isoformat(),
+                                "tipo_movimiento": "Retiro / uso de cash",
+                                "descripcion": f"Uso de cash para compra {_inv_ticker}",
+                                "monto_usd": -float(_inv_monto_usd),
+                            })
+                            guardar("ibkr_cash_movimientos")
+
+                        st.success(
+                            f"✅ Compra registrada. {_inv_ticker} quedó agregado al catálogo si era nuevo. "
+                            "El monto invertido fue descontado automáticamente del cash IBKR. "
+                            "La app intentará mostrar precio vía Yahoo; ejecuta ./run_daily_finance_dags.sh para consolidarlo por Airflow."
+                        )
+                        st.rerun()
+
+            # ──────────────────────────────────────────────
+            # Paso 3: historial y ajustes de cash IBKR
+            # ──────────────────────────────────────────────
+            with st.expander("🧾 3️⃣ Historial y ajustes de cash IBKR", expanded=False):
+                st.caption(
+                    "Aquí puedes revisar el cash generado por transferencias, los descuentos automáticos por compras "
+                    "y hacer ajustes manuales solo si necesitas cuadrar con el saldo real de IBKR."
+                )
+
+                with st.form("form_cash_ibkr", clear_on_submit=True):
+                    _cash_c1, _cash_c2, _cash_c3 = st.columns(3)
+
+                    with _cash_c1:
+                        _cash_fecha = st.date_input("Fecha", value=hoy_peru, key="fecha_cash_ibkr")
+                        _cash_tipo = st.selectbox(
+                            "Tipo de movimiento",
+                            ["Depósito", "Retiro / uso de cash"],
+                            key="tipo_cash_ibkr"
+                        )
+
+                    with _cash_c2:
+                        _cash_monto = st.number_input(
+                            "Monto USD",
+                            min_value=0.0,
+                            step=10.0,
+                            format="%.2f",
+                            key="monto_cash_ibkr"
+                        )
+
+                    with _cash_c3:
+                        _cash_desc = st.text_input(
+                            "Descripción",
+                            placeholder="Ej.: Depósito IBKR, cash pendiente de invertir",
+                            key="descripcion_cash_ibkr"
+                        )
+
+                    if st.form_submit_button("➕ Registrar ajuste manual de cash", use_container_width=True, type="primary"):
+                        if _cash_monto <= 0:
+                            st.warning("Ingresa un monto mayor a cero.")
+                        else:
+                            _cash_monto_signed = float(_cash_monto)
+                            if _cash_tipo == "Retiro / uso de cash":
+                                _cash_monto_signed = -_cash_monto_signed
+
+                            st.session_state["ibkr_cash_movimientos"].append({
+                                "id": str(uuid.uuid4()),
+                                "fecha": _cash_fecha.isoformat(),
+                                "tipo_movimiento": _cash_tipo,
+                                "descripcion": _cash_desc,
+                                "monto_usd": _cash_monto_signed,
+                            })
+                            guardar("ibkr_cash_movimientos")
+                            st.success("✅ Movimiento de cash IBKR registrado.")
+                            st.rerun()
+
+                _df_cash_ibkr = _normalizar_cash_ibkr()
+                _total_cash_manual_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
+                _total_cash_transferencias_ibkr_usd = calcular_total_transferencias_ibkr_usd()
+                _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
+                st.metric("Cash disponible IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
+                st.caption(f"Transferencias a IBKR: US$ {_total_cash_transferencias_ibkr_usd:,.2f} | Movimientos manuales: US$ {_total_cash_manual_ibkr_usd:,.2f}")
+
+                if not _df_cash_ibkr.empty:
+                    _df_cash_show = _df_cash_ibkr.copy()
+                    _df_cash_show["Eliminar"] = False
+
+                    _ed_cash = st.data_editor(
+                        _df_cash_show,
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="dynamic",
+                        height=min(38 * len(_df_cash_show) + 46, 280),
+                        column_config={
+                            "id": None,
+                            "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
+                            "tipo_movimiento": st.column_config.SelectboxColumn(
+                                "Tipo", options=["Depósito", "Retiro / uso de cash", "Ajuste"], width="medium"
+                            ),
+                            "descripcion": st.column_config.TextColumn("Descripción", width="large"),
+                            "monto_usd": st.column_config.NumberColumn(
+                                "Monto neto USD", step=10.0, format="US$ %.2f", width="small",
+                                help="Depósitos positivos. Retiros o uso de cash negativos."
+                            ),
+                            "Eliminar": st.column_config.CheckboxColumn("🗑"),
+                        },
+                        key="editor_cash_ibkr"
+                    )
+
+                    if st.button("💾 Guardar cash IBKR", type="primary"):
+                        _df_cash_save = _ed_cash.copy()
+                        _df_cash_save = _df_cash_save[_df_cash_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+
+                        if not _df_cash_save.empty:
+                            _df_cash_save["id"] = _df_cash_save["id"].apply(
+                                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                            )
+                            _df_cash_save["fecha"] = pd.to_datetime(
+                                _df_cash_save["fecha"], errors="coerce"
+                            ).dt.strftime("%Y-%m-%d")
+                            _df_cash_save["tipo_movimiento"] = _df_cash_save["tipo_movimiento"].fillna("Ajuste").astype(str)
+                            _df_cash_save["descripcion"] = _df_cash_save["descripcion"].fillna("").astype(str)
+                            _df_cash_save["monto_usd"] = pd.to_numeric(
+                                _df_cash_save["monto_usd"], errors="coerce"
+                            ).fillna(0.0)
+                            _df_cash_save = _df_cash_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
+                            st.session_state["ibkr_cash_movimientos"] = _df_cash_save.to_dict("records")
+                        else:
+                            st.session_state["ibkr_cash_movimientos"] = []
+
+                        guardar("ibkr_cash_movimientos")
+                        st.success("✅ Cash IBKR actualizado.")
+                        st.rerun()
+                else:
+                    if _total_cash_transferencias_ibkr_usd != 0:
+                        st.info("No hay movimientos manuales de cash. El cash actual proviene de transferencias a IBKR.")
+                    else:
+                        st.info("No hay cash IBKR registrado.")
+
+            # ──────────────────────────────────────────────
+            # Compras registradas
+            # ──────────────────────────────────────────────
+            _df_inv = pd.DataFrame(st.session_state.get("inversiones_ibkr", []))
+
+            if not _df_inv.empty:
+                # Normalizar columnas para registros antiguos o filas editadas.
+                for _col, _default in {
+                    "id": "",
+                    "fecha_compra": hoy_peru.isoformat(),
+                    "ticker": "VOO",
+                    "nombre": "",
+                    "broker": "IBKR",
+                    "cantidad": 0.0,
+                    "monto_invertido_usd": 0.0,
+                    "precio_promedio_compra_usd": 0.0,
+                    "moneda": "USD",
+                }.items():
+                    if _col not in _df_inv.columns:
+                        _df_inv[_col] = _default
+
+                _df_inv["id"] = _df_inv["id"].apply(
+                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                )
+                _df_inv["fecha_compra"] = pd.to_datetime(_df_inv["fecha_compra"], errors="coerce").dt.date
+                _df_inv["ticker"] = _df_inv["ticker"].fillna("VOO").astype(str).str.upper().str.strip()
+                _df_inv["nombre"] = _df_inv.apply(
+                    lambda r: str(r["nombre"]).strip()
+                    if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
+                    else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
+                    axis=1
+                )
+                _df_inv["broker"] = _df_inv["broker"].fillna("IBKR").astype(str)
+                _df_inv["moneda"] = _df_inv["moneda"].fillna("USD").astype(str)
+                _df_inv["cantidad"] = pd.to_numeric(_df_inv["cantidad"], errors="coerce").fillna(0.0)
+                _df_inv["monto_invertido_usd"] = pd.to_numeric(_df_inv["monto_invertido_usd"], errors="coerce").fillna(0.0)
+
+                _df_inv["precio_promedio_compra_usd"] = _df_inv.apply(
+                    lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
+                    axis=1
+                )
+
+                _df_inv = _df_inv.sort_values("fecha_compra", ascending=False).reset_index(drop=True)
+
+            with st.expander("📋 Compras registradas", expanded=False):
+                st.caption(
+                    "Puedes editar ticker, cantidad o monto. El precio promedio se recalcula al guardar. "
+                    "Si agregas un ticker nuevo, la app lo agrega automáticamente al catálogo."
+                )
+
+                _df_inv_show = _df_inv.copy()
+                _df_inv_show["Eliminar"] = False
+
+                _ed_inv = st.data_editor(
+                    _df_inv_show,
                     use_container_width=True,
                     hide_index=True,
                     num_rows="dynamic",
-                    height=min(38 * len(_df_cash_show) + 46, 280),
+                    height=min(38 * len(_df_inv_show) + 46, 360),
                     column_config={
                         "id": None,
-                        "fecha": st.column_config.DateColumn("Fecha", required=True, width="small"),
-                        "tipo_movimiento": st.column_config.SelectboxColumn(
-                            "Tipo", options=["Depósito", "Retiro / uso de cash", "Ajuste"], width="medium"
-                        ),
-                        "descripcion": st.column_config.TextColumn("Descripción", width="large"),
-                        "monto_usd": st.column_config.NumberColumn(
-                            "Monto neto USD", step=10.0, format="US$ %.2f", width="small",
-                            help="Depósitos positivos. Retiros o uso de cash negativos."
-                        ),
+                        "fecha_compra": st.column_config.DateColumn("📅 Fecha compra", required=True, width="small"),
+                        "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
+                        "nombre": st.column_config.TextColumn("Nombre", width="medium"),
+                        "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], required=True, width="small"),
+                        "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
+                        "monto_invertido_usd": st.column_config.NumberColumn("Invertido USD", min_value=0.0, step=10.0, format="US$ %.2f", width="small"),
+                        "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio promedio USD", disabled=True, format="US$ %.2f", width="small"),
+                        "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
                         "Eliminar": st.column_config.CheckboxColumn("🗑"),
                     },
-                    key="editor_cash_ibkr"
+                    key="editor_inversiones_ibkr"
                 )
 
-                if st.button("💾 Guardar cash IBKR", type="primary"):
-                    _df_cash_save = _ed_cash.copy()
-                    _df_cash_save = _df_cash_save[_df_cash_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+                if st.button("💾 Guardar cambios — Portafolio IBKR", type="primary"):
+                    _df_save = _ed_inv.copy()
+                    _df_save = _df_save[_df_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
 
-                    if not _df_cash_save.empty:
-                        _df_cash_save["id"] = _df_cash_save["id"].apply(
+                    if not _df_save.empty:
+                        _df_save["id"] = _df_save["id"].apply(
                             lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
                         )
-                        _df_cash_save["fecha"] = pd.to_datetime(
-                            _df_cash_save["fecha"], errors="coerce"
-                        ).dt.strftime("%Y-%m-%d")
-                        _df_cash_save["tipo_movimiento"] = _df_cash_save["tipo_movimiento"].fillna("Ajuste").astype(str)
-                        _df_cash_save["descripcion"] = _df_cash_save["descripcion"].fillna("").astype(str)
-                        _df_cash_save["monto_usd"] = pd.to_numeric(
-                            _df_cash_save["monto_usd"], errors="coerce"
+                        _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
+                        _df_save["ticker"] = _df_save["ticker"].fillna("").astype(str).str.upper().str.strip()
+                        _df_save["nombre"] = _df_save.apply(
+                            lambda r: str(r["nombre"]).strip()
+                            if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
+                            else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
+                            axis=1
+                        )
+                        _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
+                        _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
+                        _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
+                        _df_save["monto_invertido_usd"] = pd.to_numeric(
+                            _df_save["monto_invertido_usd"], errors="coerce"
                         ).fillna(0.0)
-                        _df_cash_save = _df_cash_save.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                        st.session_state["ibkr_cash_movimientos"] = _df_cash_save.to_dict("records")
+                        _df_save["precio_promedio_compra_usd"] = _df_save.apply(
+                            lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
+                            axis=1
+                        )
+
+                        _df_save = _df_save.dropna(subset=["fecha_compra"])
+                        _df_save = _df_save[
+                            (_df_save["ticker"] != "") &
+                            (_df_save["cantidad"] > 0) &
+                            (_df_save["monto_invertido_usd"] > 0)
+                        ].copy()
+
+                        # Asegurar que todo ticker comprado exista en el catálogo, sin sobreescribir
+                        # tipo/source_symbol si ya estaban correctamente definidos.
+                        for _, _row_inv in _df_save.iterrows():
+                            try:
+                                _ticker_tmp = str(_row_inv["ticker"]).upper().strip()
+                                _cat_match = _df_catalogo_ibkr[
+                                    _df_catalogo_ibkr["ticker"].astype(str).str.upper().str.strip() == _ticker_tmp
+                                ]
+
+                                if not _cat_match.empty:
+                                    _tipo_tmp = str(_cat_match.iloc[0].get("tipo", "Accion"))
+                                    _source_tmp = str(_cat_match.iloc[0].get("source_symbol", _ticker_tmp)).strip() or _ticker_tmp
+                                    _fuente_tmp = str(_cat_match.iloc[0].get("fuente_precio", "Yahoo Finance"))
+                                else:
+                                    _tipo_tmp = "Accion"
+                                    _source_tmp = _ticker_tmp
+                                    _fuente_tmp = "Yahoo Finance"
+
+                                upsert_instrumento_ibkr(
+                                    ticker=_ticker_tmp,
+                                    nombre=_row_inv["nombre"],
+                                    tipo=_tipo_tmp,
+                                    moneda=_row_inv["moneda"],
+                                    source_symbol=_source_tmp,
+                                    fuente_precio=_fuente_tmp,
+                                    activo=True,
+                                )
+                            except Exception:
+                                pass
+
+                        st.session_state["inversiones_ibkr"] = _df_save.sort_values(
+                            "fecha_compra", ascending=False
+                        ).to_dict("records")
                     else:
-                        st.session_state["ibkr_cash_movimientos"] = []
+                        st.session_state["inversiones_ibkr"] = []
 
-                    guardar("ibkr_cash_movimientos")
-                    st.success("✅ Cash IBKR actualizado.")
+                    guardar("inversiones_ibkr")
+                    st.success("✅ Portafolio IBKR actualizado.")
                     st.rerun()
-            else:
-                if _total_cash_transferencias_ibkr_usd != 0:
-                    st.info("No hay movimientos manuales de cash. El cash actual proviene de transferencias a IBKR.")
-                else:
-                    st.info("No hay cash IBKR registrado.")
 
-        # ──────────────────────────────────────────────
-        # Compras registradas
-        # ──────────────────────────────────────────────
-        _df_inv = pd.DataFrame(st.session_state.get("inversiones_ibkr", []))
+                # ──────────────────────────────────────────────
+                # Resumen por ticker y valorización
+                # ──────────────────────────────────────────────
+            with st.expander("📊 Resumen del portafolio + IBKR", expanded=True):
 
-        if not _df_inv.empty:
-            # Normalizar columnas para registros antiguos o filas editadas.
-            for _col, _default in {
-                "id": "",
-                "fecha_compra": hoy_peru.isoformat(),
-                "ticker": "VOO",
-                "nombre": "",
-                "broker": "IBKR",
-                "cantidad": 0.0,
-                "monto_invertido_usd": 0.0,
-                "precio_promedio_compra_usd": 0.0,
-                "moneda": "USD",
-            }.items():
-                if _col not in _df_inv.columns:
-                    _df_inv[_col] = _default
-
-            _df_inv["id"] = _df_inv["id"].apply(
-                lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-            )
-            _df_inv["fecha_compra"] = pd.to_datetime(_df_inv["fecha_compra"], errors="coerce").dt.date
-            _df_inv["ticker"] = _df_inv["ticker"].fillna("VOO").astype(str).str.upper().str.strip()
-            _df_inv["nombre"] = _df_inv.apply(
-                lambda r: str(r["nombre"]).strip()
-                if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
-                else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
-                axis=1
-            )
-            _df_inv["broker"] = _df_inv["broker"].fillna("IBKR").astype(str)
-            _df_inv["moneda"] = _df_inv["moneda"].fillna("USD").astype(str)
-            _df_inv["cantidad"] = pd.to_numeric(_df_inv["cantidad"], errors="coerce").fillna(0.0)
-            _df_inv["monto_invertido_usd"] = pd.to_numeric(_df_inv["monto_invertido_usd"], errors="coerce").fillna(0.0)
-
-            _df_inv["precio_promedio_compra_usd"] = _df_inv.apply(
-                lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
-                axis=1
-            )
-
-            _df_inv = _df_inv.sort_values("fecha_compra", ascending=False).reset_index(drop=True)
-
-            st.markdown("#### 📋 Compras registradas")
-            st.caption(
-                "Puedes editar ticker, cantidad o monto. El precio promedio se recalcula al guardar. "
-                "Si agregas un ticker nuevo, la app lo agrega automáticamente al catálogo."
-            )
-
-            _df_inv_show = _df_inv.copy()
-            _df_inv_show["Eliminar"] = False
-
-            _ed_inv = st.data_editor(
-                _df_inv_show,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                height=min(38 * len(_df_inv_show) + 46, 360),
-                column_config={
-                    "id": None,
-                    "fecha_compra": st.column_config.DateColumn("📅 Fecha compra", required=True, width="small"),
-                    "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
-                    "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                    "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], required=True, width="small"),
-                    "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
-                    "monto_invertido_usd": st.column_config.NumberColumn("Invertido USD", min_value=0.0, step=10.0, format="US$ %.2f", width="small"),
-                    "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio promedio USD", disabled=True, format="US$ %.2f", width="small"),
-                    "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
-                    "Eliminar": st.column_config.CheckboxColumn("🗑"),
-                },
-                key="editor_inversiones_ibkr"
-            )
-
-            if st.button("💾 Guardar cambios — Portafolio IBKR", type="primary"):
-                _df_save = _ed_inv.copy()
-                _df_save = _df_save[_df_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
-
-                if not _df_save.empty:
-                    _df_save["id"] = _df_save["id"].apply(
-                        lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                _df_pos = (
+                    _df_inv.groupby("ticker", as_index=False)
+                    .agg(
+                        nombre=("nombre", "last"),
+                        cantidad_total=("cantidad", "sum"),
+                        invertido_total_usd=("monto_invertido_usd", "sum"),
                     )
-                    _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    _df_save["ticker"] = _df_save["ticker"].fillna("").astype(str).str.upper().str.strip()
-                    _df_save["nombre"] = _df_save.apply(
-                        lambda r: str(r["nombre"]).strip()
-                        if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
-                        else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
-                        axis=1
-                    )
-                    _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
-                    _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
-                    _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
-                    _df_save["monto_invertido_usd"] = pd.to_numeric(
-                        _df_save["monto_invertido_usd"], errors="coerce"
-                    ).fillna(0.0)
-                    _df_save["precio_promedio_compra_usd"] = _df_save.apply(
-                        lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
-                        axis=1
-                    )
-
-                    _df_save = _df_save.dropna(subset=["fecha_compra"])
-                    _df_save = _df_save[
-                        (_df_save["ticker"] != "") &
-                        (_df_save["cantidad"] > 0) &
-                        (_df_save["monto_invertido_usd"] > 0)
-                    ].copy()
-
-                    # Asegurar que todo ticker comprado exista en el catálogo, sin sobreescribir
-                    # tipo/source_symbol si ya estaban correctamente definidos.
-                    for _, _row_inv in _df_save.iterrows():
-                        try:
-                            _ticker_tmp = str(_row_inv["ticker"]).upper().strip()
-                            _cat_match = _df_catalogo_ibkr[
-                                _df_catalogo_ibkr["ticker"].astype(str).str.upper().str.strip() == _ticker_tmp
-                            ]
-
-                            if not _cat_match.empty:
-                                _tipo_tmp = str(_cat_match.iloc[0].get("tipo", "Accion"))
-                                _source_tmp = str(_cat_match.iloc[0].get("source_symbol", _ticker_tmp)).strip() or _ticker_tmp
-                                _fuente_tmp = str(_cat_match.iloc[0].get("fuente_precio", "Yahoo Finance"))
-                            else:
-                                _tipo_tmp = "Accion"
-                                _source_tmp = _ticker_tmp
-                                _fuente_tmp = "Yahoo Finance"
-
-                            upsert_instrumento_ibkr(
-                                ticker=_ticker_tmp,
-                                nombre=_row_inv["nombre"],
-                                tipo=_tipo_tmp,
-                                moneda=_row_inv["moneda"],
-                                source_symbol=_source_tmp,
-                                fuente_precio=_fuente_tmp,
-                                activo=True,
-                            )
-                        except Exception:
-                            pass
-
-                    st.session_state["inversiones_ibkr"] = _df_save.sort_values(
-                        "fecha_compra", ascending=False
-                    ).to_dict("records")
-                else:
-                    st.session_state["inversiones_ibkr"] = []
-
-                guardar("inversiones_ibkr")
-                st.success("✅ Portafolio IBKR actualizado.")
-                st.rerun()
-
-            # ──────────────────────────────────────────────
-            # Resumen por ticker y valorización
-            # ──────────────────────────────────────────────
-            st.markdown("#### 📊 Resumen del portafolio")
-
-            _df_pos = (
-                _df_inv.groupby("ticker", as_index=False)
-                .agg(
-                    nombre=("nombre", "last"),
-                    cantidad_total=("cantidad", "sum"),
-                    invertido_total_usd=("monto_invertido_usd", "sum"),
                 )
-            )
-            _df_pos["precio_promedio_compra_usd"] = _df_pos.apply(
-                lambda r: (r["invertido_total_usd"] / r["cantidad_total"]) if r["cantidad_total"] > 0 else 0.0,
-                axis=1
-            )
+                _df_pos["precio_promedio_compra_usd"] = _df_pos.apply(
+                    lambda r: (r["invertido_total_usd"] / r["cantidad_total"]) if r["cantidad_total"] > 0 else 0.0,
+                    axis=1
+                )
 
-            # Autodetección: todo ticker comprado se agrega al catálogo sin intervención manual.
-            try:
-                _df_catalogo_ibkr, _tickers_auto_catalogo = sincronizar_catalogo_desde_compras_ibkr(
-                    st.session_state.get("inversiones_ibkr", []),
+                # Autodetección: todo ticker comprado se agrega al catálogo sin intervención manual.
+                try:
+                    _df_catalogo_ibkr, _tickers_auto_catalogo = sincronizar_catalogo_desde_compras_ibkr(
+                        st.session_state.get("inversiones_ibkr", []),
+                        _df_catalogo_ibkr,
+                    )
+                    if _tickers_auto_catalogo:
+                        st.info(
+                            "Tickers agregados automáticamente al catálogo IBKR: "
+                            + ", ".join(_tickers_auto_catalogo)
+                            + ". Airflow los tomará en la siguiente corrida."
+                        )
+                except Exception as _e:
+                    st.warning(f"No se pudo sincronizar automáticamente el catálogo IBKR: {_e}")
+
+                # Fallback visual: si Airflow aún no tiene precio de un ticker nuevo,
+                # la app consulta Yahoo Finance en vivo para mostrar valorización inmediata.
+                _df_precios_ibkr, _tickers_fallback_yahoo = completar_precios_faltantes_con_yahoo(
+                    _df_precios_ibkr,
+                    _df_pos["ticker"].tolist(),
                     _df_catalogo_ibkr,
                 )
-                if _tickers_auto_catalogo:
+
+                if _tickers_fallback_yahoo:
                     st.info(
-                        "Tickers agregados automáticamente al catálogo IBKR: "
-                        + ", ".join(_tickers_auto_catalogo)
-                        + ". Airflow los tomará en la siguiente corrida."
+                        "Precios consultados directamente desde Yahoo Finance mientras Airflow se actualiza: "
+                        + ", ".join(_tickers_fallback_yahoo)
+                        + ". Para consolidarlos en CSV, ejecuta ./run_daily_finance_dags.sh."
                     )
-            except Exception as _e:
-                st.warning(f"No se pudo sincronizar automáticamente el catálogo IBKR: {_e}")
 
-            # Fallback visual: si Airflow aún no tiene precio de un ticker nuevo,
-            # la app consulta Yahoo Finance en vivo para mostrar valorización inmediata.
-            _df_precios_ibkr, _tickers_fallback_yahoo = completar_precios_faltantes_con_yahoo(
-                _df_precios_ibkr,
-                _df_pos["ticker"].tolist(),
-                _df_catalogo_ibkr,
-            )
-
-            if _tickers_fallback_yahoo:
-                st.info(
-                    "Precios consultados directamente desde Yahoo Finance mientras Airflow se actualiza: "
-                    + ", ".join(_tickers_fallback_yahoo)
-                    + ". Para consolidarlos en CSV, ejecuta ./run_daily_finance_dags.sh."
-                )
-
-            if not _df_precios_ibkr.empty:
-                _price_cols = [
-                    c for c in [
-                        "ticker",
-                        "precio_actual_usd",
-                        "fecha_precio",
-                        "hora_precio",
-                        "fuente_precio",
-                        "exchange",
-                        "updated_at_lima",
-                        "archivo",
+                if not _df_precios_ibkr.empty:
+                    _price_cols = [
+                        c for c in [
+                            "ticker",
+                            "precio_actual_usd",
+                            "fecha_precio",
+                            "hora_precio",
+                            "fuente_precio",
+                            "exchange",
+                            "updated_at_lima",
+                            "archivo",
+                        ]
+                        if c in _df_precios_ibkr.columns
                     ]
-                    if c in _df_precios_ibkr.columns
-                ]
-                _df_resumen = _df_pos.merge(_df_precios_ibkr[_price_cols], on="ticker", how="left")
-            else:
-                _df_resumen = _df_pos.copy()
-                _df_resumen["precio_actual_usd"] = pd.NA
-                _df_resumen["fecha_precio"] = ""
-                _df_resumen["hora_precio"] = ""
-                _df_resumen["fuente_precio"] = ""
-                _df_resumen["exchange"] = ""
-                _df_resumen["updated_at_lima"] = ""
-                _df_resumen["archivo"] = ""
+                    _df_resumen = _df_pos.merge(_df_precios_ibkr[_price_cols], on="ticker", how="left")
+                else:
+                    _df_resumen = _df_pos.copy()
+                    _df_resumen["precio_actual_usd"] = pd.NA
+                    _df_resumen["fecha_precio"] = ""
+                    _df_resumen["hora_precio"] = ""
+                    _df_resumen["fuente_precio"] = ""
+                    _df_resumen["exchange"] = ""
+                    _df_resumen["updated_at_lima"] = ""
+                    _df_resumen["archivo"] = ""
 
-            _df_resumen["precio_actual_usd"] = pd.to_numeric(
-                _df_resumen["precio_actual_usd"], errors="coerce"
-            )
-            _df_resumen["tiene_precio"] = _df_resumen["precio_actual_usd"].notna() & (_df_resumen["precio_actual_usd"] > 0)
-            _df_resumen["valor_actual_usd"] = _df_resumen["cantidad_total"] * _df_resumen["precio_actual_usd"].fillna(0.0)
-            _df_resumen["ganancia_usd"] = (
-                _df_resumen["valor_actual_usd"] - _df_resumen["invertido_total_usd"]
-            ).where(_df_resumen["tiene_precio"], 0.0)
-            _df_resumen["rendimiento_pct"] = _df_resumen.apply(
-                lambda r: (r["ganancia_usd"] / r["invertido_total_usd"] * 100)
-                if r["tiene_precio"] and r["invertido_total_usd"] > 0
-                else 0.0,
-                axis=1
-            )
-            _df_resumen["valor_actual_pen"] = _df_resumen["valor_actual_usd"] * _tc_inv
-            _df_resumen["ganancia_pen"] = _df_resumen["ganancia_usd"] * _tc_inv
-            def _estado_precio_ibkr(row):
-                if not row.get("tiene_precio", False):
-                    return "Sin precio"
-                fuente = str(row.get("fuente_precio", ""))
-                if "fallback" in fuente.lower() or "app" in fuente.lower():
-                    return "OK Yahoo app"
-                return "OK Airflow"
+                _df_resumen["precio_actual_usd"] = pd.to_numeric(
+                    _df_resumen["precio_actual_usd"], errors="coerce"
+                )
+                _df_resumen["tiene_precio"] = _df_resumen["precio_actual_usd"].notna() & (_df_resumen["precio_actual_usd"] > 0)
+                _df_resumen["valor_actual_usd"] = _df_resumen["cantidad_total"] * _df_resumen["precio_actual_usd"].fillna(0.0)
+                _df_resumen["ganancia_usd"] = (
+                    _df_resumen["valor_actual_usd"] - _df_resumen["invertido_total_usd"]
+                ).where(_df_resumen["tiene_precio"], 0.0)
+                _df_resumen["rendimiento_pct"] = _df_resumen.apply(
+                    lambda r: (r["ganancia_usd"] / r["invertido_total_usd"] * 100)
+                    if r["tiene_precio"] and r["invertido_total_usd"] > 0
+                    else 0.0,
+                    axis=1
+                )
+                _df_resumen["valor_actual_pen"] = _df_resumen["valor_actual_usd"] * _tc_inv
+                _df_resumen["ganancia_pen"] = _df_resumen["ganancia_usd"] * _tc_inv
+                def _estado_precio_ibkr(row):
+                    if not row.get("tiene_precio", False):
+                        return "Sin precio"
+                    fuente = str(row.get("fuente_precio", ""))
+                    if "fallback" in fuente.lower() or "app" in fuente.lower():
+                        return "OK Yahoo app"
+                    return "OK Airflow"
 
-            _df_resumen["estado_precio"] = _df_resumen.apply(_estado_precio_ibkr, axis=1)
+                _df_resumen["estado_precio"] = _df_resumen.apply(_estado_precio_ibkr, axis=1)
 
-            _total_invertido_usd = float(_df_resumen["invertido_total_usd"].sum())
-            _total_invertido_con_precio_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "invertido_total_usd"].sum())
-            _total_valor_activos_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "valor_actual_usd"].sum())
-            _total_cash_manual_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
-            _total_cash_transferencias_ibkr_usd = calcular_total_transferencias_ibkr_usd()
-            _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
-            _total_valor_actual_usd = _total_valor_activos_usd + _total_cash_ibkr_usd
-            _total_ganancia_usd = _total_valor_activos_usd - _total_invertido_con_precio_usd
-            _total_rendimiento_pct = (
-                _total_ganancia_usd / _total_invertido_con_precio_usd * 100
-                if _total_invertido_con_precio_usd > 0
-                else 0.0
-            )
+                _total_invertido_usd = float(_df_resumen["invertido_total_usd"].sum())
+                _total_invertido_con_precio_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "invertido_total_usd"].sum())
+                _total_valor_activos_usd = float(_df_resumen.loc[_df_resumen["tiene_precio"], "valor_actual_usd"].sum())
+                _total_cash_manual_ibkr_usd = float(_df_cash_ibkr["monto_usd"].sum()) if not _df_cash_ibkr.empty else 0.0
+                _total_cash_transferencias_ibkr_usd = calcular_total_transferencias_ibkr_usd()
+                _total_cash_ibkr_usd = float(_total_cash_manual_ibkr_usd + _total_cash_transferencias_ibkr_usd)
+                _total_valor_actual_usd = _total_valor_activos_usd + _total_cash_ibkr_usd
+                _total_ganancia_usd = _total_valor_activos_usd - _total_invertido_con_precio_usd
+                _total_rendimiento_pct = (
+                    _total_ganancia_usd / _total_invertido_con_precio_usd * 100
+                    if _total_invertido_con_precio_usd > 0
+                    else 0.0
+                )
 
-            # Botón actualizar precios IBKR en vivo
-            _btn_col, _info_col = st.columns([1, 3])
-            with _btn_col:
-                if st.button("🔄 Actualizar precios IBKR", key="btn_refresh_ibkr", type="primary"):
-                    tickers_activos = [str(r["ticker"]).upper().strip() for r in st.session_state.get("inversiones_ibkr", []) if str(r.get("ticker","")).strip()]
-                    tickers_activos = sorted(set(tickers_activos))
-                    if tickers_activos:
-                        _filas_nuevas = []
-                        _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
-                        for _tk in tickers_activos:
-                            _sym = obtener_source_symbol_ibkr(_tk, _df_catalogo_ibkr)
-                            _precio_info = consultar_precio_yahoo_ibkr(_sym)
-                            if _precio_info:
-                                _filas_nuevas.append({
-                                    "ticker": _tk,
-                                    "precio_actual_usd": _precio_info["precio_actual_usd"],
-                                    "fecha_precio": _precio_info["fecha_precio"],
-                                    "hora_precio": _precio_info["hora_precio"],
-                                    "fuente_precio": "Yahoo Finance (manual)",
-                                    "exchange": _precio_info.get("exchange", ""),
-                                    "updated_at_lima": _now_lima,
-                                })
-                        if _filas_nuevas:
-                            _df_nuevos = pd.DataFrame(_filas_nuevas)
-                            try:
-                                _df_existing = cargar_precios_ibkr_airflow()
-                                if not _df_existing.empty:
-                                    _df_existing = _df_existing[~_df_existing["ticker"].isin([r["ticker"] for r in _filas_nuevas])].copy()
-                                    _df_combined = pd.concat([_df_existing, _df_nuevos], ignore_index=True)
-                                else:
-                                    _df_combined = _df_nuevos
-                                IBKR_MARKET_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
-                                _df_combined.to_csv(IBKR_MARKET_PRICES_PATH, index=False)
-                                st.success(f"✅ Precios actualizados: {', '.join([r['ticker'] for r in _filas_nuevas])}")
-                            except Exception as _e:
-                                st.warning(f"Precios obtenidos pero no guardados en CSV: {_e}")
-                            st.rerun()
+                # Botón actualizar precios IBKR en vivo
+                _btn_col, _info_col = st.columns([1, 3])
+                with _btn_col:
+                    if st.button("🔄 Actualizar precios IBKR", key="btn_refresh_ibkr", type="primary"):
+                        tickers_activos = [str(r["ticker"]).upper().strip() for r in st.session_state.get("inversiones_ibkr", []) if str(r.get("ticker","")).strip()]
+                        tickers_activos = sorted(set(tickers_activos))
+                        if tickers_activos:
+                            _filas_nuevas = []
+                            _now_lima = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
+                            for _tk in tickers_activos:
+                                _sym = obtener_source_symbol_ibkr(_tk, _df_catalogo_ibkr)
+                                _precio_info = consultar_precio_yahoo_ibkr(_sym)
+                                if _precio_info:
+                                    _filas_nuevas.append({
+                                        "ticker": _tk,
+                                        "precio_actual_usd": _precio_info["precio_actual_usd"],
+                                        "fecha_precio": _precio_info["fecha_precio"],
+                                        "hora_precio": _precio_info["hora_precio"],
+                                        "fuente_precio": "Yahoo Finance (manual)",
+                                        "exchange": _precio_info.get("exchange", ""),
+                                        "updated_at_lima": _now_lima,
+                                    })
+                            if _filas_nuevas:
+                                _df_nuevos = pd.DataFrame(_filas_nuevas)
+                                try:
+                                    _df_existing = cargar_precios_ibkr_airflow()
+                                    if not _df_existing.empty:
+                                        _df_existing = _df_existing[~_df_existing["ticker"].isin([r["ticker"] for r in _filas_nuevas])].copy()
+                                        _df_combined = pd.concat([_df_existing, _df_nuevos], ignore_index=True)
+                                    else:
+                                        _df_combined = _df_nuevos
+                                    IBKR_MARKET_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
+                                    _df_combined.to_csv(IBKR_MARKET_PRICES_PATH, index=False)
+                                    st.success(f"✅ Precios actualizados: {', '.join([r['ticker'] for r in _filas_nuevas])}")
+                                except Exception as _e:
+                                    st.warning(f"Precios obtenidos pero no guardados en CSV: {_e}")
+                                st.rerun()
+                            else:
+                                st.warning("No se pudieron obtener precios desde Yahoo Finance.")
                         else:
-                            st.warning("No se pudieron obtener precios desde Yahoo Finance.")
-                    else:
-                        st.info("No hay tickers registrados.")
-            _m1, _m2, _m3, _m4, _m5 = st.columns(5)
-            _m1.metric("Invertido activos", f"US$ {_total_invertido_usd:,.2f}")
-            _m2.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-            _m3.metric("Valor total IBKR", f"US$ {_total_valor_actual_usd:,.2f}")
-            _m4.metric("Ganancia/Pérdida activos", f"US$ {_total_ganancia_usd:,.2f}")
-            _m5.metric("Rend. activos", f"{_total_rendimiento_pct:,.2f}%")
-
-            st.caption(
-                f"Valor total IBKR estimado en soles: S/ {_total_valor_actual_usd * _tc_inv:,.0f} | "
-                f"Cash: S/ {_total_cash_ibkr_usd * _tc_inv:,.0f} | "
-                f"Ganancia/Pérdida de activos: S/ {_total_ganancia_usd * _tc_inv:,.0f} | "
-                f"TC usado: {_tc_inv:.4f}"
-            )
-
-            if _df_precios_ibkr.empty:
-                st.info(
-                    "No se encontró data/market_prices_portfolio.csv ni precios fallback. "
-                    "Ejecuta ./run_daily_finance_dags.sh para actualizar precios desde Airflow."
-                )
-            else:
-                _ultima_actualizacion = ""
-                if "updated_at_lima" in _df_precios_ibkr.columns:
-                    _vals = _df_precios_ibkr["updated_at_lima"].dropna().astype(str)
-                    if not _vals.empty:
-                        _ultima_actualizacion = _vals.iloc[-1]
-
-                _fuentes_usadas = []
-                if "fuente_precio" in _df_precios_ibkr.columns:
-                    _fuentes_usadas = sorted(_df_precios_ibkr["fuente_precio"].dropna().astype(str).unique().tolist())
+                            st.info("No hay tickers registrados.")
+                _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+                _m1.metric("Invertido activos", f"US$ {_total_invertido_usd:,.2f}")
+                _m2.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
+                _m3.metric("Valor total IBKR", f"US$ {_total_valor_actual_usd:,.2f}")
+                _m4.metric("Ganancia/Pérdida activos", f"US$ {_total_ganancia_usd:,.2f}")
+                _m5.metric("Rend. activos", f"{_total_rendimiento_pct:,.2f}%")
 
                 st.caption(
-                    "Precios desde Airflow y/o fallback Yahoo: data/market_prices_portfolio.csv"
-                    + (f" | Fuentes: {', '.join(_fuentes_usadas)}" if _fuentes_usadas else "")
-                    + (f" | Última actualización: {_ultima_actualizacion}" if _ultima_actualizacion else "")
-                )
-
-            _faltantes = _df_resumen.loc[~_df_resumen["tiene_precio"], "ticker"].tolist()
-            if _faltantes:
-                st.warning(
-                    "Hay tickers sin precio disponible: "
-                    + ", ".join(_faltantes)
-                    + ". Si Yahoo Finance usa un símbolo distinto, edita source_symbol en el catálogo."
-                )
-
-            _df_tabla = _df_resumen.copy()
-            if _total_cash_ibkr_usd != 0:
-                _cash_row = {
-                    "ticker": "CASH",
-                    "nombre": "Cash disponible IBKR",
-                    "cantidad_total": _total_cash_ibkr_usd,
-                    "invertido_total_usd": _total_cash_ibkr_usd,
-                    "precio_promedio_compra_usd": 1.0,
-                    "precio_actual_usd": 1.0,
-                    "valor_actual_usd": _total_cash_ibkr_usd,
-                    "ganancia_usd": 0.0,
-                    "rendimiento_pct": 0.0,
-                    "valor_actual_pen": _total_cash_ibkr_usd * _tc_inv,
-                    "ganancia_pen": 0.0,
-                    "fecha_precio": "",
-                    "hora_precio": "",
-                    "exchange": "IBKR",
-                    "fuente_precio": "Cash",
-                    "updated_at_lima": "",
-                    "archivo": "",
-                    "tiene_precio": True,
-                    "estado_precio": "Cash",
-                }
-                _df_tabla = pd.concat([_df_tabla, pd.DataFrame([_cash_row])], ignore_index=True)
-
-            _df_tabla = _df_tabla.sort_values("valor_actual_usd", ascending=False)
-
-            st.dataframe(
-                _df_tabla,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "ticker": st.column_config.TextColumn("Ticker", width="small"),
-                    "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                    "cantidad_total": st.column_config.NumberColumn("Cantidad", format="%.4f", width="small"),
-                    "invertido_total_usd": st.column_config.NumberColumn("Invertido USD", format="US$ %.2f", width="small"),
-                    "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom. compra", format="US$ %.2f", width="small"),
-                    "precio_actual_usd": st.column_config.NumberColumn("Precio actual", format="US$ %.2f", width="small"),
-                    "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f", width="small"),
-                    "ganancia_usd": st.column_config.NumberColumn("Ganancia USD", format="US$ %.2f", width="small"),
-                    "rendimiento_pct": st.column_config.NumberColumn("Rend. %", format="%.2f%%", width="small"),
-                    "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f", width="small"),
-                    "ganancia_pen": st.column_config.NumberColumn("Ganancia PEN", format="S/ %.0f", width="small"),
-                    "fecha_precio": st.column_config.TextColumn("Fecha precio", width="small"),
-                    "hora_precio": st.column_config.TextColumn("Hora precio", width="small"),
-                    "exchange": st.column_config.TextColumn("Exchange", width="small"),
-                    "fuente_precio": st.column_config.TextColumn("Fuente", width="small"),
-                    "updated_at_lima": st.column_config.TextColumn("Actualizado", width="medium"),
-                    "archivo": None,
-                    "tiene_precio": None,
-                    "estado_precio": st.column_config.TextColumn("Estado", width="medium"),
-                }
-            )
-
-            # ──────────────────────────────────────────────
-            # Gráficas simples
-            # ──────────────────────────────────────────────
-            _df_graf = _df_resumen[_df_resumen["tiene_precio"]].copy()
-
-            if not _df_graf.empty:
-                st.markdown("#### 📈 Gráficas rápidas")
-
-                _fig_gain = px.bar(
-                    _df_graf.sort_values("ganancia_usd", ascending=False),
-                    x="ticker",
-                    y="ganancia_usd",
-                    text="ganancia_usd",
-                    title="Ganancia / Pérdida por ticker (USD)",
-                    labels={"ticker": "Ticker", "ganancia_usd": "Ganancia/Pérdida USD"},
-                )
-                _fig_gain.update_traces(texttemplate="US$ %{text:,.2f}", textposition="outside")
-                _fig_gain.update_layout(yaxis_tickprefix="US$ ", uniformtext_minsize=8, uniformtext_mode="hide")
-                st.plotly_chart(_fig_gain, use_container_width=True)
-
-                _df_dist = _df_graf[_df_graf["valor_actual_usd"] > 0].copy()
-                if _total_cash_ibkr_usd > 0:
-                    _df_dist = pd.concat([
-                        _df_dist,
-                        pd.DataFrame([{
-                            "ticker": "CASH",
-                            "valor_actual_usd": _total_cash_ibkr_usd,
-                        }])
-                    ], ignore_index=True)
-
-                if not _df_dist.empty:
-                    _fig_dist = px.pie(
-                        _df_dist,
-                        names="ticker",
-                        values="valor_actual_usd",
-                        hole=0.45,
-                        title="Distribución del portafolio por valor actual",
-                    )
-                    st.plotly_chart(_fig_dist, use_container_width=True)
-
-        else:
-            if _total_cash_ibkr_usd != 0:
-                st.markdown("#### 📊 Resumen del portafolio")
-                _valor_total_cash_pen = _total_cash_ibkr_usd * _tc_inv
-                _c1, _c2 = st.columns(2)
-                _c1.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-                _c2.metric("Valor total IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
-                st.caption(
-                    f"Valor total estimado en soles: S/ {_valor_total_cash_pen:,.0f} | "
+                    f"Valor total IBKR estimado en soles: S/ {_total_valor_actual_usd * _tc_inv:,.0f} | "
+                    f"Cash: S/ {_total_cash_ibkr_usd * _tc_inv:,.0f} | "
+                    f"Ganancia/Pérdida de activos: S/ {_total_ganancia_usd * _tc_inv:,.0f} | "
                     f"TC usado: {_tc_inv:.4f}"
                 )
-                st.dataframe(
-                    pd.DataFrame([{
+
+                if _df_precios_ibkr.empty:
+                    st.info(
+                        "No se encontró data/market_prices_portfolio.csv ni precios fallback. "
+                        "Ejecuta ./run_daily_finance_dags.sh para actualizar precios desde Airflow."
+                    )
+                else:
+                    _ultima_actualizacion = ""
+                    if "updated_at_lima" in _df_precios_ibkr.columns:
+                        _vals = _df_precios_ibkr["updated_at_lima"].dropna().astype(str)
+                        if not _vals.empty:
+                            _ultima_actualizacion = _vals.iloc[-1]
+
+                    _fuentes_usadas = []
+                    if "fuente_precio" in _df_precios_ibkr.columns:
+                        _fuentes_usadas = sorted(_df_precios_ibkr["fuente_precio"].dropna().astype(str).unique().tolist())
+
+                    st.caption(
+                        "Precios desde Airflow y/o fallback Yahoo: data/market_prices_portfolio.csv"
+                        + (f" | Fuentes: {', '.join(_fuentes_usadas)}" if _fuentes_usadas else "")
+                        + (f" | Última actualización: {_ultima_actualizacion}" if _ultima_actualizacion else "")
+                    )
+
+                _faltantes = _df_resumen.loc[~_df_resumen["tiene_precio"], "ticker"].tolist()
+                if _faltantes:
+                    st.warning(
+                        "Hay tickers sin precio disponible: "
+                        + ", ".join(_faltantes)
+                        + ". Si Yahoo Finance usa un símbolo distinto, edita source_symbol en el catálogo."
+                    )
+
+                _df_tabla = _df_resumen.copy()
+                if _total_cash_ibkr_usd != 0:
+                    _cash_row = {
                         "ticker": "CASH",
                         "nombre": "Cash disponible IBKR",
+                        "cantidad_total": _total_cash_ibkr_usd,
+                        "invertido_total_usd": _total_cash_ibkr_usd,
+                        "precio_promedio_compra_usd": 1.0,
+                        "precio_actual_usd": 1.0,
                         "valor_actual_usd": _total_cash_ibkr_usd,
-                        "valor_actual_pen": _valor_total_cash_pen,
-                    }]),
+                        "ganancia_usd": 0.0,
+                        "rendimiento_pct": 0.0,
+                        "valor_actual_pen": _total_cash_ibkr_usd * _tc_inv,
+                        "ganancia_pen": 0.0,
+                        "fecha_precio": "",
+                        "hora_precio": "",
+                        "exchange": "IBKR",
+                        "fuente_precio": "Cash",
+                        "updated_at_lima": "",
+                        "archivo": "",
+                        "tiene_precio": True,
+                        "estado_precio": "Cash",
+                    }
+                    _df_tabla = pd.concat([_df_tabla, pd.DataFrame([_cash_row])], ignore_index=True)
+
+                _df_tabla = _df_tabla.sort_values("valor_actual_usd", ascending=False)
+
+                st.dataframe(
+                    _df_tabla,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
                         "ticker": st.column_config.TextColumn("Ticker", width="small"),
                         "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                        "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f"),
-                        "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f"),
+                        "cantidad_total": st.column_config.NumberColumn("Cantidad", format="%.4f", width="small"),
+                        "invertido_total_usd": st.column_config.NumberColumn("Invertido USD", format="US$ %.2f", width="small"),
+                        "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom. compra", format="US$ %.2f", width="small"),
+                        "precio_actual_usd": st.column_config.NumberColumn("Precio actual", format="US$ %.2f", width="small"),
+                        "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f", width="small"),
+                        "ganancia_usd": st.column_config.NumberColumn("Ganancia USD", format="US$ %.2f", width="small"),
+                        "rendimiento_pct": st.column_config.NumberColumn("Rend. %", format="%.2f%%", width="small"),
+                        "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f", width="small"),
+                        "ganancia_pen": st.column_config.NumberColumn("Ganancia PEN", format="S/ %.0f", width="small"),
+                        "fecha_precio": st.column_config.TextColumn("Fecha precio", width="small"),
+                        "hora_precio": st.column_config.TextColumn("Hora precio", width="small"),
+                        "exchange": st.column_config.TextColumn("Exchange", width="small"),
+                        "fuente_precio": st.column_config.TextColumn("Fuente", width="small"),
+                        "updated_at_lima": st.column_config.TextColumn("Actualizado", width="medium"),
+                        "archivo": None,
+                        "tiene_precio": None,
+                        "estado_precio": st.column_config.TextColumn("Estado", width="medium"),
                     }
                 )
-            else:
-                st.info("Aún no hay compras ni cash registrados en IBKR. Registra tu primera compra o movimiento de cash arriba.")
+
+                # ──────────────────────────────────────────────
+                # Gráficas simples
+                # ──────────────────────────────────────────────
+                _df_graf = _df_resumen[_df_resumen["tiene_precio"]].copy()
+
+                if not _df_graf.empty:
+                    with st.expander("📈 Gráficas del portafolio", expanded=False):
+
+                        _fig_gain = px.bar(
+                            _df_graf.sort_values("ganancia_usd", ascending=False),
+                            x="ticker",
+                            y="ganancia_usd",
+                            text="ganancia_usd",
+                            title="Ganancia / Pérdida por ticker (USD)",
+                            labels={"ticker": "Ticker", "ganancia_usd": "Ganancia/Pérdida USD"},
+                        )
+                        _fig_gain.update_traces(texttemplate="US$ %{text:,.2f}", textposition="outside")
+                        _fig_gain.update_layout(yaxis_tickprefix="US$ ", uniformtext_minsize=8, uniformtext_mode="hide")
+                        st.plotly_chart(_fig_gain, use_container_width=True)
+
+                        _df_dist = _df_graf[_df_graf["valor_actual_usd"] > 0].copy()
+                        if _total_cash_ibkr_usd > 0:
+                            _df_dist = pd.concat([
+                                _df_dist,
+                                pd.DataFrame([{
+                                    "ticker": "CASH",
+                                    "valor_actual_usd": _total_cash_ibkr_usd,
+                                }])
+                            ], ignore_index=True)
+
+                        if not _df_dist.empty:
+                            _fig_dist = px.pie(
+                                _df_dist,
+                                names="ticker",
+                                values="valor_actual_usd",
+                                hole=0.45,
+                                title="Distribución del portafolio por valor actual",
+                            )
+                            st.plotly_chart(_fig_dist, use_container_width=True)
+
+                else:
+                    if _total_cash_ibkr_usd != 0:
+                        st.markdown("#### 📊 Resumen del portafolio")
+                        _valor_total_cash_pen = _total_cash_ibkr_usd * _tc_inv
+                        _c1, _c2 = st.columns(2)
+                        _c1.metric("Cash IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
+                        _c2.metric("Valor total IBKR", f"US$ {_total_cash_ibkr_usd:,.2f}")
+                        st.caption(
+                            f"Valor total estimado en soles: S/ {_valor_total_cash_pen:,.0f} | "
+                            f"TC usado: {_tc_inv:.4f}"
+                        )
+                        st.dataframe(
+                            pd.DataFrame([{
+                                "ticker": "CASH",
+                                "nombre": "Cash disponible IBKR",
+                                "valor_actual_usd": _total_cash_ibkr_usd,
+                                "valor_actual_pen": _valor_total_cash_pen,
+                            }]),
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "ticker": st.column_config.TextColumn("Ticker", width="small"),
+                                "nombre": st.column_config.TextColumn("Nombre", width="medium"),
+                                "valor_actual_usd": st.column_config.NumberColumn("Valor actual USD", format="US$ %.2f"),
+                                "valor_actual_pen": st.column_config.NumberColumn("Valor PEN", format="S/ %.0f"),
+                            }
+                        )
+                    else:
+                        st.info("Aún no hay compras ni cash registrados en IBKR. Registra tu primera compra o movimiento de cash arriba.")
 
 
 
 
 
 
-# Catálogo técnico de instrumentos
-        # ──────────────────────────────────────────────
+        # Catálogo técnico de instrumentos
+                # ──────────────────────────────────────────────
         with st.expander("⚙️ Catálogo técnico IBKR / Airflow", expanded=False):
             st.caption(
                 "Este catálogo alimenta al DAG market_prices_ibkr_portfolio. Normalmente se actualiza solo cuando registras una compra nueva. "
