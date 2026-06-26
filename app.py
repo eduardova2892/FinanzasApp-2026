@@ -4143,16 +4143,8 @@ for _, r in df_fijos.iterrows():
     for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
         try:
             f = mes.replace(day=int(r["dia_cobro"]))
-
             if f >= pd.to_datetime(r["fecha_inicio"]) and f in g_fijos.index:
                 g_fijos.loc[f] += float(r["monto"])
-        except:
-            pass
-    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
-        try:
-            f = mes.replace(day=int(r["dia_cobro"]))
-            if f >= pd.to_datetime(r["fecha_inicio"]) and f in g_fijos.index:
-                g_fijos.loc[f] += r["monto"]
         except:
             pass
 
