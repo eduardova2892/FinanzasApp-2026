@@ -3610,11 +3610,11 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     _df_inv_edit["broker"] = _df_inv_edit["broker"].fillna("IBKR").astype(str)
                     _df_inv_edit["ticker"] = _df_inv_edit["ticker"].fillna("").astype(str).str.upper().str.strip()
                     _df_inv_edit["nombre"] = _df_inv_edit["nombre"].fillna("").astype(str)
-                    _df_inv_edit["dueno"] = _df_inv_edit["dueno"].fillna(_duenos_cfg[0]).astype(str)
-                    # Incluir en las opciones del selectbox cualquier valor ya guardado en los registros
-                    # (aunque no esté en la config actual), para evitar incompatibilidad de tipos
-                    _duenos_en_registros = _df_inv_edit["dueno"].dropna().unique().tolist()
-                    _duenos_opciones = sorted(set(_duenos_cfg + _duenos_en_registros))
+                    # Normalizar: si el valor guardado no está en _duenos_cfg, reemplazar con el primero
+                    _df_inv_edit["dueno"] = _df_inv_edit["dueno"].apply(
+                        lambda d: str(d) if str(d) in _duenos_cfg else _duenos_cfg[0]
+                    )
+                    _duenos_opciones = _duenos_cfg  # Solo los dueños configurados
                     _df_inv_edit["🗑 Eliminar"] = False
 
                     _ed_inv = st.data_editor(
