@@ -2941,6 +2941,23 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
         # 4.2 PORTAFOLIO IBKR
         # ==================================================
     with st.expander("📈 4.2 IBKR: cash e inversiones", expanded=False):
+        # ── Configuración de dueños de acciones ──────────────────
+        with st.expander("👥 Gestionar dueños de acciones", expanded=False):
+            st.caption("Define quiénes pueden ser dueños de acciones en el portafolio IBKR.")
+            _duenos_actual = st.session_state["configuracion"].get("ibkr_duenos", ["Eduardo", "Hermano", "Hermana"])
+            _duenos_str = st.text_input(
+                "Dueños (separados por coma)",
+                value=", ".join(_duenos_actual),
+                key="cfg_ibkr_duenos",
+                help="Ej: Eduardo, Ana, Roberto"
+            )
+            if st.button("💾 Guardar dueños", key="btn_save_duenos"):
+                _nuevos = [d.strip() for d in _duenos_str.split(",") if d.strip()]
+                if _nuevos:
+                    st.session_state["configuracion"]["ibkr_duenos"] = _nuevos
+                    guardar("configuracion")
+                    st.success(f"✅ Dueños actualizados: {', '.join(_nuevos)}")
+                    st.rerun()
         st.caption(
             "Primero agrega cash a IBKR desde una cuenta local; luego usa ese cash para comprar acciones o ETFs. Si compras un ticker nuevo, "
             "la app lo agrega automáticamente al catálogo y puede consultar Yahoo Finance como respaldo hasta que Airflow lo actualice."
@@ -3555,10 +3572,12 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 else:
                     # ── Tabla editable con eliminación por fila ──────────────
                     _df_inv_edit = pd.DataFrame(_inv_list)
-                    _cols_show = ["fecha_compra", "ticker", "nombre", "cantidad", "monto_invertido_usd", "precio_promedio_compra_usd", "moneda", "broker"]
+                    # Obtener lista de dueños desde configuración o usar default
+                    _duenos_cfg = st.session_state["configuracion"].get("ibkr_duenos", ["Eduardo", "Hermano", "Hermana"])
+                    _cols_show = ["fecha_compra", "ticker", "nombre", "dueno", "cantidad", "monto_invertido_usd", "precio_promedio_compra_usd", "moneda", "broker"]
                     for _c in _cols_show:
                         if _c not in _df_inv_edit.columns:
-                            _df_inv_edit[_c] = ""
+                            _df_inv_edit[_c] = "" if _c != "dueno" else _duenos_cfg[0]
                     # Asegurar tipos correctos antes del data_editor
                     _df_inv_edit["fecha_compra"] = pd.to_datetime(_df_inv_edit["fecha_compra"], errors="coerce").dt.date
                     _df_inv_edit["cantidad"] = pd.to_numeric(_df_inv_edit["cantidad"], errors="coerce").fillna(0.0)
@@ -3568,6 +3587,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     _df_inv_edit["broker"] = _df_inv_edit["broker"].fillna("IBKR").astype(str)
                     _df_inv_edit["ticker"] = _df_inv_edit["ticker"].fillna("").astype(str).str.upper().str.strip()
                     _df_inv_edit["nombre"] = _df_inv_edit["nombre"].fillna("").astype(str)
+                    _df_inv_edit["dueno"] = _df_inv_edit["dueno"].fillna(_duenos_cfg[0]).astype(str)
                     _df_inv_edit["🗑 Eliminar"] = False
 
                     _ed_inv = st.data_editor(
@@ -3580,6 +3600,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                             "fecha_compra": st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
                             "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
                             "nombre": st.column_config.TextColumn("Nombre", width="medium"),
+                            "dueno": st.column_config.SelectboxColumn("👤 Dueño", options=_duenos_cfg, width="small"),
                             "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
                             "monto_invertido_usd": st.column_config.NumberColumn("Invertido US$", min_value=0.0, step=10.0, format="%.2f", width="small"),
                             "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom.", disabled=True, format="%.2f", width="small"),
@@ -3629,6 +3650,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                             )
                             _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
                             _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
+                            _df_save["dueno"] = _df_save["dueno"].fillna(_duenos_cfg[0]).astype(str) if "dueno" in _df_save.columns else _duenos_cfg[0]
                             _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
                             _df_save["monto_invertido_usd"] = pd.to_numeric(_df_save["monto_invertido_usd"], errors="coerce").fillna(0.0)
                             _df_save["precio_promedio_compra_usd"] = _df_save.apply(
@@ -3813,6 +3835,16 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                                         _df_combined = _df_nuevos
                                     IBKR_MARKET_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
                                     _df_combined.to_csv(IBKR_MARKET_PRICES_PATH, index=False)
+                                    # Acumular en historial de precios
+                                    try:
+                                        _df_hist_new = pd.DataFrame(_filas_nuevas)
+                                        _df_hist_new["fecha_registro"] = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d")
+                                        _df_hist_exist = pd.read_csv(IBKR_MARKET_PRICES_HISTORY_PATH) if IBKR_MARKET_PRICES_HISTORY_PATH.exists() else pd.DataFrame()
+                                        _df_hist_all = pd.concat([_df_hist_exist, _df_hist_new], ignore_index=True)
+                                        _df_hist_all = _df_hist_all.drop_duplicates(subset=["ticker", "fecha_registro"], keep="last")
+                                        _df_hist_all.to_csv(IBKR_MARKET_PRICES_HISTORY_PATH, index=False)
+                                    except Exception:
+                                        pass
                                     st.success(f"✅ Precios actualizados: {', '.join([r['ticker'] for r in _filas_nuevas])}")
                                 except Exception as _e:
                                     st.warning(f"Precios obtenidos pero no guardados en CSV: {_e}")
@@ -3903,6 +3935,15 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                                         _df_comb = pd.DataFrame([_fila_nueva])
                                     IBKR_MARKET_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
                                     _df_comb.to_csv(IBKR_MARKET_PRICES_PATH, index=False)
+                                    # Acumular en historial
+                                    try:
+                                        _hrow = {**_fila_nueva, "fecha_registro": pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d")}
+                                        _df_hx = pd.read_csv(IBKR_MARKET_PRICES_HISTORY_PATH) if IBKR_MARKET_PRICES_HISTORY_PATH.exists() else pd.DataFrame()
+                                        _df_hx = pd.concat([_df_hx, pd.DataFrame([_hrow])], ignore_index=True)
+                                        _df_hx = _df_hx.drop_duplicates(subset=["ticker","fecha_registro"], keep="last")
+                                        _df_hx.to_csv(IBKR_MARKET_PRICES_HISTORY_PATH, index=False)
+                                    except Exception:
+                                        pass
                                     st.success(f"✅ {_tk_sel}: US$ {_precio_sel['precio_actual_usd']:.2f} actualizado desde Yahoo Finance")
                                     st.rerun()
                                 except Exception as _e_tk:
@@ -3965,44 +4006,166 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 )
 
                 # ──────────────────────────────────────────────
-                # Gráficas simples
+                # Gráficas del portafolio
                 # ──────────────────────────────────────────────
                 _df_graf = _df_resumen[_df_resumen["tiene_precio"]].copy()
 
                 if not _df_graf.empty:
                     with st.expander("📈 Gráficas del portafolio", expanded=False):
 
-                        _fig_gain = px.bar(
-                            _df_graf.sort_values("ganancia_usd", ascending=False),
-                            x="ticker",
-                            y="ganancia_usd",
-                            text="ganancia_usd",
-                            title="Ganancia / Pérdida por ticker (USD)",
-                            labels={"ticker": "Ticker", "ganancia_usd": "Ganancia/Pérdida USD"},
+                        # ── Filtros globales ────────────────────────────────
+                        _duenos_disponibles = ["Todos"] + sorted(
+                            set(r.get("dueno", _duenos_cfg[0]) for r in st.session_state.get("inversiones_ibkr", []))
                         )
-                        _fig_gain.update_traces(texttemplate="US$ %{text:,.2f}", textposition="outside")
-                        _fig_gain.update_layout(yaxis_tickprefix="US$ ", uniformtext_minsize=8, uniformtext_mode="hide")
-                        st.plotly_chart(_fig_gain, use_container_width=True)
+                        _gcol1, _gcol2 = st.columns([1, 3])
+                        with _gcol1:
+                            _filtro_dueno = st.selectbox("👤 Ver acciones de", _duenos_disponibles, key="graf_filtro_dueno")
 
-                        _df_dist = _df_graf[_df_graf["valor_actual_usd"] > 0].copy()
-                        if _total_cash_ibkr_usd > 0:
-                            _df_dist = pd.concat([
-                                _df_dist,
-                                pd.DataFrame([{
-                                    "ticker": "CASH",
-                                    "valor_actual_usd": _total_cash_ibkr_usd,
-                                }])
-                            ], ignore_index=True)
+                        # Merge dueno desde inversiones al resumen
+                        _df_inv_duenos = pd.DataFrame(st.session_state.get("inversiones_ibkr", []))
+                        if not _df_inv_duenos.empty and "dueno" in _df_inv_duenos.columns:
+                            _df_inv_duenos["ticker"] = _df_inv_duenos["ticker"].astype(str).str.upper().str.strip()
+                            _df_dueno_map = _df_inv_duenos.groupby("ticker")["dueno"].first().reset_index()
+                            _df_graf = _df_graf.merge(_df_dueno_map, on="ticker", how="left")
+                            _df_graf["dueno"] = _df_graf["dueno"].fillna(_duenos_cfg[0])
+                        else:
+                            _df_graf["dueno"] = _duenos_cfg[0]
 
-                        if not _df_dist.empty:
-                            _fig_dist = px.pie(
-                                _df_dist,
-                                names="ticker",
-                                values="valor_actual_usd",
-                                hole=0.45,
-                                title="Distribución del portafolio por valor actual",
-                            )
-                            st.plotly_chart(_fig_dist, use_container_width=True)
+                        if _filtro_dueno != "Todos":
+                            _df_graf_f = _df_graf[_df_graf["dueno"] == _filtro_dueno].copy()
+                        else:
+                            _df_graf_f = _df_graf.copy()
+
+                        if _df_graf_f.empty:
+                            st.info(f"No hay acciones con precio para '{_filtro_dueno}'.")
+                        else:
+                            # ── Tab layout de gráficas ──────────────────────
+                            _gt1, _gt2, _gt3 = st.tabs(["📊 Ganancia/Pérdida", "🥧 Distribución", "📈 Evolución de precios"])
+
+                            with _gt1:
+                                # Filtro de tickers a mostrar
+                                _tickers_disp_g1 = sorted(_df_graf_f["ticker"].tolist())
+                                _tickers_sel_g1 = st.multiselect(
+                                    "Tickers a mostrar", _tickers_disp_g1, default=_tickers_disp_g1, key="ms_g1"
+                                )
+                                _df_g1 = _df_graf_f[_df_graf_f["ticker"].isin(_tickers_sel_g1)].sort_values("ganancia_usd", ascending=False)
+                                if not _df_g1.empty:
+                                    _fig_gain = px.bar(
+                                        _df_g1,
+                                        x="ticker", y="ganancia_usd",
+                                        text="ganancia_usd",
+                                        color="dueno",
+                                        title="Ganancia / Pérdida por ticker (USD)",
+                                        labels={"ticker": "Ticker", "ganancia_usd": "G/P USD", "dueno": "Dueño"},
+                                        color_discrete_sequence=px.colors.qualitative.Set2,
+                                    )
+                                    _fig_gain.update_traces(texttemplate="US$ %{text:,.2f}", textposition="outside")
+                                    _fig_gain.update_layout(
+                                        yaxis_tickprefix="US$ ", uniformtext_minsize=8,
+                                        uniformtext_mode="hide", legend_title="Dueño"
+                                    )
+                                    st.plotly_chart(_fig_gain, use_container_width=True)
+
+                            with _gt2:
+                                _tickers_disp_g2 = sorted(_df_graf_f["ticker"].tolist())
+                                _tickers_sel_g2 = st.multiselect(
+                                    "Tickers a mostrar", _tickers_disp_g2, default=_tickers_disp_g2, key="ms_g2"
+                                )
+                                _df_g2 = _df_graf_f[_df_graf_f["ticker"].isin(_tickers_sel_g2)].copy()
+                                _df_dist = _df_g2[_df_g2["valor_actual_usd"] > 0].copy()
+                                if _total_cash_ibkr_usd > 0 and _filtro_dueno == "Todos":
+                                    _df_dist = pd.concat([_df_dist, pd.DataFrame([{
+                                        "ticker": "CASH", "valor_actual_usd": _total_cash_ibkr_usd, "dueno": "—"
+                                    }])], ignore_index=True)
+                                if not _df_dist.empty:
+                                    _fig_dist = px.pie(
+                                        _df_dist, names="ticker", values="valor_actual_usd",
+                                        hole=0.45,
+                                        color="dueno" if "dueno" in _df_dist.columns else None,
+                                        title=f"Distribución del portafolio — {_filtro_dueno}",
+                                        color_discrete_sequence=px.colors.qualitative.Set2,
+                                    )
+                                    _fig_dist.update_traces(textinfo="label+percent")
+                                    st.plotly_chart(_fig_dist, use_container_width=True)
+
+                            with _gt3:
+                                _tickers_disp_g3 = sorted(_df_graf_f["ticker"].tolist())
+                                _tickers_sel_g3 = st.multiselect(
+                                    "Tickers a mostrar", _tickers_disp_g3, default=_tickers_disp_g3, key="ms_g3"
+                                )
+
+                                # Construir serie temporal: precio compra + historia + precio actual
+                                _puntos = []
+
+                                # Punto de compra por ticker
+                                for _, _rinv in pd.DataFrame(st.session_state.get("inversiones_ibkr", [])).iterrows():
+                                    _tk = str(_rinv.get("ticker","")).upper().strip()
+                                    if _tk not in _tickers_sel_g3:
+                                        continue
+                                    _ppc = float(_rinv.get("precio_promedio_compra_usd", 0) or 0)
+                                    _fec = str(_rinv.get("fecha_compra",""))
+                                    _own = str(_rinv.get("dueno", _duenos_cfg[0]))
+                                    if _ppc > 0 and _fec:
+                                        _puntos.append({"ticker": _tk, "fecha": _fec, "precio": _ppc, "tipo": "Compra", "dueno": _own})
+
+                                # Historia acumulada (si existe)
+                                if IBKR_MARKET_PRICES_HISTORY_PATH.exists():
+                                    try:
+                                        _df_hist_viz = pd.read_csv(IBKR_MARKET_PRICES_HISTORY_PATH)
+                                        if "fecha_registro" in _df_hist_viz.columns and "precio_actual_usd" in _df_hist_viz.columns:
+                                            for _, _hr in _df_hist_viz.iterrows():
+                                                _htk = str(_hr.get("ticker","")).upper().strip()
+                                                if _htk not in _tickers_sel_g3:
+                                                    continue
+                                                _hown = _df_graf_f[_df_graf_f["ticker"]==_htk]["dueno"].iloc[0] if _htk in _df_graf_f["ticker"].values else _duenos_cfg[0]
+                                                _puntos.append({
+                                                    "ticker": _htk,
+                                                    "fecha": str(_hr["fecha_registro"]),
+                                                    "precio": float(_hr.get("precio_actual_usd", 0) or 0),
+                                                    "tipo": "Histórico",
+                                                    "dueno": _hown,
+                                                })
+                                    except Exception:
+                                        pass
+
+                                # Precio actual como punto final
+                                for _, _rp in _df_graf_f[_df_graf_f["ticker"].isin(_tickers_sel_g3)].iterrows():
+                                    _puntos.append({
+                                        "ticker": _rp["ticker"],
+                                        "fecha": str(_rp.get("fecha_precio", pd.Timestamp.now().strftime("%Y-%m-%d")))[:10],
+                                        "precio": float(_rp.get("precio_actual_usd", 0) or 0),
+                                        "tipo": "Actual",
+                                        "dueno": _rp.get("dueno", _duenos_cfg[0]),
+                                    })
+
+                                if _puntos:
+                                    _df_linea = pd.DataFrame(_puntos)
+                                    _df_linea["fecha"] = pd.to_datetime(_df_linea["fecha"], errors="coerce")
+                                    _df_linea = _df_linea.dropna(subset=["fecha"]).sort_values(["ticker","fecha"])
+                                    _df_linea["label"] = _df_linea["ticker"] + " (" + _df_linea["dueno"] + ")"
+
+                                    _fig_linea = px.line(
+                                        _df_linea,
+                                        x="fecha", y="precio",
+                                        color="label",
+                                        markers=True,
+                                        symbol="tipo",
+                                        title="Evolución de precios: compra → historial → hoy",
+                                        labels={"fecha": "Fecha", "precio": "Precio (US$)", "label": "Ticker (Dueño)", "tipo": "Punto"},
+                                        color_discrete_sequence=px.colors.qualitative.Set1,
+                                    )
+                                    _fig_linea.update_traces(line_width=2, marker_size=9)
+                                    _fig_linea.update_layout(
+                                        yaxis_tickprefix="US$ ",
+                                        legend_title="Ticker (Dueño)",
+                                        hovermode="x unified",
+                                    )
+                                    st.plotly_chart(_fig_linea, use_container_width=True)
+
+                                    if not IBKR_MARKET_PRICES_HISTORY_PATH.exists():
+                                        st.caption("💡 El gráfico tendrá más puntos históricos cada vez que uses el botón 🔄 Actualizar precios IBKR.")
+                                else:
+                                    st.info("No hay datos suficientes para el gráfico de evolución.")
 
                 else:
                     if _total_cash_ibkr_usd != 0:
