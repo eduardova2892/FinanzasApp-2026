@@ -2942,11 +2942,15 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
         # ==================================================
     with st.expander("📈 4.2 IBKR: cash e inversiones", expanded=False):
         # Definir _duenos_cfg una sola vez al inicio de la sección 4.2
-        _duenos_cfg = st.session_state["configuracion"].get("ibkr_duenos", ["Edu", "Hermano", "Hermana"])
+        # Leer directamente de session_state para asegurar valor más reciente
+        _cfg_raw = st.session_state.get("configuracion", {})
+        _duenos_cfg = _cfg_raw.get("ibkr_duenos") or ["Edu", "Hermano", "Hermana"]
+        if isinstance(_duenos_cfg, str):
+            _duenos_cfg = [d.strip() for d in _duenos_cfg.split(",") if d.strip()]
 
         # ── Configuración de dueños de acciones ──────────────────
         with st.expander("👥 Gestionar dueños de acciones", expanded=False):
-            st.caption("Define quiénes pueden ser dueños de acciones en el portafolio IBKR.")
+            st.caption(f"Define quiénes pueden ser dueños. Actualmente cargados: **{', '.join(_duenos_cfg)}**")
             _duenos_actual = st.session_state["configuracion"].get("ibkr_duenos", ["Edu", "Hermano", "Hermana"])
             _duenos_str = st.text_input(
                 "Dueños (separados por coma)",
@@ -2961,8 +2965,10 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     if _nuevos:
                         st.session_state["configuracion"]["ibkr_duenos"] = _nuevos
                         guardar("configuracion")
-                        st.success(f"✅ Dueños actualizados: {', '.join(_nuevos)}")
+                        st.success(f"✅ Dueños guardados en Supabase: {', '.join(_nuevos)}")
                         st.rerun()
+                    else:
+                        st.warning("Ingresa al menos un dueño.")
             with _d_c2:
                 # Migrar registros con dueño viejo
                 _duenos_actuales = st.session_state["configuracion"].get("ibkr_duenos", [])
