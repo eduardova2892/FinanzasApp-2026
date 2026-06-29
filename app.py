@@ -2951,13 +2951,34 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 key="cfg_ibkr_duenos",
                 help="Ej: Eduardo, Ana, Roberto"
             )
-            if st.button("💾 Guardar dueños", key="btn_save_duenos"):
-                _nuevos = [d.strip() for d in _duenos_str.split(",") if d.strip()]
-                if _nuevos:
-                    st.session_state["configuracion"]["ibkr_duenos"] = _nuevos
-                    guardar("configuracion")
-                    st.success(f"✅ Dueños actualizados: {', '.join(_nuevos)}")
-                    st.rerun()
+            _d_c1, _d_c2 = st.columns(2)
+            with _d_c1:
+                if st.button("💾 Guardar dueños", key="btn_save_duenos"):
+                    _nuevos = [d.strip() for d in _duenos_str.split(",") if d.strip()]
+                    if _nuevos:
+                        st.session_state["configuracion"]["ibkr_duenos"] = _nuevos
+                        guardar("configuracion")
+                        st.success(f"✅ Dueños actualizados: {', '.join(_nuevos)}")
+                        st.rerun()
+            with _d_c2:
+                # Migrar registros con dueño viejo
+                _duenos_actuales = st.session_state["configuracion"].get("ibkr_duenos", [])
+                _inv_con_dueno_viejo = [
+                    r for r in st.session_state.get("inversiones_ibkr", [])
+                    if str(r.get("dueno","")) not in _duenos_actuales
+                ]
+                if _inv_con_dueno_viejo and _duenos_actuales:
+                    _mig_target = st.selectbox(
+                        f"Reasignar {len(_inv_con_dueno_viejo)} registro(s) con dueño no reconocido a:",
+                        _duenos_actuales, key="sel_mig_dueno"
+                    )
+                    if st.button(f"🔄 Reasignar a '{_mig_target}'", key="btn_mig_dueno"):
+                        for _r in st.session_state["inversiones_ibkr"]:
+                            if str(_r.get("dueno","")) not in _duenos_actuales:
+                                _r["dueno"] = _mig_target
+                        guardar("inversiones_ibkr")
+                        st.success(f"✅ {len(_inv_con_dueno_viejo)} registro(s) reasignados a '{_mig_target}'.")
+                        st.rerun()
         st.caption(
             "Primero agrega cash a IBKR desde una cuenta local; luego usa ese cash para comprar acciones o ETFs. Si compras un ticker nuevo, "
             "la app lo agrega automáticamente al catálogo y puede consultar Yahoo Finance como respaldo hasta que Airflow lo actualice."
@@ -3573,7 +3594,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     # ── Tabla editable con eliminación por fila ──────────────
                     _df_inv_edit = pd.DataFrame(_inv_list)
                     # Obtener lista de dueños desde configuración o usar default
-                    _duenos_cfg = st.session_state["configuracion"].get("ibkr_duenos", ["Eduardo", "Hermano", "Hermana"])
+                    _duenos_cfg = st.session_state["configuracion"].get("ibkr_duenos", ["Edu", "Hermano", "Hermana"])
                     _cols_show = ["fecha_compra", "ticker", "nombre", "dueno", "cantidad", "monto_invertido_usd", "precio_promedio_compra_usd", "moneda", "broker"]
                     for _c in _cols_show:
                         if _c not in _df_inv_edit.columns:
@@ -3588,6 +3609,10 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     _df_inv_edit["ticker"] = _df_inv_edit["ticker"].fillna("").astype(str).str.upper().str.strip()
                     _df_inv_edit["nombre"] = _df_inv_edit["nombre"].fillna("").astype(str)
                     _df_inv_edit["dueno"] = _df_inv_edit["dueno"].fillna(_duenos_cfg[0]).astype(str)
+                    # Incluir en las opciones del selectbox cualquier valor ya guardado en los registros
+                    # (aunque no esté en la config actual), para evitar incompatibilidad de tipos
+                    _duenos_en_registros = _df_inv_edit["dueno"].dropna().unique().tolist()
+                    _duenos_opciones = sorted(set(_duenos_cfg + _duenos_en_registros))
                     _df_inv_edit["🗑 Eliminar"] = False
 
                     _ed_inv = st.data_editor(
@@ -3600,7 +3625,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                             "fecha_compra": st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
                             "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
                             "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                            "dueno": st.column_config.SelectboxColumn("👤 Dueño", options=_duenos_cfg, width="small"),
+                            "dueno": st.column_config.SelectboxColumn("👤 Dueño", options=_duenos_opciones, width="small"),
                             "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
                             "monto_invertido_usd": st.column_config.NumberColumn("Invertido US$", min_value=0.0, step=10.0, format="%.2f", width="small"),
                             "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom.", disabled=True, format="%.2f", width="small"),
