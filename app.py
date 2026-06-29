@@ -3559,6 +3559,15 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                     for _c in _cols_show:
                         if _c not in _df_inv_edit.columns:
                             _df_inv_edit[_c] = ""
+                    # Asegurar tipos correctos antes del data_editor
+                    _df_inv_edit["fecha_compra"] = pd.to_datetime(_df_inv_edit["fecha_compra"], errors="coerce").dt.date
+                    _df_inv_edit["cantidad"] = pd.to_numeric(_df_inv_edit["cantidad"], errors="coerce").fillna(0.0)
+                    _df_inv_edit["monto_invertido_usd"] = pd.to_numeric(_df_inv_edit["monto_invertido_usd"], errors="coerce").fillna(0.0)
+                    _df_inv_edit["precio_promedio_compra_usd"] = pd.to_numeric(_df_inv_edit["precio_promedio_compra_usd"], errors="coerce").fillna(0.0)
+                    _df_inv_edit["moneda"] = _df_inv_edit["moneda"].fillna("USD").astype(str)
+                    _df_inv_edit["broker"] = _df_inv_edit["broker"].fillna("IBKR").astype(str)
+                    _df_inv_edit["ticker"] = _df_inv_edit["ticker"].fillna("").astype(str).str.upper().str.strip()
+                    _df_inv_edit["nombre"] = _df_inv_edit["nombre"].fillna("").astype(str)
                     _df_inv_edit["🗑 Eliminar"] = False
 
                     _ed_inv = st.data_editor(
