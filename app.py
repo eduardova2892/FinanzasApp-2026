@@ -4199,45 +4199,56 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                                     st.plotly_chart(_fig_dist, use_container_width=True)
 
                             with _gt3:
-                                st.caption("Precio de mercado de **1 acción** — evolución desde la fecha de compra hasta hoy según actualizaciones de Yahoo Finance.")
+                                st.caption("Precio de mercado de **1 acción** — línea continua desde fecha de compra hasta hoy. Verde = sube, Rojo = baja.")
                                 _tickers_sel_g3 = st.multiselect("Tickers", _all_tickers_g, default=_all_tickers_g, key="ms_g3")
                                 _pts3 = _build_history_points(_tickers_sel_g3)
                                 if _pts3:
                                     _df3 = pd.DataFrame(_pts3)
                                     _df3["fecha"] = pd.to_datetime(_df3["fecha"], errors="coerce")
                                     _df3 = _df3.dropna(subset=["fecha"]).sort_values(["ticker","fecha"])
+                                    # Una sola leyenda por ticker: "VOO (Edu)"
                                     _df3["label"] = _df3["ticker"] + " (" + _df3["dueno"] + ")"
-                                    _df3["precio_txt"] = _df3["precio_accion"].apply(lambda x: f"US$ {x:,.2f}")
-                                    _fig3 = px.line(
-                                        _df3, x="fecha", y="precio_accion",
-                                        color="ticker", color_discrete_map=_color_map,
-                                        markers=True, symbol="tipo",
-                                        title="Precio por acción (US$) — evolución en el tiempo",
-                                        labels={"fecha": "Fecha", "precio_accion": "Precio (US$)", "ticker": "Ticker", "tipo": "Punto"},
-                                    )
-                                    _fig3.update_traces(
-                                        line_width=2.5, marker_size=10,
-                                        hovertemplate="<b>%{fullData.name}</b><br>Fecha: %{x|%d %b %Y}<br>Precio: US$ %{y:,.2f}<extra></extra>"
-                                    )
-                                    # Añadir anotaciones de precio en el último punto de cada ticker
+
+                                    import plotly.graph_objects as go
+                                    _fig3 = go.Figure()
                                     for _tk3 in _tickers_sel_g3:
-                                        _last = _df3[(_df3["ticker"]==_tk3) & (_df3["tipo"]=="📍 Hoy")]
-                                        if not _last.empty:
-                                            _fig3.add_annotation(
-                                                x=_last.iloc[-1]["fecha"], y=_last.iloc[-1]["precio_accion"],
-                                                text=f"US$ {_last.iloc[-1]['precio_accion']:,.2f}",
-                                                showarrow=True, arrowhead=2, arrowsize=1,
-                                                font=dict(size=10, color=_color_map.get(_tk3, "#fff")),
-                                                bgcolor="rgba(0,0,0,0.5)", borderpad=3,
-                                            )
+                                        _sub = _df3[_df3["ticker"] == _tk3].sort_values("fecha")
+                                        if _sub.empty:
+                                            continue
+                                        _own3 = _sub.iloc[0]["dueno"]
+                                        _col3 = _color_map.get(_tk3, "#888")
+                                        _p_ini = _sub.iloc[0]["precio_accion"]
+                                        _p_fin = _sub.iloc[-1]["precio_accion"]
+                                        _line_col = "#2ecc71" if _p_fin >= _p_ini else "#e74c3c"
+                                        _rend3 = ((_p_fin - _p_ini) / _p_ini * 100) if _p_ini > 0 else 0
+                                        _fig3.add_trace(go.Scatter(
+                                            x=_sub["fecha"], y=_sub["precio_accion"],
+                                            mode="lines+markers",
+                                            name=f"{_tk3} ({_own3})  {_rend3:+.1f}%",
+                                            line=dict(color=_line_col, width=2.5),
+                                            marker=dict(color=_col3, size=8, line=dict(color="#fff", width=1)),
+                                            hovertemplate=f"<b>{_tk3} ({_own3})</b><br>%{{x|%d %b %Y}}<br>US$ %{{y:,.2f}}<br>Rendimiento: {_rend3:+.1f}%<extra></extra>",
+                                        ))
+                                        # Anotación en el punto final
+                                        _fig3.add_annotation(
+                                            x=_sub.iloc[-1]["fecha"], y=_sub.iloc[-1]["precio_accion"],
+                                            text=f"<b>US$ {_p_fin:,.2f}</b><br>{_rend3:+.1f}%",
+                                            showarrow=True, arrowhead=2, arrowcolor=_line_col,
+                                            font=dict(size=9, color=_line_col),
+                                            bgcolor="rgba(0,0,0,0.6)", bordercolor=_line_col, borderpad=4,
+                                            xanchor="left", yanchor="middle",
+                                        )
                                     _fig3.update_layout(
+                                        title="Precio por acción (US$) — evolución en el tiempo",
+                                        xaxis_title="Fecha", yaxis_title="Precio (US$)",
                                         yaxis_tickprefix="US$ ", hovermode="x unified",
                                         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                                         font_color="#e0e0e0", yaxis_gridcolor="rgba(255,255,255,0.08)",
-                                        legend_title="Ticker"
+                                        legend_title="Ticker (Dueño)  Rend.",
+                                        legend=dict(bgcolor="rgba(0,0,0,0.4)", bordercolor="rgba(255,255,255,0.1)", borderwidth=1),
                                     )
                                     st.plotly_chart(_fig3, use_container_width=True)
-                                    st.caption("💡 Cada punto 🛒 es el precio promedio de compra. Los puntos 📅 y 📍 son actualizaciones de Yahoo Finance.")
+                                    st.caption("💡 El gráfico crece con cada actualización del botón 🔄.")
                                 else:
                                     st.info("No hay datos. Actualiza precios con el botón 🔄.")
 
@@ -4252,33 +4263,44 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
 
                                     _col4a, _col4b = st.columns(2)
                                     with _col4a:
-                                        _fig4a = px.line(
-                                            _df4, x="fecha", y="valor_invertido",
-                                            color="ticker", color_discrete_map=_color_map,
-                                            markers=True, symbol="tipo",
-                                            title="Valor de lo invertido (US$)",
-                                            labels={"fecha": "Fecha", "valor_invertido": "Valor (US$)", "ticker": "Ticker"},
+                                        import plotly.graph_objects as go
+                                    _fig4a = go.Figure()
+                                    for _tk4 in _tickers_sel_g4:
+                                        _sub4 = _df4[_df4["ticker"] == _tk4].sort_values("fecha")
+                                        if _sub4.empty:
+                                            continue
+                                        _own4 = _sub4.iloc[0]["dueno"]
+                                        _inv_ini4 = _sub4.iloc[0]["valor_invertido"]
+                                        _inv_fin4 = _sub4.iloc[-1]["valor_invertido"]
+                                        _rend4 = _sub4.iloc[-1]["rendimiento_pct"]
+                                        _lc4 = "#2ecc71" if _inv_fin4 >= _inv_ini4 else "#e74c3c"
+                                        _col4 = _color_map.get(_tk4, "#888")
+                                        _fig4a.add_trace(go.Scatter(
+                                            x=_sub4["fecha"], y=_sub4["valor_invertido"],
+                                            mode="lines+markers",
+                                            name=f"{_tk4} ({_own4})  {_rend4:+.1f}%",
+                                            line=dict(color=_lc4, width=2.5),
+                                            marker=dict(color=_col4, size=8, line=dict(color="#fff", width=1)),
+                                            hovertemplate=f"<b>{_tk4} ({_own4})</b><br>%{{x|%d %b %Y}}<br>US$ %{{y:,.2f}}<br>Rend: {_rend4:+.1f}%<extra></extra>",
+                                        ))
+                                        _fig4a.add_annotation(
+                                            x=_sub4.iloc[-1]["fecha"], y=_inv_fin4,
+                                            text=f"<b>US$ {_inv_fin4:,.2f}</b><br>{_rend4:+.1f}%",
+                                            showarrow=True, arrowhead=2, arrowcolor=_lc4,
+                                            font=dict(size=9, color=_lc4),
+                                            bgcolor="rgba(0,0,0,0.6)", bordercolor=_lc4, borderpad=4,
+                                            xanchor="left", yanchor="middle",
                                         )
-                                        _fig4a.update_traces(
-                                            line_width=2.5, marker_size=10,
-                                            hovertemplate="<b>%{fullData.name}</b><br>%{x|%d %b %Y}<br>US$ %{y:,.2f}<extra></extra>"
-                                        )
-                                        # Anotaciones valor actual
-                                        for _tk4 in _tickers_sel_g4:
-                                            _last4 = _df4[(_df4["ticker"]==_tk4) & (_df4["tipo"]=="📍 Hoy")]
-                                            if not _last4.empty:
-                                                _fig4a.add_annotation(
-                                                    x=_last4.iloc[-1]["fecha"], y=_last4.iloc[-1]["valor_invertido"],
-                                                    text=f"US$ {_last4.iloc[-1]['valor_invertido']:,.2f}",
-                                                    showarrow=True, arrowhead=2, font=dict(size=9, color=_color_map.get(_tk4,"#fff")),
-                                                    bgcolor="rgba(0,0,0,0.5)", borderpad=3,
-                                                )
-                                        _fig4a.update_layout(
-                                            yaxis_tickprefix="US$ ", hovermode="x unified", showlegend=True,
-                                            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                                            font_color="#e0e0e0", yaxis_gridcolor="rgba(255,255,255,0.08)"
-                                        )
-                                        st.plotly_chart(_fig4a, use_container_width=True)
+                                    _fig4a.update_layout(
+                                        title="Valor de lo invertido (US$)",
+                                        xaxis_title="Fecha", yaxis_title="Valor (US$)",
+                                        yaxis_tickprefix="US$ ", hovermode="x unified",
+                                        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                        font_color="#e0e0e0", yaxis_gridcolor="rgba(255,255,255,0.08)",
+                                        legend_title="Ticker (Dueño)  Rend.",
+                                        legend=dict(bgcolor="rgba(0,0,0,0.4)", bordercolor="rgba(255,255,255,0.1)", borderwidth=1),
+                                    )
+                                    st.plotly_chart(_fig4a, use_container_width=True)
 
                                     with _col4b:
                                         _df4_hoy = _df4[_df4["tipo"]=="📍 Hoy"].copy()
