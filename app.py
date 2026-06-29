@@ -3546,108 +3546,117 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 _df_inv = _df_inv.sort_values("fecha_compra", ascending=False).reset_index(drop=True)
 
             with st.expander("📋 Compras registradas", expanded=False):
-                st.caption(
-                    "Puedes editar ticker, cantidad o monto. El precio promedio se recalcula al guardar. "
-                    "Si agregas un ticker nuevo, la app lo agrega automáticamente al catálogo."
-                )
+                st.caption("Edita o elimina compras individuales. Los cambios se aplican al guardar.")
 
-                _df_inv_show = _df_inv.copy()
-                _df_inv_show["Eliminar"] = False
+                _inv_list = st.session_state.get("inversiones_ibkr", [])
 
-                _ed_inv = st.data_editor(
-                    _df_inv_show,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    height=min(38 * len(_df_inv_show) + 46, 360),
-                    column_config={
-                        "id": None,
-                        "fecha_compra": st.column_config.DateColumn("📅 Fecha compra", required=True, width="small"),
-                        "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
-                        "nombre": st.column_config.TextColumn("Nombre", width="medium"),
-                        "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], required=True, width="small"),
-                        "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
-                        "monto_invertido_usd": st.column_config.NumberColumn("Invertido USD", min_value=0.0, step=10.0, format="US$ %.2f", width="small"),
-                        "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio promedio USD", disabled=True, format="US$ %.2f", width="small"),
-                        "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
-                        "Eliminar": st.column_config.CheckboxColumn("🗑"),
-                    },
-                    key="editor_inversiones_ibkr"
-                )
+                if not _inv_list:
+                    st.info("No hay compras registradas aún.")
+                else:
+                    # ── Tabla editable con eliminación por fila ──────────────
+                    _df_inv_edit = pd.DataFrame(_inv_list)
+                    _cols_show = ["fecha_compra", "ticker", "nombre", "cantidad", "monto_invertido_usd", "precio_promedio_compra_usd", "moneda", "broker"]
+                    for _c in _cols_show:
+                        if _c not in _df_inv_edit.columns:
+                            _df_inv_edit[_c] = ""
+                    _df_inv_edit["🗑 Eliminar"] = False
 
-                if st.button("💾 Guardar cambios — Portafolio IBKR", type="primary"):
-                    _df_save = _ed_inv.copy()
-                    _df_save = _df_save[_df_save["Eliminar"] == False].drop(columns=["Eliminar"]).copy()
+                    _ed_inv = st.data_editor(
+                        _df_inv_edit[_cols_show + ["🗑 Eliminar"]],
+                        use_container_width=True,
+                        hide_index=True,
+                        num_rows="fixed",
+                        height=min(40 * len(_df_inv_edit) + 50, 420),
+                        column_config={
+                            "fecha_compra": st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
+                            "ticker": st.column_config.TextColumn("Ticker", required=True, width="small"),
+                            "nombre": st.column_config.TextColumn("Nombre", width="medium"),
+                            "cantidad": st.column_config.NumberColumn("Cantidad", min_value=0.0, step=0.0001, format="%.4f", width="small"),
+                            "monto_invertido_usd": st.column_config.NumberColumn("Invertido US$", min_value=0.0, step=10.0, format="%.2f", width="small"),
+                            "precio_promedio_compra_usd": st.column_config.NumberColumn("Precio prom.", disabled=True, format="%.2f", width="small"),
+                            "moneda": st.column_config.SelectboxColumn("Moneda", options=["USD"], width="small"),
+                            "broker": st.column_config.SelectboxColumn("Broker", options=["IBKR"], width="small"),
+                            "🗑 Eliminar": st.column_config.CheckboxColumn("🗑 Eliminar", width="small"),
+                        },
+                        key="editor_inversiones_ibkr"
+                    )
 
-                    if not _df_save.empty:
-                        _df_save["id"] = _df_save["id"].apply(
-                            lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                    # Contar filas marcadas para eliminar
+                    _n_eliminar = int(_ed_inv["🗑 Eliminar"].sum()) if "🗑 Eliminar" in _ed_inv.columns else 0
+
+                    _btn_c1, _btn_c2 = st.columns([2, 1])
+                    with _btn_c1:
+                        _btn_guardar = st.button(
+                            "💾 Guardar cambios",
+                            type="primary",
+                            key="btn_guardar_portafolio",
+                            use_container_width=True,
                         )
-                        _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
-                        _df_save["ticker"] = _df_save["ticker"].fillna("").astype(str).str.upper().str.strip()
-                        _df_save["nombre"] = _df_save.apply(
-                            lambda r: str(r["nombre"]).strip()
-                            if str(r.get("nombre", "")).strip() not in ["", "None", "nan"]
-                            else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
-                            axis=1
-                        )
-                        _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
-                        _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
-                        _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
-                        _df_save["monto_invertido_usd"] = pd.to_numeric(
-                            _df_save["monto_invertido_usd"], errors="coerce"
-                        ).fillna(0.0)
-                        _df_save["precio_promedio_compra_usd"] = _df_save.apply(
-                            lambda r: (r["monto_invertido_usd"] / r["cantidad"]) if r["cantidad"] > 0 else 0.0,
-                            axis=1
-                        )
+                    with _btn_c2:
+                        if _n_eliminar > 0:
+                            st.warning(f"⚠️ {_n_eliminar} fila(s) marcadas para eliminar")
 
-                        _df_save = _df_save.dropna(subset=["fecha_compra"])
-                        _df_save = _df_save[
-                            (_df_save["ticker"] != "") &
-                            (_df_save["cantidad"] > 0) &
-                            (_df_save["monto_invertido_usd"] > 0)
-                        ].copy()
+                    if _btn_guardar:
+                        _df_save = _ed_inv.copy()
+                        # Eliminar filas marcadas
+                        _df_save = _df_save[_df_save["🗑 Eliminar"] == False].drop(columns=["🗑 Eliminar"]).copy()
 
-                        # Asegurar que todo ticker comprado exista en el catálogo, sin sobreescribir
-                        # tipo/source_symbol si ya estaban correctamente definidos.
-                        for _, _row_inv in _df_save.iterrows():
-                            try:
-                                _ticker_tmp = str(_row_inv["ticker"]).upper().strip()
-                                _cat_match = _df_catalogo_ibkr[
-                                    _df_catalogo_ibkr["ticker"].astype(str).str.upper().str.strip() == _ticker_tmp
-                                ]
+                        if not _df_save.empty:
+                            # Restaurar IDs originales (preservar del session_state original)
+                            _ids_orig = {
+                                (str(r.get("ticker","")).upper(), str(r.get("fecha_compra",""))): r.get("id", "")
+                                for r in _inv_list
+                            }
+                            _df_save["fecha_compra"] = pd.to_datetime(_df_save["fecha_compra"], errors="coerce").dt.strftime("%Y-%m-%d")
+                            _df_save["ticker"] = _df_save["ticker"].fillna("").astype(str).str.upper().str.strip()
+                            _df_save["id"] = _df_save.apply(
+                                lambda r: _ids_orig.get((r["ticker"], str(r["fecha_compra"])), "") or str(uuid.uuid4()), axis=1
+                            )
+                            _df_save["nombre"] = _df_save.apply(
+                                lambda r: str(r["nombre"]).strip()
+                                if str(r.get("nombre","")).strip() not in ["","None","nan"]
+                                else obtener_nombre_instrumento_ibkr(r["ticker"], _df_catalogo_ibkr),
+                                axis=1
+                            )
+                            _df_save["broker"] = _df_save["broker"].fillna("IBKR").astype(str)
+                            _df_save["moneda"] = _df_save["moneda"].fillna("USD").astype(str).str.upper()
+                            _df_save["cantidad"] = pd.to_numeric(_df_save["cantidad"], errors="coerce").fillna(0.0)
+                            _df_save["monto_invertido_usd"] = pd.to_numeric(_df_save["monto_invertido_usd"], errors="coerce").fillna(0.0)
+                            _df_save["precio_promedio_compra_usd"] = _df_save.apply(
+                                lambda r: round(r["monto_invertido_usd"] / r["cantidad"], 4) if r["cantidad"] > 0 else 0.0, axis=1
+                            )
+                            _df_save = _df_save.dropna(subset=["fecha_compra"])
+                            _df_save = _df_save[
+                                (_df_save["ticker"] != "") &
+                                (_df_save["cantidad"] > 0) &
+                                (_df_save["monto_invertido_usd"] > 0)
+                            ].copy()
 
-                                if not _cat_match.empty:
-                                    _tipo_tmp = str(_cat_match.iloc[0].get("tipo", "Accion"))
-                                    _source_tmp = str(_cat_match.iloc[0].get("source_symbol", _ticker_tmp)).strip() or _ticker_tmp
-                                    _fuente_tmp = str(_cat_match.iloc[0].get("fuente_precio", "Yahoo Finance"))
-                                else:
-                                    _tipo_tmp = "Accion"
-                                    _source_tmp = _ticker_tmp
-                                    _fuente_tmp = "Yahoo Finance"
+                            # Sincronizar catálogo
+                            for _, _row_inv in _df_save.iterrows():
+                                try:
+                                    _ticker_tmp = str(_row_inv["ticker"]).upper().strip()
+                                    _cat_match = _df_catalogo_ibkr[
+                                        _df_catalogo_ibkr["ticker"].astype(str).str.upper().str.strip() == _ticker_tmp
+                                    ]
+                                    _tipo_tmp = str(_cat_match.iloc[0].get("tipo", "Accion")) if not _cat_match.empty else "Accion"
+                                    _source_tmp = str(_cat_match.iloc[0].get("source_symbol", _ticker_tmp)).strip() or _ticker_tmp if not _cat_match.empty else _ticker_tmp
+                                    _fuente_tmp = str(_cat_match.iloc[0].get("fuente_precio", "Yahoo Finance")) if not _cat_match.empty else "Yahoo Finance"
+                                    upsert_instrumento_ibkr(
+                                        ticker=_ticker_tmp, nombre=_row_inv["nombre"],
+                                        tipo=_tipo_tmp, moneda=_row_inv["moneda"],
+                                        source_symbol=_source_tmp, fuente_precio=_fuente_tmp, activo=True,
+                                    )
+                                except Exception:
+                                    pass
 
-                                upsert_instrumento_ibkr(
-                                    ticker=_ticker_tmp,
-                                    nombre=_row_inv["nombre"],
-                                    tipo=_tipo_tmp,
-                                    moneda=_row_inv["moneda"],
-                                    source_symbol=_source_tmp,
-                                    fuente_precio=_fuente_tmp,
-                                    activo=True,
-                                )
-                            except Exception:
-                                pass
+                            st.session_state["inversiones_ibkr"] = _df_save.sort_values("fecha_compra", ascending=False).to_dict("records")
+                        else:
+                            st.session_state["inversiones_ibkr"] = []
 
-                        st.session_state["inversiones_ibkr"] = _df_save.sort_values(
-                            "fecha_compra", ascending=False
-                        ).to_dict("records")
-                    else:
-                        st.session_state["inversiones_ibkr"] = []
-
-                    guardar("inversiones_ibkr")
-                    st.success("✅ Portafolio IBKR actualizado.")
-                    st.rerun()
+                        guardar("inversiones_ibkr")
+                        st.success(f"✅ Portafolio guardado. {_n_eliminar} fila(s) eliminadas." if _n_eliminar > 0 else "✅ Portafolio IBKR actualizado.")
+                        st.rerun()
 
                 # ──────────────────────────────────────────────
                 # Resumen por ticker y valorización
@@ -3842,10 +3851,55 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 _faltantes = _df_resumen.loc[~_df_resumen["tiene_precio"], "ticker"].tolist()
                 if _faltantes:
                     st.warning(
-                        "Hay tickers sin precio disponible: "
-                        + ", ".join(_faltantes)
-                        + ". Si Yahoo Finance usa un símbolo distinto, edita source_symbol en el catálogo."
+                        "Tickers sin precio: " + ", ".join(_faltantes)
+                        + ". Usa el botón 🔄 individual para recargar, o edita source_symbol en el catálogo IBKR."
                     )
+
+                # ── Recarga individual por ticker ──────────────────────────────
+                _tickers_portafolio = sorted(_df_resumen["ticker"].tolist())
+                if _tickers_portafolio:
+                    with st.expander("🔄 Recargar precio de un ticker específico", expanded=False):
+                        _rc_cols = st.columns([2, 1])
+                        with _rc_cols[0]:
+                            _tk_sel = st.selectbox(
+                                "Ticker a actualizar",
+                                options=_tickers_portafolio,
+                                key="sel_tk_refresh"
+                            )
+                        with _rc_cols[1]:
+                            st.write("")
+                            st.write("")
+                            _btn_tk_refresh = st.button(f"🔄 Actualizar {_tk_sel}", key="btn_tk_refresh_individual", type="secondary")
+
+                        if _btn_tk_refresh and _tk_sel:
+                            _sym_sel = obtener_source_symbol_ibkr(_tk_sel, _df_catalogo_ibkr)
+                            _precio_sel = consultar_precio_yahoo_ibkr(_sym_sel)
+                            if _precio_sel:
+                                _now_lima_sel = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).strftime("%Y-%m-%d %H:%M:%S")
+                                _fila_nueva = {
+                                    "ticker": _tk_sel,
+                                    "precio_actual_usd": _precio_sel["precio_actual_usd"],
+                                    "fecha_precio": _precio_sel["fecha_precio"],
+                                    "hora_precio": _precio_sel["hora_precio"],
+                                    "fuente_precio": "Yahoo Finance (manual)",
+                                    "exchange": _precio_sel.get("exchange", ""),
+                                    "updated_at_lima": _now_lima_sel,
+                                }
+                                try:
+                                    _df_ex = cargar_precios_ibkr_airflow()
+                                    if not _df_ex.empty:
+                                        _df_ex = _df_ex[_df_ex["ticker"] != _tk_sel].copy()
+                                        _df_comb = pd.concat([_df_ex, pd.DataFrame([_fila_nueva])], ignore_index=True)
+                                    else:
+                                        _df_comb = pd.DataFrame([_fila_nueva])
+                                    IBKR_MARKET_PRICES_PATH.parent.mkdir(parents=True, exist_ok=True)
+                                    _df_comb.to_csv(IBKR_MARKET_PRICES_PATH, index=False)
+                                    st.success(f"✅ {_tk_sel}: US$ {_precio_sel['precio_actual_usd']:.2f} actualizado desde Yahoo Finance")
+                                    st.rerun()
+                                except Exception as _e_tk:
+                                    st.error(f"Error guardando precio de {_tk_sel}: {_e_tk}")
+                            else:
+                                st.error(f"No se pudo obtener precio de {_tk_sel} desde Yahoo Finance. Verifica el source_symbol en el catálogo.")
 
                 _df_tabla = _df_resumen.copy()
                 if _total_cash_ibkr_usd != 0:
