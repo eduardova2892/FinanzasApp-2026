@@ -2941,10 +2941,13 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
         # 4.2 PORTAFOLIO IBKR
         # ==================================================
     with st.expander("📈 4.2 IBKR: cash e inversiones", expanded=False):
+        # Definir _duenos_cfg una sola vez al inicio de la sección 4.2
+        _duenos_cfg = st.session_state["configuracion"].get("ibkr_duenos", ["Edu", "Hermano", "Hermana"])
+
         # ── Configuración de dueños de acciones ──────────────────
         with st.expander("👥 Gestionar dueños de acciones", expanded=False):
             st.caption("Define quiénes pueden ser dueños de acciones en el portafolio IBKR.")
-            _duenos_actual = st.session_state["configuracion"].get("ibkr_duenos", ["Eduardo", "Hermano", "Hermana"])
+            _duenos_actual = st.session_state["configuracion"].get("ibkr_duenos", ["Edu", "Hermano", "Hermana"])
             _duenos_str = st.text_input(
                 "Dueños (separados por coma)",
                 value=", ".join(_duenos_actual),
@@ -3593,8 +3596,7 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
                 else:
                     # ── Tabla editable con eliminación por fila ──────────────
                     _df_inv_edit = pd.DataFrame(_inv_list)
-                    # Obtener lista de dueños desde configuración o usar default
-                    _duenos_cfg = st.session_state["configuracion"].get("ibkr_duenos", ["Edu", "Hermano", "Hermana"])
+                    # _duenos_cfg ya definido al inicio de la sección 4.2
                     _cols_show = ["fecha_compra", "ticker", "nombre", "dueno", "cantidad", "monto_invertido_usd", "precio_promedio_compra_usd", "moneda", "broker"]
                     for _c in _cols_show:
                         if _c not in _df_inv_edit.columns:
