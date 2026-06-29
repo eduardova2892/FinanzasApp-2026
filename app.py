@@ -1610,14 +1610,19 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
                 help="Se auto-rellena desde Airflow si hay datos. Puedes ajustarlo manualmente."
             )
 
-        st.session_state["configuracion"] = {
+        # Merge: preservar campos extra (ibkr_duenos, meta_ahorro, ajustes, etc.)
+        _cfg_prev = st.session_state.get("configuracion", {})
+        if not isinstance(_cfg_prev, dict):
+            _cfg_prev = {}
+        _cfg_prev.update({
             "fecha_inicio_sim": fecha_inicio_sim.isoformat(),
             "fecha_fin_sim": fecha_fin_sim.isoformat(),
             "ahorro_inicial": ahorro_inicial,
             "nombre_cuenta_principal": nombre_cuenta_principal,
             "tipo_cambio_default": tipo_cambio_default,
-            "fuente_tipo_cambio_default": _fuente_tc_cfg
-        }
+            "fuente_tipo_cambio_default": _fuente_tc_cfg,
+        })
+        st.session_state["configuracion"] = _cfg_prev
         guardar("configuracion")
 
         st.divider()
