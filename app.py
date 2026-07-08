@@ -1099,7 +1099,7 @@ def calcular_resumen_ibkr_global(tc_usd_pen=None, usar_fallback_yahoo=True):
 hoy_peru = pd.Timestamp.now(
     tz=ZoneInfo("America/Lima")
 ).date()
-st.set_page_config(page_title="Finanzas Personales", layout="wide")
+st.set_page_config(page_title="Mi Chanchito 🐷", layout="wide")
 
 # ==================================================
 # CONEXIÓN SUPABASE
@@ -1114,7 +1114,7 @@ supabase = create_client(
 # ==================================================
 if "user" not in st.session_state:
     st.markdown(
-        "<h1 style='text-align:center;margin-top:80px'>📊 Finanzas Personales</h1>"
+        "<h1 style='text-align:center;margin-top:80px'>🐷💰 Mi Chanchito</h1>"
         "<p style='text-align:center;color:gray;margin-bottom:40px'>Inicia sesión para continuar</p>",
         unsafe_allow_html=True
     )
@@ -1330,8 +1330,9 @@ defaults = {
     "gastos_tarjeta": [],
     "gastos_recurrentes_tarjeta": [],
     "categorias": [
-        "Alimentación","Familia","Supermercado","Tecnología","Salidas y entretenimiento","Movilidad","Ropa","Regalos","Mascotas",
-        "Vuelos", "Salud","Entretenimiento","Combustible","Otros"],
+        "Alimentación","Familia","Supermercado","Tecnología","Salidas y entretenimiento",
+        "Movilidad","Ropa","Regalos","Mascotas","Vuelos","Salud","Entretenimiento",
+        "Combustible","Transporte","Política","Otros"],
 "cuentas_ahorro": [],
 "transferencias": [],
 "pagos_tarjeta": [],
@@ -1340,6 +1341,7 @@ defaults = {
 "simulaciones_prestamo": [],
 "inversiones_ibkr": [],
 "ibkr_cash_movimientos": [],
+    "proyectos_gastos": [],
 "ibkr_transferencias": [],
 }
 
@@ -1854,6 +1856,26 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
     # TC global de trabajo para cálculos que ocurren antes del bloque de simulación.
     # Sale de la configuración guardada arriba, que a su vez se auto-rellena desde Airflow.
     _tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+
+
+    # ── Categorías personalizadas ──────────────────────
+    with st.expander("🏷️ Categorías de gastos", expanded=False):
+        st.caption("Personaliza las categorías de todos los selectores. Una por línea, sin duplicados.")
+        _fix_t = {"Alimentacion":"Alimentación","Alimentaci?n":"Alimentación",
+                  "Tecnologia":"Tecnología","Politica":"Política"}
+        _cats_curr = sorted(set(_fix_t.get(c,c) for c in st.session_state.get("categorias", [])))
+        _cats_ta = st.text_area("Categorías", value=chr(10).join(_cats_curr),
+                                height=210, key="cfg_cats_ta",
+                                help="Una categoría por línea. Se guardan en orden alfabético.")
+        if st.button("💾 Guardar categorías", key="btn_save_cats"):
+            _nuevas_cats = sorted(set(
+                _fix_t.get(c.strip(), c.strip()) for c in _cats_ta.splitlines() if c.strip()
+            ))
+            if _nuevas_cats:
+                st.session_state["categorias"] = _nuevas_cats
+                guardar("categorias")
+                st.success(f"✅ {len(_nuevas_cats)} categorías guardadas.")
+                st.rerun()
 
     # ==================================================
     # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
@@ -5819,3 +5841,175 @@ with st.expander("📊 5. Gráficos y resultados", expanded=True):
             st.info("No hay gastos válidos con tarjeta para calcular ciclos.")
     else:
         st.info("No hay gastos con tarjeta registrados.")
+
+    # ─────────────────────────────────────────────────────────
+    # PROYECTOS / VIAJES — Seguimiento de gastos por evento
+    # ─────────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("✈️ Proyectos y viajes — seguimiento de gastos", expanded=False):
+        st.caption("Agrupa gastos por proyecto o viaje (ej: Europa 2026). Cada gasto tiene fecha, monto, moneda y comentario.")
+
+        _proyectos_all = st.session_state.get("proyectos_gastos", [])
+
+        # ── Selector de proyecto ───────────────────────────────
+        _proy_nombres = sorted(set(p.get("proyecto","") for p in _proyectos_all if p.get("proyecto","")))
+        _pc1, _pc2 = st.columns([3, 1])
+        with _pc1:
+            _proy_sel = st.selectbox("📂 Proyecto / viaje", ["(Todos)"] + _proy_nombres, key="proy_sel")
+        with _pc2:
+            _nuevo_proy = st.text_input("➕ Nuevo proyecto", placeholder="ej: Europa 2026", key="new_proy_name")
+        if _nuevo_proy.strip() and st.button("Crear", key="btn_crear_proy"):
+            st.session_state["proyectos_gastos"].append({
+                "id": str(uuid.uuid4()), "proyecto": _nuevo_proy.strip(),
+                "fecha": hoy_peru.strftime("%Y-%m-%d"), "monto": 0.0,
+                "moneda": "PEN", "categoria": "Otros", "comentario": "", "cuenta": "principal"
+            })
+            guardar("proyectos_gastos")
+            st.rerun()
+
+        st.divider()
+
+        # ── Agregar gasto a un proyecto ─────────────────────────
+        if _proy_nombres:
+            with st.expander("➕ Agregar gasto a un proyecto", expanded=False):
+                _pa1, _pa2, _pa3 = st.columns([2, 1, 1])
+                with _pa1:
+                    _proy_target = st.selectbox("Proyecto", _proy_nombres, key="proy_add_target")
+                    _proy_comentario = st.text_input("💬 Comentario", placeholder="ej: Vuelo Madrid-Roma", key="proy_coment")
+                with _pa2:
+                    _proy_fecha = st.date_input("📅 Fecha", value=hoy_peru, key="proy_fecha")
+                    _proy_cat = st.selectbox("🏷️ Categoría",
+                        sorted(st.session_state.get("categorias", ["Vuelos","Hoteles","Alimentación","Otros"])),
+                        key="proy_cat")
+                with _pa3:
+                    _proy_monto = st.number_input("💰 Monto", min_value=0.0, step=10.0, key="proy_monto")
+                    _proy_moneda = st.selectbox("Moneda", ["PEN","USD","EUR","GBP"], key="proy_moneda")
+                if st.button("💾 Agregar gasto", key="btn_add_proy_gasto", type="primary"):
+                    if _proy_monto > 0:
+                        st.session_state["proyectos_gastos"].append({
+                            "id": str(uuid.uuid4()), "proyecto": _proy_target,
+                            "fecha": str(_proy_fecha), "monto": float(_proy_monto),
+                            "moneda": _proy_moneda, "categoria": _proy_cat,
+                            "comentario": _proy_comentario.strip(),
+                            "cuenta": "principal"
+                        })
+                        guardar("proyectos_gastos")
+                        st.success(f"✅ Gasto de {_proy_moneda} {_proy_monto:,.2f} agregado a '{_proy_target}'.")
+                        st.rerun()
+                    else:
+                        st.warning("Ingresa un monto mayor a 0.")
+
+        # ── Resumen y gráfico del proyecto seleccionado ─────────
+        _df_proy_all = pd.DataFrame(_proyectos_all) if _proyectos_all else pd.DataFrame()
+        if not _df_proy_all.empty:
+            _df_proy_all["fecha"] = pd.to_datetime(_df_proy_all["fecha"], errors="coerce")
+            _df_proy_all["monto"] = pd.to_numeric(_df_proy_all["monto"], errors="coerce").fillna(0.0)
+            # Convertir todo a PEN para comparar
+            _df_proy_all["monto_pen"] = _df_proy_all.apply(
+                lambda r: r["monto"] * _tc_default if r["moneda"] == "USD" else
+                          r["monto"] * _tc_default * 1.07 if r["moneda"] == "EUR" else
+                          r["monto"] * _tc_default * 1.27 if r["moneda"] == "GBP" else
+                          r["monto"], axis=1
+            )
+
+            _df_proy_f = _df_proy_all if _proy_sel == "(Todos)" else _df_proy_all[_df_proy_all["proyecto"] == _proy_sel]
+
+            if not _df_proy_f.empty:
+                # ── Métricas resumen ──────────────────────────────
+                _total_pen = _df_proy_f["monto_pen"].sum()
+                _n_gastos = len(_df_proy_f)
+                _cats_proy = _df_proy_f.groupby("categoria")["monto_pen"].sum().sort_values(ascending=False)
+                _m1, _m2, _m3 = st.columns(3)
+                _m1.metric("Total gastado (S/)", f"S/ {_total_pen:,.2f}")
+                _m2.metric("Número de gastos", str(_n_gastos))
+                _m3.metric("Categoría mayor", _cats_proy.index[0] if not _cats_proy.empty else "—")
+
+                # ── Gráfico de barras acumulado por fecha ──────────
+                _df_proy_sorted = _df_proy_f.sort_values("fecha").copy()
+                _df_proy_sorted["acumulado"] = _df_proy_sorted["monto_pen"].cumsum()
+                _df_proy_sorted["label"] = _df_proy_sorted.apply(
+                    lambda r: f"{r['comentario'] or r['categoria']} — {r['moneda']} {r['monto']:,.0f}", axis=1
+                )
+
+                _fig_proy = go.Figure()
+                # Barras por categoría
+                for _cat_p in _df_proy_sorted["categoria"].unique():
+                    _sub_p = _df_proy_sorted[_df_proy_sorted["categoria"] == _cat_p]
+                    _fig_proy.add_trace(go.Bar(
+                        x=_sub_p["fecha"], y=_sub_p["monto_pen"],
+                        name=_cat_p,
+                        text=_sub_p["label"],
+                        textposition="inside",
+                        hovertemplate="<b>%{text}</b><br>%{x|%d %b %Y}<br>S/ %{y:,.2f}<extra></extra>",
+                    ))
+                # Línea acumulada
+                _fig_proy.add_trace(go.Scatter(
+                    x=_df_proy_sorted["fecha"], y=_df_proy_sorted["acumulado"],
+                    mode="lines+markers+text",
+                    name="Acumulado",
+                    line=dict(color="#F1C40F", width=2.5, dash="dot"),
+                    marker=dict(size=8),
+                    text=_df_proy_sorted["acumulado"].apply(lambda x: f"S/ {x:,.0f}"),
+                    textposition="top center",
+                    yaxis="y2",
+                ))
+                _fig_proy.update_layout(
+                    title=f"Gastos del proyecto: {_proy_sel}",
+                    barmode="stack",
+                    xaxis_title="Fecha",
+                    yaxis=dict(title="Gasto (S/)", gridcolor="rgba(255,255,255,0.08)", color=_font_col),
+                    yaxis2=dict(title="Acumulado (S/)", overlaying="y", side="right", color="#F1C40F", showgrid=False),
+                    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color=_font_col, family="Inter, sans-serif"),
+                    legend=dict(bgcolor="rgba(0,0,0,0.4)"),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(_fig_proy, use_container_width=True)
+
+                # ── Tabla de gastos editable ───────────────────────
+                with st.expander("📋 Ver / eliminar gastos del proyecto", expanded=False):
+                    _df_show = _df_proy_f[["fecha","proyecto","categoria","comentario","monto","moneda","monto_pen"]].copy()
+                    _df_show["fecha"] = _df_show["fecha"].dt.strftime("%Y-%m-%d")
+                    _df_show["🗑"] = False
+                    _ed_proy = st.data_editor(
+                        _df_show, use_container_width=True, hide_index=True, num_rows="fixed",
+                        column_config={
+                            "fecha": st.column_config.TextColumn("📅 Fecha", width="small"),
+                            "proyecto": st.column_config.TextColumn("Proyecto", width="medium"),
+                            "categoria": st.column_config.SelectboxColumn("🏷️ Categoría",
+                                options=sorted(st.session_state.get("categorias",["Otros"])), width="medium"),
+                            "comentario": st.column_config.TextColumn("💬 Comentario", width="large"),
+                            "monto": st.column_config.NumberColumn("Monto", format="%.2f", width="small"),
+                            "moneda": st.column_config.SelectboxColumn("Moneda", options=["PEN","USD","EUR","GBP"], width="small"),
+                            "monto_pen": st.column_config.NumberColumn("≈ S/", disabled=True, format="S/ %.2f", width="small"),
+                            "🗑": st.column_config.CheckboxColumn("🗑 Eliminar", width="small"),
+                        }, key="ed_proy_gastos"
+                    )
+                    if st.button("💾 Guardar cambios / eliminar", key="btn_save_proy_ed", type="primary"):
+                        _ids_del = set()
+                        _df_ed_result = _ed_proy[_ed_proy["🗑"] == False].copy()
+                        # Reconstruir todos los proyectos preservando los no filtrados
+                        _otros_proyectos = [p for p in _proyectos_all
+                                           if _proy_sel != "(Todos)" and p.get("proyecto") != _proy_sel]
+                        _nuevos_gastos = []
+                        for _, _row_ed in _df_ed_result.iterrows():
+                            _match = next((p for p in _proyectos_all
+                                          if p.get("fecha","")[:10] == str(_row_ed["fecha"])[:10]
+                                          and p.get("comentario","") == str(_row_ed.get("comentario",""))
+                                          and p.get("proyecto","") == str(_row_ed.get("proyecto",""))), None)
+                            _nuevos_gastos.append({
+                                "id": _match["id"] if _match else str(uuid.uuid4()),
+                                "proyecto": str(_row_ed.get("proyecto","")),
+                                "fecha": str(_row_ed["fecha"])[:10],
+                                "monto": float(_row_ed["monto"]),
+                                "moneda": str(_row_ed["moneda"]),
+                                "categoria": str(_row_ed["categoria"]),
+                                "comentario": str(_row_ed.get("comentario","")),
+                                "cuenta": "principal",
+                            })
+                        st.session_state["proyectos_gastos"] = _otros_proyectos + _nuevos_gastos
+                        guardar("proyectos_gastos")
+                        st.success("✅ Cambios guardados.")
+                        st.rerun()
+        else:
+            st.info("Crea un proyecto arriba y empieza a agregar gastos.")
