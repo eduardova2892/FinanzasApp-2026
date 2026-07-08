@@ -1530,12 +1530,19 @@ def limpiar_gastos_invalidos():
 limpiar_gastos_invalidos()
 
 
-# ══════════════════════════════════════════════════════
-# RESUMEN Y GRÁFICO PRINCIPAL DE SALDOS
-# ══════════════════════════════════════════════════════
+# ── Pre-carga de variables para el gráfico principal ────────────
+_conf_top = st.session_state.get("configuracion", {})
+_fi_str = _conf_top.get("fecha_inicio_sim")
+_ff_str = _conf_top.get("fecha_fin_sim")
+fecha_inicio_sim    = date.fromisoformat(_fi_str) if _fi_str else date(2026, 4, 1)
+fecha_fin_sim       = date.fromisoformat(_ff_str) if _ff_str else date(2028, 12, 31)
+nombre_cuenta_principal = _conf_top.get("nombre_cuenta_principal", "Cuenta principal")
+ahorro_inicial      = float(_conf_top.get("ahorro_inicial", 0.0))
+_tc_default         = float(_conf_top.get("tipo_cambio_default", 3.80))
 
-# ─────────────────────────────────────────────────────────
-# PALETA Y CONSTANTES
+# ══════════════════════════════════════════════════════
+# GRÁFICO PRINCIPAL — EVOLUCIÓN DE SALDOS
+# ══════════════════════════════════════════════════════
 # ─────────────────────────────────────────────────────────
 MESES_ES = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
@@ -1892,14 +1899,14 @@ fig_evol.update_xaxes(showgrid=False, color=_font_col)
 st.plotly_chart(fig_evol, use_container_width=True)
 
 with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
-
+    
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 2 — META MENSUAL DE AHORRO
     # ─────────────────────────────────────────────────────────
     st.divider()
-
+    
     mes_actual = pd.Timestamp(hoy_peru).to_period("M")
-
+    
     meta_col, _ = st.columns([1, 2])
     with meta_col:
         _meta_saved = float(st.session_state["configuracion"].get("meta_ahorro_mensual", 2000.0))
@@ -1911,24 +1918,24 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
         if meta_ahorro != _meta_saved:
             st.session_state["configuracion"]["meta_ahorro_mensual"] = meta_ahorro
             guardar("configuracion")
-
+    
     ingresos_mes_actual = (
         (ing_rec + ing_punt)
         .loc[(ing_rec + ing_punt).index.to_period("M") == mes_actual]
         .sum()
     )
-
+    
     fila_mes_actual = df_mes_tipo[df_mes_tipo["mes"] == mes_actual]
     if not fila_mes_actual.empty:
         gastos_fijos_mes_actual    = float(fila_mes_actual["Gastos fijos mensuales"].iloc[0])
         gastos_no_fijos_mes_actual = float(fila_mes_actual["Gastos no fijos mensuales"].iloc[0])
     else:
         gastos_fijos_mes_actual = gastos_no_fijos_mes_actual = 0.0
-
+    
     gastos_comprometidos          = gastos_fijos_mes_actual + gastos_no_fijos_mes_actual
     monto_disponible_para_gastar  = ingresos_mes_actual - gastos_comprometidos - meta_ahorro
     pct_gastado = (gastos_comprometidos / ingresos_mes_actual * 100) if ingresos_mes_actual > 0 else 0
-
+    
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Ingresos del mes",        f"S/ {ingresos_mes_actual:,.0f}")
     m2.metric("Gastos comprometidos",    f"S/ {gastos_comprometidos:,.0f}",
@@ -1937,7 +1944,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
     m4.metric("Disponible para gastar",  f"S/ {max(0, monto_disponible_para_gastar):,.0f}",
               delta="✅ OK" if monto_disponible_para_gastar >= 0 else "⚠️ Meta en riesgo",
               delta_color="normal" if monto_disponible_para_gastar >= 0 else "inverse")
-
+    
     # Gauge de progreso
     fig_gauge = go.Figure(go.Indicator(
         mode="gauge+number+delta",
@@ -1967,27 +1974,27 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
     fig_gauge.update_layout(paper_bgcolor="rgba(0,0,0,0)", font_color=_font_col, height=260,
                             margin=dict(l=20, r=20, t=40, b=10))
     st.plotly_chart(fig_gauge, use_container_width=True)
-
+    
     if monto_disponible_para_gastar >= 0:
         st.success(f"Vas bien. Puedes gastar hasta **S/ {monto_disponible_para_gastar:,.0f}** más este mes y cumplir tu meta.")
     else:
         st.error(f"Ya superaste el presupuesto de tu meta de ahorro por **S/ {abs(monto_disponible_para_gastar):,.0f}**.")
-
+    
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 3 — GASTOS NO FIJOS POR CATEGORÍA
     # ─────────────────────────────────────────────────────────
     st.divider()
-
+    
     meses_disponibles = pd.period_range(start=fecha_inicio_sim, end=fecha_fin_sim, freq="M")
     opciones_meses = {
         f"{MESES_ES[m.month]} {m.year}": m for m in meses_disponibles
     }
-
+    
     # Seleccionar mes por defecto: el mes actual si está en rango, si no el primero
     _mes_default_key = f"{MESES_ES.get(hoy_peru.month, 'Enero')} {hoy_peru.year}"
     _idx_default = list(opciones_meses.keys()).index(_mes_default_key) \
         if _mes_default_key in opciones_meses else 0
-
+    
     cat_col1, cat_col2 = st.columns([1, 1])
     with cat_col1:
         mes_categoria_txt = st.selectbox(
@@ -2003,9 +2010,9 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             horizontal=True,
             key="vista_cat"
         )
-
+    
     mes_categoria = opciones_meses[mes_categoria_txt]
-
+    
     frames_cat = []
     df_debito_cat = pd.DataFrame(st.session_state["gastos_diarios"])
     if not df_debito_cat.empty:
@@ -2017,7 +2024,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             )
         df_debito_cat["mes"]   = df_debito_cat["fecha"].dt.to_period("M")
         frames_cat.append(df_debito_cat[["fecha", "mes", "categoria", "monto"]])
-
+    
     df_credito_cat = pd.DataFrame(st.session_state["gastos_tarjeta"])
     if not df_credito_cat.empty:
         df_credito_cat["fecha"] = pd.to_datetime(df_credito_cat["fecha"], errors="coerce")
@@ -2029,22 +2036,22 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
         )
         df_credito_cat["mes"]   = df_credito_cat["fecha"].dt.to_period("M")
         frames_cat.append(df_credito_cat[["fecha", "mes", "categoria", "monto"]])
-
+    
     df_gastos_cat = pd.concat(frames_cat, ignore_index=True) if frames_cat \
         else pd.DataFrame(columns=["fecha", "mes", "categoria", "monto"])
-
+    
     df_mes_cat = df_gastos_cat[df_gastos_cat["mes"] == mes_categoria]
-
+    
     if not df_mes_cat.empty:
         resumen_cat = (
             df_mes_cat.groupby("categoria")["monto"]
             .sum().reset_index().sort_values("monto", ascending=False)
         )
         total_mes = resumen_cat["monto"].sum()
-
+    
         # Definir colores por categoría
         _cat_colors = px.colors.qualitative.Set3
-
+    
         if tipo_vista_cat == "Donut":
             fig_cat = go.Figure(go.Pie(
                 labels=resumen_cat["categoria"],
@@ -2087,7 +2094,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             )
             fig_cat.update_xaxes(**_XAXIS_DEF, tickformat=",d")
             fig_cat.update_yaxes(**_YAXIS_DEF)
-
+    
         chart_col, table_col = st.columns([1.6, 1])
         with chart_col:
             st.plotly_chart(fig_cat, use_container_width=True)
@@ -2104,18 +2111,18 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             )
     else:
         st.info(f"No hay gastos no fijos registrados en {mes_categoria_txt}.")
-
+    
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 4 — GRÁFICOS MENSUALES COMPARATIVOS
     # ─────────────────────────────────────────────────────────
     st.divider()
-
+    
     if df_mes_tipo["Total general"].sum() > 0:
-
+    
         tab_ingegr, tab_debcred, tab_fijvar, tab_tabla = st.tabs(
             ["📈 Ingresos vs Egresos", "💳 Débito vs Crédito", "📌 Fijos vs Variables", "📋 Tabla detallada"]
         )
-
+    
         def _plotly_bar_grouped(col_a, col_b, lbl_a, lbl_b, col_color_a, col_color_b):
             fig_b = go.Figure()
             fig_b.add_trace(go.Bar(
@@ -2137,10 +2144,10 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             fig_b.update_xaxes(**_XAXIS_DEF, tickangle=-30, showgrid=False)
             fig_b.update_yaxes(**_YAXIS_DEF, tickformat=",d", title_text="S/")
             return fig_b
-
+    
         mensual_tab = mensual.copy()
         mensual_tab["Mes"] = mensual_tab["fecha_mes"].dt.strftime("%b %Y")
-
+    
         with tab_ingegr:
             fig_ing = go.Figure()
             fig_ing.add_trace(go.Bar(
@@ -2172,7 +2179,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             fig_ing.update_xaxes(**_XAXIS_DEF, tickangle=-30, showgrid=False)
             fig_ing.update_yaxes(**_YAXIS_DEF, tickformat=",d", title_text="S/")
             st.plotly_chart(fig_ing, use_container_width=True)
-
+    
         with tab_debcred:
             st.plotly_chart(
                 _plotly_bar_grouped(
@@ -2181,7 +2188,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                     PALETTE["debito"], PALETTE["credito"]
                 ), use_container_width=True
             )
-
+    
         with tab_fijvar:
             st.plotly_chart(
                 _plotly_bar_grouped(
@@ -2190,7 +2197,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                     PALETTE["fijos"], PALETTE["variables"]
                 ), use_container_width=True
             )
-
+    
         with tab_tabla:
             st.dataframe(
                 df_mes_tipo[[
@@ -2212,12 +2219,12 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             )
     else:
         st.info("No hay gastos registrados para mostrar.")
-
+    
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 5 — RESUMEN POR CICLO DE TARJETA
     # ─────────────────────────────────────────────────────────
     st.divider()
-
+    
     if not df_gt_calc.empty or any(
         r.get("medio_pago") == "Tarjeta de credito"
         for r in st.session_state.get("gastos_reembolsables", [])
@@ -2248,7 +2255,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                     "Monto remb PEN": 0.0,
                     "TC usado": tc if moneda_g == "USD" else None,
                 })
-
+    
         # ── Agregar reembolsables con tarjeta al resumen ──────────
         for _rr in st.session_state.get("gastos_reembolsables", []):
             if _rr.get("medio_pago") != "Tarjeta de credito":
@@ -2277,7 +2284,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                 "Monto remb PEN": _monto_pen_rr,
                 "TC usado": _tc_rr if _mon_rr == "USD" else None,
             })
-
+    
         df_res = pd.DataFrame(resumen)
         if not df_res.empty:
             resumen_ciclo = (
@@ -2298,20 +2305,20 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                 _tc_rep, on=["Tarjeta ID", "Inicio ciclo"], how="left"
             )
             resumen_ciclo["TC rep"] = resumen_ciclo["TC rep"].fillna(_tc_default)
-
+    
             resumen_ciclo["Ciclo facturación"] = resumen_ciclo.apply(
                 lambda r: f"{pd.to_datetime(r['Inicio ciclo']).strftime('%d/%m/%Y')} → {pd.to_datetime(r['Cierre ciclo']).strftime('%d/%m/%Y')}",
                 axis=1
             )
-
+    
             hoy_date = pd.Timestamp.now(tz=ZoneInfo("America/Lima")).normalize().date()
             resumen_ciclo["_fecha_pago_dt"] = pd.to_datetime(resumen_ciclo["Fecha pago"])
             resumen_ciclo["_dias"] = (resumen_ciclo["_fecha_pago_dt"].dt.date
                                        .apply(lambda d: (d - hoy_date).days))
-
+    
             pagos_futuros = resumen_ciclo[resumen_ciclo["_dias"] >= 0].copy()
             pagos_pasados  = resumen_ciclo[resumen_ciclo["_dias"] < 0].copy()
-
+    
             # ── Próximos pagos como tarjetas visuales ──────────────
             if not pagos_futuros.empty:
                 proximos = pagos_futuros.sort_values("_dias").head(4)
@@ -2327,7 +2334,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                         _urgencia = f"🟡 {_d} días"
                     else:
                         _urgencia = f"🟢 {_d} días"
-
+    
                     with _pcols[_ci]:
                         with st.container(border=True):
                             st.caption(f"💳 {_row['Tarjeta']}")
@@ -2345,7 +2352,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                             st.caption(f"📆 Pago: **{_row['_fecha_pago_dt'].strftime('%d/%m/%Y')}**")
                             st.caption(f"🗓 Cierre: {pd.to_datetime(_row['Cierre ciclo']).strftime('%d/%m/%Y')}")
                             st.markdown(f"**{_urgencia}**")
-
+    
             # ── Timeline de pagos futuros (gráfico) ────────────────
             if not pagos_futuros.empty:
                 st.markdown("#### 📊 Timeline de pagos futuros")
@@ -2353,7 +2360,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                 _timeline["color"] = _timeline["_dias"].apply(
                     lambda d: "#E74C3C" if d <= 5 else ("#F39C12" if d <= 15 else "#26C281")
                 )
-
+    
                 fig_tl = go.Figure()
                 for _, _row in _timeline.iterrows():
                     _usd_txt  = f" | USD {_row['Monto USD']:,.2f}×{_row['TC rep']:.2f}" if _row["Monto USD"] > 0 else ""
@@ -2378,7 +2385,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                         ),
                         showlegend=False
                     ))
-
+    
                 fig_tl.update_layout(
                     **PLOTLY_LAYOUT,
                     height=max(200, len(_timeline) * 52 + 60),
@@ -2395,7 +2402,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                     font=dict(size=11, color=_font_col)
                 )
                 st.plotly_chart(fig_tl, use_container_width=True)
-
+    
             # ── Tabla completa ─────────────────────────────────────
             with st.expander("📋 Ver historial completo de ciclos", expanded=False):
                 _tabla_show = resumen_ciclo[
@@ -2427,16 +2434,16 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             st.info("No hay gastos válidos con tarjeta para calcular ciclos.")
     else:
         st.info("No hay gastos con tarjeta registrados.")
-
+    
     # ─────────────────────────────────────────────────────────
     # PROYECTOS / VIAJES — Seguimiento de gastos por evento
     # ─────────────────────────────────────────────────────────
     st.divider()
     with st.expander("✈️ Proyectos y viajes — seguimiento de gastos", expanded=False):
         st.caption("Agrupa gastos por proyecto o viaje (ej: Europa 2026). Cada gasto tiene fecha, monto, moneda y comentario.")
-
+    
         _proyectos_all = st.session_state.get("proyectos_gastos", [])
-
+    
         # ── Selector de proyecto ───────────────────────────────
         _proy_nombres = sorted(set(p.get("proyecto","") for p in _proyectos_all if p.get("proyecto","")))
         _pc1, _pc2 = st.columns([3, 1])
@@ -2452,9 +2459,9 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
             })
             guardar("proyectos_gastos")
             st.rerun()
-
+    
         st.divider()
-
+    
         # ── Agregar gasto a un proyecto ─────────────────────────
         if _proy_nombres:
             with st.expander("➕ Agregar gasto a un proyecto", expanded=False):
@@ -2484,7 +2491,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                         st.rerun()
                     else:
                         st.warning("Ingresa un monto mayor a 0.")
-
+    
         # ── Resumen y gráfico del proyecto seleccionado ─────────
         _df_proy_all = pd.DataFrame(_proyectos_all) if _proyectos_all else pd.DataFrame()
         if not _df_proy_all.empty:
@@ -2497,9 +2504,9 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                           r["monto"] * _tc_default * 1.27 if r["moneda"] == "GBP" else
                           r["monto"], axis=1
             )
-
+    
             _df_proy_f = _df_proy_all if _proy_sel == "(Todos)" else _df_proy_all[_df_proy_all["proyecto"] == _proy_sel]
-
+    
             if not _df_proy_f.empty:
                 # ── Métricas resumen ──────────────────────────────
                 _total_pen = _df_proy_f["monto_pen"].sum()
@@ -2509,14 +2516,14 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                 _m1.metric("Total gastado (S/)", f"S/ {_total_pen:,.2f}")
                 _m2.metric("Número de gastos", str(_n_gastos))
                 _m3.metric("Categoría mayor", _cats_proy.index[0] if not _cats_proy.empty else "—")
-
+    
                 # ── Gráfico de barras acumulado por fecha ──────────
                 _df_proy_sorted = _df_proy_f.sort_values("fecha").copy()
                 _df_proy_sorted["acumulado"] = _df_proy_sorted["monto_pen"].cumsum()
                 _df_proy_sorted["label"] = _df_proy_sorted.apply(
                     lambda r: f"{r['comentario'] or r['categoria']} — {r['moneda']} {r['monto']:,.0f}", axis=1
                 )
-
+    
                 _fig_proy = go.Figure()
                 # Barras por categoría
                 for _cat_p in _df_proy_sorted["categoria"].unique():
@@ -2551,7 +2558,7 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                     hovermode="x unified",
                 )
                 st.plotly_chart(_fig_proy, use_container_width=True)
-
+    
                 # ── Tabla de gastos editable ───────────────────────
                 with st.expander("📋 Ver / eliminar gastos del proyecto", expanded=False):
                     _df_show = _df_proy_f[["fecha","proyecto","categoria","comentario","monto","moneda","monto_pen"]].copy()
@@ -2599,6 +2606,8 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
                         st.rerun()
         else:
             st.info("Crea un proyecto arriba y empieza a agregar gastos.")
+
+
 # ==================================================
 # CONFIGURACIÓN DE SIMULACIÓN Y CUENTAS DE AHORRO
 # ==================================================
@@ -6108,6 +6117,4 @@ mensual["fecha_mes"] = mensual["mes"].dt.to_timestamp()
 
 # ==================================================
 
-# ==================================================
-# 5. GRÁFICOS Y RESULTADOS
 # ==================================================
