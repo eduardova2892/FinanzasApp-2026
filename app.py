@@ -1530,7 +1530,7 @@ def limpiar_gastos_invalidos():
 limpiar_gastos_invalidos()
 
 
-# ── Pre-carga de variables para el gráfico principal ────────────
+# ── Pre-carga de variables para el gráfico principal ─────
 _conf_top = st.session_state.get("configuracion", {})
 _fi_str = _conf_top.get("fecha_inicio_sim")
 _ff_str = _conf_top.get("fecha_fin_sim")
@@ -1539,6 +1539,483 @@ fecha_fin_sim       = date.fromisoformat(_ff_str) if _ff_str else date(2028, 12,
 nombre_cuenta_principal = _conf_top.get("nombre_cuenta_principal", "Cuenta principal")
 ahorro_inicial      = float(_conf_top.get("ahorro_inicial", 0.0))
 _tc_default         = float(_conf_top.get("tipo_cambio_default", 3.80))
+
+gastos_tarjeta_recurrentes_expandido = []
+
+for g in st.session_state["gastos_recurrentes_tarjeta"]:
+    fecha_ini = pd.to_datetime(g["fecha_inicio"])
+    fecha_fin_g = pd.to_datetime(g["fecha_fin"])
+
+    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
+        try:
+            fecha_cargo = mes.replace(day=int(g["dia_cargo"]))
+
+            if fecha_cargo >= fecha_ini and fecha_cargo <= fecha_fin_g:
+                gastos_tarjeta_recurrentes_expandido.append({
+                    "fecha": fecha_cargo,
+                    "tarjeta_id": g["tarjeta_id"],
+                    "tarjeta_nombre": g["tarjeta_nombre"],
+                    "categoria": g["categoria"],
+                    "descripcion": g["nombre"],
+                    "moneda": g.get("moneda", "PEN"),
+                    "monto": float(g["monto"]),
+                    "tipo_gasto": "Crédito recurrente"
+                })
+        except:
+            pass
+
+df_grt_expandido = pd.DataFrame(gastos_tarjeta_recurrentes_expandido)
+
+if not df_grt_expandido.empty:
+    df_grt_expandido["fecha"] = pd.to_datetime(
+        df_grt_expandido["fecha"],
+        errors="coerce"
+    )
+    df_grt_expandido["monto"] = pd.to_numeric(
+        df_grt_expandido["monto"],
+        errors="coerce"
+    ).fillna(0)
+
+if not df_gt.empty and not df_grt_expandido.empty:
+    df_gt_calc = pd.concat([df_gt, df_grt_expandido], ignore_index=True)
+elif not df_gt.empty:
+    df_gt_calc = df_gt.copy()
+elif not df_grt_expandido.empty:
+    df_gt_calc = df_grt_expandido.copy()
+else:
+    df_gt_calc = pd.DataFrame(
+        columns=[
+            "fecha",
+            "tarjeta_id",
+            "tarjeta_nombre",
+            "categoria",
+            "descripcion",
+            "monto",
+            "tipo_gasto"
+        ]
+    )
+# ==================================================
+# CÁLCULOS FINALES Y GRÁFICO (CON SALDO RESALTADO ✅)
+# ==================================================
+fechas = pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="D")
+
+# Ingresos y gastos diarios
+if not df_g.empty:
+    df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
+    df_gt = df_gt.sort_values(
+    by="fecha",
+    ascending=False
+)
+    g_diarios_principal = (
+        df_g[df_g.get("cuenta_origen", "principal") == "principal"]
+        .groupby("fecha")["monto"]
+        .sum()
+        .reindex(fechas, fill_value=0)
+    )
+else:
+    g_diarios_principal = pd.Series(0.0, index=fechas)
+
+g_fijos = pd.Series(0.0, index=fechas)
+
+for _, r in df_fijos.iterrows():
+    cuenta_origen = r.get("cuenta_origen", "principal")
+
+    if cuenta_origen != "principal":
+        continue
+
+    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
+        try:
+            f = mes.replace(day=int(r["dia_cobro"]))
+            if f >= pd.to_datetime(r["fecha_inicio"]) and f in g_fijos.index:
+                g_fijos.loc[f] += float(r["monto"])
+        except:
+            pass
+
+ing_rec = pd.Series(0.0, index=fechas)
+for _, r in df_ing_rec.iterrows():
+    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
+        try:
+            f = mes.replace(day=int(r["dia_cobro"]))
+            if f >= pd.to_datetime(r["fecha_inicio"]) and f in ing_rec.index:
+                ing_rec.loc[f] += r["monto"]
+        except:
+            pass
+
+ing_punt     = pd.Series(0.0, index=fechas)
+ing_punt_sec = {}   # keyed by cuenta_id for secondary-account reimbursements
+for _, r in df_ing_punt.iterrows():
+    f = pd.to_datetime(r["fecha"])
+    _cta_d = r.get("cuenta_destino_id", "principal") if hasattr(r, "get") else "principal"
+    if not _cta_d or str(_cta_d) in ["principal", "", "None", "nan"]:
+        if f in ing_punt.index:
+            ing_punt.loc[f] += r["monto"]
+    else:
+        if _cta_d not in ing_punt_sec:
+            ing_punt_sec[_cta_d] = pd.Series(0.0, index=fechas)
+        if f in ing_punt_sec[_cta_d].index:
+            ing_punt_sec[_cta_d].loc[f] += r["monto"]
+
+# Lookup tipo_de_cambio: (tarjeta_id, "YYYY-MM") -> float
+_tc_lookup = {}
+for _tc in st.session_state.get("tipos_cambio", []):
+    _tc_lookup[(_tc["tarjeta_id"], _tc["anio_mes"])] = float(_tc["tipo_de_cambio"])
+# Compatibilidad con pagos_tarjeta antiguo (por ciclo_cierre)
+for _p in st.session_state.get("pagos_tarjeta", []):
+    _ym = str(_p.get("ciclo_cierre", ""))[:7]  # "2026-05"
+    _key_old = (_p["tarjeta_id"], _ym)
+    if _key_old not in _tc_lookup:
+        _tc_lookup[_key_old] = float(_p.get("tipo_de_cambio", 3.85))
+
+# Tipo de cambio default usado en simulaciones y conversiones USD/PEN.
+# Se usa el valor guardado en configuración, que puede venir de BCRP, BCP, API internacional o ajuste manual.
+_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
+
+# egresos por cuenta: dict cuenta_id -> Series
+egresos_tarjeta_por_cuenta = {}
+
+if not df_gt_calc.empty:
+    for t in st.session_state.tarjetas:
+        # Cuenta que paga esta tarjeta (nuevo campo, fallback a "principal")
+        _cuenta_pago_t = t.get("cuenta_pago_id", "principal") or "principal"
+        df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
+        for _, g in df_t.iterrows():
+            _, cierre = obtener_ciclo_tarjeta(g["fecha"], t["dia_cierre"])
+            fecha_pago = (pd.Timestamp(cierre) + pd.DateOffset(months=1)).replace(day=t["dia_pago"])
+            # Mes del pago para buscar tipo de cambio
+            _anio_mes_pago = fecha_pago.strftime("%Y-%m")
+            tc = _tc_lookup.get((t["id"], _anio_mes_pago), _tc_default)
+            moneda_g = g.get("moneda", "PEN")
+            monto_pen = float(g["monto"]) * tc if moneda_g == "USD" else float(g["monto"])
+            if _cuenta_pago_t not in egresos_tarjeta_por_cuenta:
+                egresos_tarjeta_por_cuenta[_cuenta_pago_t] = pd.Series(0.0, index=fechas)
+            if fecha_pago in egresos_tarjeta_por_cuenta[_cuenta_pago_t].index:
+                egresos_tarjeta_por_cuenta[_cuenta_pago_t].loc[fecha_pago] += monto_pen
+
+# ── Reembolsables con tarjeta: agregar al ciclo de pago ──────
+for _r in st.session_state.get("gastos_reembolsables", []):
+    if _r.get("medio_pago") != "Tarjeta de credito":
+        continue
+    _tarj_id_r = _r.get("tarjeta_id", "")
+    _f_r = pd.to_datetime(_r.get("fecha"), errors="coerce")
+    if pd.isna(_f_r) or not _tarj_id_r:
+        continue
+    # Buscar la tarjeta para obtener dia_cierre y dia_pago
+    _t_match = next((t for t in st.session_state["tarjetas"] if t["id"] == _tarj_id_r), None)
+    if _t_match is None:
+        continue
+    _, _cierre_r = obtener_ciclo_tarjeta(_f_r, int(_t_match["dia_cierre"]))
+    _fecha_pago_r = (pd.Timestamp(_cierre_r) + pd.DateOffset(months=1)).replace(day=int(_t_match["dia_pago"]))
+    _anio_mes_r = _fecha_pago_r.strftime("%Y-%m")
+    _tc_r = _tc_lookup.get((_tarj_id_r, _anio_mes_r), _tc_default)
+    _mon_r = _r.get("moneda", "PEN")
+    _monto_pen_r = float(_r["monto"]) * _tc_r if _mon_r == "USD" else float(_r["monto"])
+    # Cuenta de pago de la tarjeta (igual que gastos normales)
+    _t_pago_r = next(
+        (t.get("cuenta_pago", "principal") for t in st.session_state["tarjetas"] if t["id"] == _tarj_id_r),
+        "principal"
+    )
+    if _t_pago_r not in egresos_tarjeta_por_cuenta:
+        egresos_tarjeta_por_cuenta[_t_pago_r] = pd.Series(0.0, index=fechas)
+    if _fecha_pago_r in egresos_tarjeta_por_cuenta[_t_pago_r].index:
+        egresos_tarjeta_por_cuenta[_t_pago_r].loc[_fecha_pago_r] += _monto_pen_r
+    else:
+        _idx_nearest = int((egresos_tarjeta_por_cuenta[_t_pago_r].index - _fecha_pago_r).abs().argmin())
+        egresos_tarjeta_por_cuenta[_t_pago_r].iloc[_idx_nearest] += _monto_pen_r
+
+# egresos de cuenta principal (para saldo principal y gráfico)
+egresos_tarjeta = egresos_tarjeta_por_cuenta.get("principal", pd.Series(0.0, index=fechas))
+
+# ── Gastos reembolsables: impacto NETO en cuenta ─────────────
+# Para cada reembolsable:
+#   - Resta en la fecha del gasto (o fecha de pago para crédito)
+#   - Suma de vuelta en fecha_esperada si está PENDIENTE
+#     (si ya está reembolsado, la suma viene de ingresos_puntuales)
+_g_remb = pd.Series(0.0, index=fechas)
+
+def _nearest(series, fecha):
+    """Agrega monto a la fecha más cercana disponible en el índice."""
+    f = pd.Timestamp(fecha)
+    if f in series.index:
+        return f
+    if len(series.index) == 0:
+        return None
+    return series.index[int((series.index - f).abs().argmin())]
+
+for _r in st.session_state.get("gastos_reembolsables", []):
+    _f = pd.to_datetime(_r.get("fecha"), errors="coerce")
+    if pd.isna(_f):
+        continue
+    _monto_r     = float(_r.get("monto", 0))
+    _mon_r       = _r.get("moneda", "PEN")
+    _monto_pen_r = _monto_r * _tc_default if _mon_r == "USD" else _monto_r
+    _estado_r    = _r.get("estado", "pendiente")
+
+    # ── Fecha en que sale el dinero (solo débito) ────────────
+    # Crédito ya va por egresos_tarjeta_por_cuenta (ciclo de pago real)
+    if _r.get("medio_pago", "Debito") == "Debito":
+        _fs = _nearest(_g_remb, _f)
+        if _fs is not None:
+            _g_remb.loc[_fs] += _monto_pen_r
+
+
+    # ── Fecha en que vuelve el dinero (solo débito pendiente) ───
+    # Crédito: el reembolso va a la cuenta de ahorro seleccionada → se registra
+    # como ingreso puntual al marcar reembolsado.
+    if _estado_r == "pendiente" and _r.get("medio_pago", "Debito") == "Debito":
+        _f_esp = pd.to_datetime(_r.get("fecha_esperada"), errors="coerce")
+        if not pd.isna(_f_esp):
+            _fe = _nearest(_g_remb, _f_esp)
+            if _fe is not None:
+                _g_remb.loc[_fe] -= _monto_pen_r   # resta negativa = suma
+
+# ── Simulaciones de préstamo activas (por cuenta) ─────────────
+# Cada operación se registra en la cuenta correcta:
+#   _ing_prestamos_cta[cta_id]  → ingreso del préstamo en esa cuenta
+#   _g_prestamos_cta[cta_id]    → pago del bien + cuotas desde esa cuenta
+
+def _add_to(series, fecha, monto):
+    f = pd.Timestamp(fecha)
+    if len(series.index) == 0:
+        return
+    if f < series.index[0] or f > series.index[-1]:
+        return
+    if f in series.index:
+        series.loc[f] += monto
+    else:
+        _idx = int((series.index.astype("int64") - f.value).abs().argmin())
+        series.iloc[_idx] += monto
+
+def _get_or_create(dct, key):
+    if key not in dct:
+        dct[key] = pd.Series(0.0, index=fechas)
+    return dct[key]
+
+_ing_prestamos_cta = {}  # cta_id -> Series
+_g_prestamos_cta   = {}  # cta_id -> Series
+
+for _sim in st.session_state.get("simulaciones_prestamo", []):
+    if not _sim.get("activo", True):
+        continue
+    _f_desembolso = pd.to_datetime(_sim.get("fecha_desembolso", _sim.get("fecha_inicio", hoy_peru)))
+    _f_compra     = pd.to_datetime(_sim.get("fecha_compra",     _sim.get("fecha_inicio", hoy_peru)))
+    _f_primera    = pd.to_datetime(_sim.get("fecha_primera_cuota", _sim.get("fecha_inicio", hoy_peru)))
+    _f_fin_s      = pd.to_datetime(_sim["fecha_fin"])
+    _dia_cuota_s  = int(_sim.get("dia_cuota", 5))
+    _monto_pre_s  = float(_sim["monto_prestamo"])
+    _monto_tot_s  = float(_sim.get("monto_total", _monto_pre_s))
+    _cuota_s      = float(_sim["cuota"])
+
+    # Cuenta que RECIBE el préstamo
+    _cta_desembolso = _sim.get("cta_desembolso_id", "principal") or "principal"
+    # Cuenta que PAGA el bien
+    _cta_bien = _sim.get("cta_pago_bien_id", "principal") or "principal"
+    # Cuenta/tarjeta que PAGA las cuotas
+    _medio_cuota = _sim.get("medio_id", "principal") or "principal"
+    _tipo_cuota  = _sim.get("medio_tipo", "cuenta")
+
+    # 1. Desembolso → ingreso en la cuenta seleccionada
+    _add_to(_get_or_create(_ing_prestamos_cta, _cta_desembolso), _f_desembolso, _monto_pre_s)
+
+    # 2. Pago del bien → gasto desde la cuenta seleccionada
+    _add_to(_get_or_create(_g_prestamos_cta, _cta_bien), _f_compra, _monto_tot_s)
+
+    # 3. Cuotas mensuales → gasto desde cuenta/tarjeta seleccionada
+    _cta_cuota_id  = _medio_cuota if _tipo_cuota == "cuenta" else "principal"
+    _monto_cierre  = float(_sim.get("monto_cierre", 0) or 0)
+    _fecha_cierre_s = pd.to_datetime(_sim["fecha_cierre"]) if _sim.get("fecha_cierre") and _monto_cierre > 0 else None
+    # Límite real: la cuota más temprana entre fecha_fin y fecha_cierre
+    _f_limite = min(_f_fin_s, _fecha_cierre_s) if _fecha_cierre_s else _f_fin_s
+
+    _cur_s = _f_primera.replace(day=min(_dia_cuota_s, 28))
+    while _cur_s <= _f_limite:
+        _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _cur_s, _cuota_s)
+        try:
+            _cur_s = (_cur_s + pd.DateOffset(months=1)).replace(day=min(_dia_cuota_s, 28))
+        except Exception:
+            _cur_s = _cur_s + pd.DateOffset(months=1)
+
+    # Pago de cierre anticipado (si existe) en la misma cuenta de cuotas
+    if _fecha_cierre_s and _monto_cierre > 0:
+        _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _fecha_cierre_s, _monto_cierre)
+
+# Totales para cuenta principal
+_ing_prestamos_principal = _ing_prestamos_cta.get("principal", pd.Series(0.0, index=fechas))
+_g_prestamos_principal   = _g_prestamos_cta.get("principal",   pd.Series(0.0, index=fechas))
+
+saldo = (
+    ahorro_inicial
+    + ing_rec.cumsum()
+    + ing_punt.cumsum()
+    + _ing_prestamos_principal.cumsum()
+    - g_diarios_principal.cumsum()
+    - g_fijos.cumsum()
+    - egresos_tarjeta.cumsum()
+    - _g_remb.cumsum()
+    - _g_prestamos_principal.cumsum()
+)
+
+
+# ✅ Serie base de la cuenta principal (nombre nuevo, sin colisiones)
+serie_cuenta_principal = saldo
+# ==================================================
+# AJUSTES POR TRANSFERENCIAS EN CUENTA PRINCIPAL
+# ==================================================
+for t in st.session_state.transferencias:
+    f = pd.to_datetime(t["fecha"])
+
+    if f in serie_cuenta_principal.index:
+        # Sale dinero de la cuenta principal
+        if t["origen"] == "principal":
+            serie_cuenta_principal.loc[f:] -= t["monto"]
+
+        # Entra dinero a la cuenta principal
+        if t["destino"] == "principal":
+            serie_cuenta_principal.loc[f:] += t["monto"]
+
+# Transferencias desde cuenta principal hacia IBKR.
+# El monto debitado incluye el monto enviado y la comisión equivalente en soles.
+for _t_ibkr in st.session_state.get("ibkr_transferencias", []):
+    _f_ibkr = pd.to_datetime(_t_ibkr.get("fecha"), errors="coerce")
+    if pd.notna(_f_ibkr) and _f_ibkr in serie_cuenta_principal.index:
+        if str(_t_ibkr.get("cuenta_origen_id", "")) == "principal":
+            serie_cuenta_principal.loc[_f_ibkr:] -= calcular_total_debitado_transferencia_ibkr(_t_ibkr)
+
+# ==================================================
+# SALDOS DE CUENTAS DE AHORRO SECUNDARIAS
+# ==================================================
+
+# Valor total actual del portafolio IBKR para integrarlo en saldos generales.
+# Reemplaza cualquier cuenta secundaria llamada IBKR para evitar doble conteo.
+_resumen_ibkr_global = calcular_resumen_ibkr_global(_tc_default)
+_valor_total_ibkr_pen = float(_resumen_ibkr_global.get("total_pen", 0.0))
+_hay_ibkr_global = bool(_resumen_ibkr_global.get("hay_datos", False))
+
+saldos_sec = {}
+_cuentas_ibkr_reemplazadas = []
+
+for cuenta in st.session_state["cuentas_ahorro"]:
+    nombre_cuenta = cuenta["nombre"]
+
+    if "IBKR" in str(nombre_cuenta).upper():
+        _cuentas_ibkr_reemplazadas.append(str(nombre_cuenta))
+        continue
+
+    saldo_ini = float(cuenta.get("saldo_inicial", 0.0))
+
+    serie_sec = pd.Series(saldo_ini, index=fechas)
+
+    # Gastos diarios débito asociados a esta cuenta secundaria
+    if not df_g.empty and "cuenta_origen" in df_g.columns:
+        gastos_sec = (
+            df_g[df_g["cuenta_origen"] == cuenta["id"]]
+            .groupby("fecha")["monto"]
+            .sum()
+            .reindex(fechas, fill_value=0)
+        )
+
+        serie_sec = serie_sec - gastos_sec.cumsum()
+
+    # Gastos fijos asociados a esta cuenta secundaria
+    if not df_fijos.empty and "cuenta_origen" in df_fijos.columns:
+        gastos_fijos_sec = pd.Series(0.0, index=fechas)
+
+        for _, r in df_fijos[df_fijos["cuenta_origen"] == cuenta["id"]].iterrows():
+            for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
+                try:
+                    f = mes.replace(day=int(r["dia_cobro"]))
+
+                    if f >= pd.to_datetime(r["fecha_inicio"]) and f in gastos_fijos_sec.index:
+                        gastos_fijos_sec.loc[f] += float(r["monto"])
+                except:
+                    pass
+
+        serie_sec = serie_sec - gastos_fijos_sec.cumsum()
+
+    # Transferencias
+    for t in st.session_state["transferencias"]:
+        f = pd.to_datetime(t["fecha"])
+
+        if f in serie_sec.index:
+            if t["origen"] == cuenta["id"]:
+                serie_sec.loc[f:] -= float(t["monto"])
+
+            if t["destino"] == cuenta["id"]:
+                serie_sec.loc[f:] += float(t["monto"])
+
+    # Transferencias desde esta cuenta secundaria hacia IBKR
+    for _t_ibkr in st.session_state.get("ibkr_transferencias", []):
+        _f_ibkr = pd.to_datetime(_t_ibkr.get("fecha"), errors="coerce")
+
+        if pd.notna(_f_ibkr) and _f_ibkr in serie_sec.index:
+            if str(_t_ibkr.get("cuenta_origen_id", "")) == str(cuenta["id"]):
+                serie_sec.loc[_f_ibkr:] -= calcular_total_debitado_transferencia_ibkr(_t_ibkr)
+
+    # Pagos de tarjeta de crédito desde esta cuenta secundaria
+    egr_tc_sec = egresos_tarjeta_por_cuenta.get(cuenta["id"], pd.Series(0.0, index=fechas))
+    serie_sec = serie_sec - egr_tc_sec.cumsum()
+
+
+    # Reembolsos recibidos en esta cuenta secundaria
+    if cuenta["id"] in ing_punt_sec:
+        serie_sec = serie_sec + ing_punt_sec[cuenta["id"]].cumsum()
+
+    # Préstamos: desembolso recibido y pagos del bien/cuotas desde esta cuenta
+    if cuenta["id"] in _ing_prestamos_cta:
+        serie_sec = serie_sec + _ing_prestamos_cta[cuenta["id"]].cumsum()
+    if cuenta["id"] in _g_prestamos_cta:
+        serie_sec = serie_sec - _g_prestamos_cta[cuenta["id"]].cumsum()
+    # Interés diario por TEA
+    tea = float(cuenta.get("tea", 0.0))
+    aplica_interes_diario = bool(cuenta.get("aplica_interes_diario", False))
+
+    if aplica_interes_diario and tea > 0:
+        tasa_diaria = (1 + tea / 100) ** (1 / 365) - 1
+
+        serie_con_interes = pd.Series(index=fechas, dtype=float)
+        saldo_actual = float(serie_sec.iloc[0])
+        serie_movimientos = serie_sec.diff().fillna(0)
+
+        for i, f in enumerate(fechas):
+            if i == 0:
+                serie_con_interes.loc[f] = saldo_actual
+            else:
+                saldo_actual = saldo_actual + serie_movimientos.loc[f]
+                saldo_actual = saldo_actual * (1 + tasa_diaria)
+                serie_con_interes.loc[f] = saldo_actual
+
+        serie_sec = serie_con_interes
+
+    # IMPORTANTE: esto debe ir fuera del if de interés
+    saldos_sec[nombre_cuenta] = serie_sec
+
+# Agrega IBKR como cuenta dinámica si existe portafolio o cash registrado.
+# El valor se calcula con precios actuales y TC configurado. Se mantiene constante en la línea temporal
+# porque representa el valor de mercado actual disponible para el resumen de patrimonio.
+if _hay_ibkr_global:
+    saldos_sec["IBKR"] = pd.Series(_valor_total_ibkr_pen, index=fechas)
+
+# ==================================================
+# AHORRO TOTAL (SUMA DE CUENTAS + VALOR TOTAL IBKR)
+# ==================================================
+serie_ahorro_total = serie_cuenta_principal
+
+for s in saldos_sec.values():
+    serie_ahorro_total = serie_ahorro_total + s
+
+df_plot = pd.DataFrame({
+    "fecha": fechas,
+    "saldo": saldo,
+    "ingresos": ing_rec + ing_punt,
+    "egresos": g_diarios_principal + g_fijos + egresos_tarjeta
+})
+
+df_plot["mes"] = df_plot["fecha"].dt.to_period("M")
+mensual = df_plot.groupby("mes")[["ingresos", "egresos"]].sum().reset_index()
+mensual["fecha_mes"] = mensual["mes"].dt.to_timestamp()
+
+# ==================================================
+
+# ==================================================
 
 # ══════════════════════════════════════════════════════
 # GRÁFICO PRINCIPAL — EVOLUCIÓN DE SALDOS
@@ -5641,480 +6118,3 @@ if not df_gt.empty:
         df_gt["moneda"] = "PEN"
     else:
         df_gt["moneda"] = df_gt["moneda"].fillna("PEN")
-
-gastos_tarjeta_recurrentes_expandido = []
-
-for g in st.session_state["gastos_recurrentes_tarjeta"]:
-    fecha_ini = pd.to_datetime(g["fecha_inicio"])
-    fecha_fin_g = pd.to_datetime(g["fecha_fin"])
-
-    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
-        try:
-            fecha_cargo = mes.replace(day=int(g["dia_cargo"]))
-
-            if fecha_cargo >= fecha_ini and fecha_cargo <= fecha_fin_g:
-                gastos_tarjeta_recurrentes_expandido.append({
-                    "fecha": fecha_cargo,
-                    "tarjeta_id": g["tarjeta_id"],
-                    "tarjeta_nombre": g["tarjeta_nombre"],
-                    "categoria": g["categoria"],
-                    "descripcion": g["nombre"],
-                    "moneda": g.get("moneda", "PEN"),
-                    "monto": float(g["monto"]),
-                    "tipo_gasto": "Crédito recurrente"
-                })
-        except:
-            pass
-
-df_grt_expandido = pd.DataFrame(gastos_tarjeta_recurrentes_expandido)
-
-if not df_grt_expandido.empty:
-    df_grt_expandido["fecha"] = pd.to_datetime(
-        df_grt_expandido["fecha"],
-        errors="coerce"
-    )
-    df_grt_expandido["monto"] = pd.to_numeric(
-        df_grt_expandido["monto"],
-        errors="coerce"
-    ).fillna(0)
-
-if not df_gt.empty and not df_grt_expandido.empty:
-    df_gt_calc = pd.concat([df_gt, df_grt_expandido], ignore_index=True)
-elif not df_gt.empty:
-    df_gt_calc = df_gt.copy()
-elif not df_grt_expandido.empty:
-    df_gt_calc = df_grt_expandido.copy()
-else:
-    df_gt_calc = pd.DataFrame(
-        columns=[
-            "fecha",
-            "tarjeta_id",
-            "tarjeta_nombre",
-            "categoria",
-            "descripcion",
-            "monto",
-            "tipo_gasto"
-        ]
-    )
-# ==================================================
-# CÁLCULOS FINALES Y GRÁFICO (CON SALDO RESALTADO ✅)
-# ==================================================
-fechas = pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="D")
-
-# Ingresos y gastos diarios
-if not df_g.empty:
-    df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
-    df_gt = df_gt.sort_values(
-    by="fecha",
-    ascending=False
-)
-    g_diarios_principal = (
-        df_g[df_g.get("cuenta_origen", "principal") == "principal"]
-        .groupby("fecha")["monto"]
-        .sum()
-        .reindex(fechas, fill_value=0)
-    )
-else:
-    g_diarios_principal = pd.Series(0.0, index=fechas)
-
-g_fijos = pd.Series(0.0, index=fechas)
-
-for _, r in df_fijos.iterrows():
-    cuenta_origen = r.get("cuenta_origen", "principal")
-
-    if cuenta_origen != "principal":
-        continue
-
-    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
-        try:
-            f = mes.replace(day=int(r["dia_cobro"]))
-            if f >= pd.to_datetime(r["fecha_inicio"]) and f in g_fijos.index:
-                g_fijos.loc[f] += float(r["monto"])
-        except:
-            pass
-
-ing_rec = pd.Series(0.0, index=fechas)
-for _, r in df_ing_rec.iterrows():
-    for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
-        try:
-            f = mes.replace(day=int(r["dia_cobro"]))
-            if f >= pd.to_datetime(r["fecha_inicio"]) and f in ing_rec.index:
-                ing_rec.loc[f] += r["monto"]
-        except:
-            pass
-
-ing_punt     = pd.Series(0.0, index=fechas)
-ing_punt_sec = {}   # keyed by cuenta_id for secondary-account reimbursements
-for _, r in df_ing_punt.iterrows():
-    f = pd.to_datetime(r["fecha"])
-    _cta_d = r.get("cuenta_destino_id", "principal") if hasattr(r, "get") else "principal"
-    if not _cta_d or str(_cta_d) in ["principal", "", "None", "nan"]:
-        if f in ing_punt.index:
-            ing_punt.loc[f] += r["monto"]
-    else:
-        if _cta_d not in ing_punt_sec:
-            ing_punt_sec[_cta_d] = pd.Series(0.0, index=fechas)
-        if f in ing_punt_sec[_cta_d].index:
-            ing_punt_sec[_cta_d].loc[f] += r["monto"]
-
-# Lookup tipo_de_cambio: (tarjeta_id, "YYYY-MM") -> float
-_tc_lookup = {}
-for _tc in st.session_state.get("tipos_cambio", []):
-    _tc_lookup[(_tc["tarjeta_id"], _tc["anio_mes"])] = float(_tc["tipo_de_cambio"])
-# Compatibilidad con pagos_tarjeta antiguo (por ciclo_cierre)
-for _p in st.session_state.get("pagos_tarjeta", []):
-    _ym = str(_p.get("ciclo_cierre", ""))[:7]  # "2026-05"
-    _key_old = (_p["tarjeta_id"], _ym)
-    if _key_old not in _tc_lookup:
-        _tc_lookup[_key_old] = float(_p.get("tipo_de_cambio", 3.85))
-
-# Tipo de cambio default usado en simulaciones y conversiones USD/PEN.
-# Se usa el valor guardado en configuración, que puede venir de BCRP, BCP, API internacional o ajuste manual.
-_tc_default = float(st.session_state["configuracion"].get("tipo_cambio_default", 3.85))
-
-# egresos por cuenta: dict cuenta_id -> Series
-egresos_tarjeta_por_cuenta = {}
-
-if not df_gt_calc.empty:
-    for t in st.session_state.tarjetas:
-        # Cuenta que paga esta tarjeta (nuevo campo, fallback a "principal")
-        _cuenta_pago_t = t.get("cuenta_pago_id", "principal") or "principal"
-        df_t = df_gt_calc[df_gt_calc["tarjeta_id"] == t["id"]]
-        for _, g in df_t.iterrows():
-            _, cierre = obtener_ciclo_tarjeta(g["fecha"], t["dia_cierre"])
-            fecha_pago = (pd.Timestamp(cierre) + pd.DateOffset(months=1)).replace(day=t["dia_pago"])
-            # Mes del pago para buscar tipo de cambio
-            _anio_mes_pago = fecha_pago.strftime("%Y-%m")
-            tc = _tc_lookup.get((t["id"], _anio_mes_pago), _tc_default)
-            moneda_g = g.get("moneda", "PEN")
-            monto_pen = float(g["monto"]) * tc if moneda_g == "USD" else float(g["monto"])
-            if _cuenta_pago_t not in egresos_tarjeta_por_cuenta:
-                egresos_tarjeta_por_cuenta[_cuenta_pago_t] = pd.Series(0.0, index=fechas)
-            if fecha_pago in egresos_tarjeta_por_cuenta[_cuenta_pago_t].index:
-                egresos_tarjeta_por_cuenta[_cuenta_pago_t].loc[fecha_pago] += monto_pen
-
-# ── Reembolsables con tarjeta: agregar al ciclo de pago ──────
-for _r in st.session_state.get("gastos_reembolsables", []):
-    if _r.get("medio_pago") != "Tarjeta de credito":
-        continue
-    _tarj_id_r = _r.get("tarjeta_id", "")
-    _f_r = pd.to_datetime(_r.get("fecha"), errors="coerce")
-    if pd.isna(_f_r) or not _tarj_id_r:
-        continue
-    # Buscar la tarjeta para obtener dia_cierre y dia_pago
-    _t_match = next((t for t in st.session_state["tarjetas"] if t["id"] == _tarj_id_r), None)
-    if _t_match is None:
-        continue
-    _, _cierre_r = obtener_ciclo_tarjeta(_f_r, int(_t_match["dia_cierre"]))
-    _fecha_pago_r = (pd.Timestamp(_cierre_r) + pd.DateOffset(months=1)).replace(day=int(_t_match["dia_pago"]))
-    _anio_mes_r = _fecha_pago_r.strftime("%Y-%m")
-    _tc_r = _tc_lookup.get((_tarj_id_r, _anio_mes_r), _tc_default)
-    _mon_r = _r.get("moneda", "PEN")
-    _monto_pen_r = float(_r["monto"]) * _tc_r if _mon_r == "USD" else float(_r["monto"])
-    # Cuenta de pago de la tarjeta (igual que gastos normales)
-    _t_pago_r = next(
-        (t.get("cuenta_pago", "principal") for t in st.session_state["tarjetas"] if t["id"] == _tarj_id_r),
-        "principal"
-    )
-    if _t_pago_r not in egresos_tarjeta_por_cuenta:
-        egresos_tarjeta_por_cuenta[_t_pago_r] = pd.Series(0.0, index=fechas)
-    if _fecha_pago_r in egresos_tarjeta_por_cuenta[_t_pago_r].index:
-        egresos_tarjeta_por_cuenta[_t_pago_r].loc[_fecha_pago_r] += _monto_pen_r
-    else:
-        _idx_nearest = int((egresos_tarjeta_por_cuenta[_t_pago_r].index - _fecha_pago_r).abs().argmin())
-        egresos_tarjeta_por_cuenta[_t_pago_r].iloc[_idx_nearest] += _monto_pen_r
-
-# egresos de cuenta principal (para saldo principal y gráfico)
-egresos_tarjeta = egresos_tarjeta_por_cuenta.get("principal", pd.Series(0.0, index=fechas))
-
-# ── Gastos reembolsables: impacto NETO en cuenta ─────────────
-# Para cada reembolsable:
-#   - Resta en la fecha del gasto (o fecha de pago para crédito)
-#   - Suma de vuelta en fecha_esperada si está PENDIENTE
-#     (si ya está reembolsado, la suma viene de ingresos_puntuales)
-_g_remb = pd.Series(0.0, index=fechas)
-
-def _nearest(series, fecha):
-    """Agrega monto a la fecha más cercana disponible en el índice."""
-    f = pd.Timestamp(fecha)
-    if f in series.index:
-        return f
-    if len(series.index) == 0:
-        return None
-    return series.index[int((series.index - f).abs().argmin())]
-
-for _r in st.session_state.get("gastos_reembolsables", []):
-    _f = pd.to_datetime(_r.get("fecha"), errors="coerce")
-    if pd.isna(_f):
-        continue
-    _monto_r     = float(_r.get("monto", 0))
-    _mon_r       = _r.get("moneda", "PEN")
-    _monto_pen_r = _monto_r * _tc_default if _mon_r == "USD" else _monto_r
-    _estado_r    = _r.get("estado", "pendiente")
-
-    # ── Fecha en que sale el dinero (solo débito) ────────────
-    # Crédito ya va por egresos_tarjeta_por_cuenta (ciclo de pago real)
-    if _r.get("medio_pago", "Debito") == "Debito":
-        _fs = _nearest(_g_remb, _f)
-        if _fs is not None:
-            _g_remb.loc[_fs] += _monto_pen_r
-
-
-    # ── Fecha en que vuelve el dinero (solo débito pendiente) ───
-    # Crédito: el reembolso va a la cuenta de ahorro seleccionada → se registra
-    # como ingreso puntual al marcar reembolsado.
-    if _estado_r == "pendiente" and _r.get("medio_pago", "Debito") == "Debito":
-        _f_esp = pd.to_datetime(_r.get("fecha_esperada"), errors="coerce")
-        if not pd.isna(_f_esp):
-            _fe = _nearest(_g_remb, _f_esp)
-            if _fe is not None:
-                _g_remb.loc[_fe] -= _monto_pen_r   # resta negativa = suma
-
-# ── Simulaciones de préstamo activas (por cuenta) ─────────────
-# Cada operación se registra en la cuenta correcta:
-#   _ing_prestamos_cta[cta_id]  → ingreso del préstamo en esa cuenta
-#   _g_prestamos_cta[cta_id]    → pago del bien + cuotas desde esa cuenta
-
-def _add_to(series, fecha, monto):
-    f = pd.Timestamp(fecha)
-    if len(series.index) == 0:
-        return
-    if f < series.index[0] or f > series.index[-1]:
-        return
-    if f in series.index:
-        series.loc[f] += monto
-    else:
-        _idx = int((series.index.astype("int64") - f.value).abs().argmin())
-        series.iloc[_idx] += monto
-
-def _get_or_create(dct, key):
-    if key not in dct:
-        dct[key] = pd.Series(0.0, index=fechas)
-    return dct[key]
-
-_ing_prestamos_cta = {}  # cta_id -> Series
-_g_prestamos_cta   = {}  # cta_id -> Series
-
-for _sim in st.session_state.get("simulaciones_prestamo", []):
-    if not _sim.get("activo", True):
-        continue
-    _f_desembolso = pd.to_datetime(_sim.get("fecha_desembolso", _sim.get("fecha_inicio", hoy_peru)))
-    _f_compra     = pd.to_datetime(_sim.get("fecha_compra",     _sim.get("fecha_inicio", hoy_peru)))
-    _f_primera    = pd.to_datetime(_sim.get("fecha_primera_cuota", _sim.get("fecha_inicio", hoy_peru)))
-    _f_fin_s      = pd.to_datetime(_sim["fecha_fin"])
-    _dia_cuota_s  = int(_sim.get("dia_cuota", 5))
-    _monto_pre_s  = float(_sim["monto_prestamo"])
-    _monto_tot_s  = float(_sim.get("monto_total", _monto_pre_s))
-    _cuota_s      = float(_sim["cuota"])
-
-    # Cuenta que RECIBE el préstamo
-    _cta_desembolso = _sim.get("cta_desembolso_id", "principal") or "principal"
-    # Cuenta que PAGA el bien
-    _cta_bien = _sim.get("cta_pago_bien_id", "principal") or "principal"
-    # Cuenta/tarjeta que PAGA las cuotas
-    _medio_cuota = _sim.get("medio_id", "principal") or "principal"
-    _tipo_cuota  = _sim.get("medio_tipo", "cuenta")
-
-    # 1. Desembolso → ingreso en la cuenta seleccionada
-    _add_to(_get_or_create(_ing_prestamos_cta, _cta_desembolso), _f_desembolso, _monto_pre_s)
-
-    # 2. Pago del bien → gasto desde la cuenta seleccionada
-    _add_to(_get_or_create(_g_prestamos_cta, _cta_bien), _f_compra, _monto_tot_s)
-
-    # 3. Cuotas mensuales → gasto desde cuenta/tarjeta seleccionada
-    _cta_cuota_id  = _medio_cuota if _tipo_cuota == "cuenta" else "principal"
-    _monto_cierre  = float(_sim.get("monto_cierre", 0) or 0)
-    _fecha_cierre_s = pd.to_datetime(_sim["fecha_cierre"]) if _sim.get("fecha_cierre") and _monto_cierre > 0 else None
-    # Límite real: la cuota más temprana entre fecha_fin y fecha_cierre
-    _f_limite = min(_f_fin_s, _fecha_cierre_s) if _fecha_cierre_s else _f_fin_s
-
-    _cur_s = _f_primera.replace(day=min(_dia_cuota_s, 28))
-    while _cur_s <= _f_limite:
-        _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _cur_s, _cuota_s)
-        try:
-            _cur_s = (_cur_s + pd.DateOffset(months=1)).replace(day=min(_dia_cuota_s, 28))
-        except Exception:
-            _cur_s = _cur_s + pd.DateOffset(months=1)
-
-    # Pago de cierre anticipado (si existe) en la misma cuenta de cuotas
-    if _fecha_cierre_s and _monto_cierre > 0:
-        _add_to(_get_or_create(_g_prestamos_cta, _cta_cuota_id), _fecha_cierre_s, _monto_cierre)
-
-# Totales para cuenta principal
-_ing_prestamos_principal = _ing_prestamos_cta.get("principal", pd.Series(0.0, index=fechas))
-_g_prestamos_principal   = _g_prestamos_cta.get("principal",   pd.Series(0.0, index=fechas))
-
-saldo = (
-    ahorro_inicial
-    + ing_rec.cumsum()
-    + ing_punt.cumsum()
-    + _ing_prestamos_principal.cumsum()
-    - g_diarios_principal.cumsum()
-    - g_fijos.cumsum()
-    - egresos_tarjeta.cumsum()
-    - _g_remb.cumsum()
-    - _g_prestamos_principal.cumsum()
-)
-
-
-# ✅ Serie base de la cuenta principal (nombre nuevo, sin colisiones)
-serie_cuenta_principal = saldo
-# ==================================================
-# AJUSTES POR TRANSFERENCIAS EN CUENTA PRINCIPAL
-# ==================================================
-for t in st.session_state.transferencias:
-    f = pd.to_datetime(t["fecha"])
-
-    if f in serie_cuenta_principal.index:
-        # Sale dinero de la cuenta principal
-        if t["origen"] == "principal":
-            serie_cuenta_principal.loc[f:] -= t["monto"]
-
-        # Entra dinero a la cuenta principal
-        if t["destino"] == "principal":
-            serie_cuenta_principal.loc[f:] += t["monto"]
-
-# Transferencias desde cuenta principal hacia IBKR.
-# El monto debitado incluye el monto enviado y la comisión equivalente en soles.
-for _t_ibkr in st.session_state.get("ibkr_transferencias", []):
-    _f_ibkr = pd.to_datetime(_t_ibkr.get("fecha"), errors="coerce")
-    if pd.notna(_f_ibkr) and _f_ibkr in serie_cuenta_principal.index:
-        if str(_t_ibkr.get("cuenta_origen_id", "")) == "principal":
-            serie_cuenta_principal.loc[_f_ibkr:] -= calcular_total_debitado_transferencia_ibkr(_t_ibkr)
-
-# ==================================================
-# SALDOS DE CUENTAS DE AHORRO SECUNDARIAS
-# ==================================================
-
-# Valor total actual del portafolio IBKR para integrarlo en saldos generales.
-# Reemplaza cualquier cuenta secundaria llamada IBKR para evitar doble conteo.
-_resumen_ibkr_global = calcular_resumen_ibkr_global(_tc_default)
-_valor_total_ibkr_pen = float(_resumen_ibkr_global.get("total_pen", 0.0))
-_hay_ibkr_global = bool(_resumen_ibkr_global.get("hay_datos", False))
-
-saldos_sec = {}
-_cuentas_ibkr_reemplazadas = []
-
-for cuenta in st.session_state["cuentas_ahorro"]:
-    nombre_cuenta = cuenta["nombre"]
-
-    if "IBKR" in str(nombre_cuenta).upper():
-        _cuentas_ibkr_reemplazadas.append(str(nombre_cuenta))
-        continue
-
-    saldo_ini = float(cuenta.get("saldo_inicial", 0.0))
-
-    serie_sec = pd.Series(saldo_ini, index=fechas)
-
-    # Gastos diarios débito asociados a esta cuenta secundaria
-    if not df_g.empty and "cuenta_origen" in df_g.columns:
-        gastos_sec = (
-            df_g[df_g["cuenta_origen"] == cuenta["id"]]
-            .groupby("fecha")["monto"]
-            .sum()
-            .reindex(fechas, fill_value=0)
-        )
-
-        serie_sec = serie_sec - gastos_sec.cumsum()
-
-    # Gastos fijos asociados a esta cuenta secundaria
-    if not df_fijos.empty and "cuenta_origen" in df_fijos.columns:
-        gastos_fijos_sec = pd.Series(0.0, index=fechas)
-
-        for _, r in df_fijos[df_fijos["cuenta_origen"] == cuenta["id"]].iterrows():
-            for mes in pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="MS"):
-                try:
-                    f = mes.replace(day=int(r["dia_cobro"]))
-
-                    if f >= pd.to_datetime(r["fecha_inicio"]) and f in gastos_fijos_sec.index:
-                        gastos_fijos_sec.loc[f] += float(r["monto"])
-                except:
-                    pass
-
-        serie_sec = serie_sec - gastos_fijos_sec.cumsum()
-
-    # Transferencias
-    for t in st.session_state["transferencias"]:
-        f = pd.to_datetime(t["fecha"])
-
-        if f in serie_sec.index:
-            if t["origen"] == cuenta["id"]:
-                serie_sec.loc[f:] -= float(t["monto"])
-
-            if t["destino"] == cuenta["id"]:
-                serie_sec.loc[f:] += float(t["monto"])
-
-    # Transferencias desde esta cuenta secundaria hacia IBKR
-    for _t_ibkr in st.session_state.get("ibkr_transferencias", []):
-        _f_ibkr = pd.to_datetime(_t_ibkr.get("fecha"), errors="coerce")
-
-        if pd.notna(_f_ibkr) and _f_ibkr in serie_sec.index:
-            if str(_t_ibkr.get("cuenta_origen_id", "")) == str(cuenta["id"]):
-                serie_sec.loc[_f_ibkr:] -= calcular_total_debitado_transferencia_ibkr(_t_ibkr)
-
-    # Pagos de tarjeta de crédito desde esta cuenta secundaria
-    egr_tc_sec = egresos_tarjeta_por_cuenta.get(cuenta["id"], pd.Series(0.0, index=fechas))
-    serie_sec = serie_sec - egr_tc_sec.cumsum()
-
-
-    # Reembolsos recibidos en esta cuenta secundaria
-    if cuenta["id"] in ing_punt_sec:
-        serie_sec = serie_sec + ing_punt_sec[cuenta["id"]].cumsum()
-
-    # Préstamos: desembolso recibido y pagos del bien/cuotas desde esta cuenta
-    if cuenta["id"] in _ing_prestamos_cta:
-        serie_sec = serie_sec + _ing_prestamos_cta[cuenta["id"]].cumsum()
-    if cuenta["id"] in _g_prestamos_cta:
-        serie_sec = serie_sec - _g_prestamos_cta[cuenta["id"]].cumsum()
-    # Interés diario por TEA
-    tea = float(cuenta.get("tea", 0.0))
-    aplica_interes_diario = bool(cuenta.get("aplica_interes_diario", False))
-
-    if aplica_interes_diario and tea > 0:
-        tasa_diaria = (1 + tea / 100) ** (1 / 365) - 1
-
-        serie_con_interes = pd.Series(index=fechas, dtype=float)
-        saldo_actual = float(serie_sec.iloc[0])
-        serie_movimientos = serie_sec.diff().fillna(0)
-
-        for i, f in enumerate(fechas):
-            if i == 0:
-                serie_con_interes.loc[f] = saldo_actual
-            else:
-                saldo_actual = saldo_actual + serie_movimientos.loc[f]
-                saldo_actual = saldo_actual * (1 + tasa_diaria)
-                serie_con_interes.loc[f] = saldo_actual
-
-        serie_sec = serie_con_interes
-
-    # IMPORTANTE: esto debe ir fuera del if de interés
-    saldos_sec[nombre_cuenta] = serie_sec
-
-# Agrega IBKR como cuenta dinámica si existe portafolio o cash registrado.
-# El valor se calcula con precios actuales y TC configurado. Se mantiene constante en la línea temporal
-# porque representa el valor de mercado actual disponible para el resumen de patrimonio.
-if _hay_ibkr_global:
-    saldos_sec["IBKR"] = pd.Series(_valor_total_ibkr_pen, index=fechas)
-
-# ==================================================
-# AHORRO TOTAL (SUMA DE CUENTAS + VALOR TOTAL IBKR)
-# ==================================================
-serie_ahorro_total = serie_cuenta_principal
-
-for s in saldos_sec.values():
-    serie_ahorro_total = serie_ahorro_total + s
-
-df_plot = pd.DataFrame({
-    "fecha": fechas,
-    "saldo": saldo,
-    "ingresos": ing_rec + ing_punt,
-    "egresos": g_diarios_principal + g_fijos + egresos_tarjeta
-})
-
-df_plot["mes"] = df_plot["fecha"].dt.to_period("M")
-mensual = df_plot.groupby("mes")[["ingresos", "egresos"]].sum().reset_index()
-mensual["fecha_mes"] = mensual["mes"].dt.to_timestamp()
-
-# ==================================================
-
-# ==================================================
