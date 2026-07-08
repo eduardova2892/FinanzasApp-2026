@@ -1931,26 +1931,19 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
                 guardar("categorias")
                 st.success(f"✅ {len(_nuevas_cats)} categorías guardadas.")
                 st.rerun()
-# ==================================================
-# MAPA GLOBAL DE CUENTAS DÉBITO
-# ==================================================
-nombre_cuenta_principal = st.session_state["configuracion"].get(
-    "nombre_cuenta_principal",
-    "Cuenta principal"
-)
 
-cuentas_debito_map = {
-    nombre_cuenta_principal: "principal"
-}
-
-for c in st.session_state["cuentas_ahorro"]:
-    cuentas_debito_map[c["nombre"]] = c["id"]
     # ==================================================
     # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
     # ==================================================
 with st.expander("📌 2. Ingresos y gastos fijos / recurrentes", expanded=False):
 
     with st.expander("💰 Ingresos recurrentes", expanded=False):
+
+        # Construir mapa de cuentas disponibles
+        _ncp_ir = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        _cuentas_debito_map_ir = {_ncp_ir: "principal"}
+        for _c_ir in st.session_state.get("cuentas_ahorro", []):
+            _cuentas_debito_map_ir[_c_ir["nombre"]] = _c_ir["id"]
 
         with st.form("form_ingreso_rec"):
             _ci1, _ci2, _ci3 = st.columns(3)
@@ -1962,13 +1955,13 @@ with st.expander("📌 2. Ingresos y gastos fijos / recurrentes", expanded=False
                 monto = st.number_input("💰 Monto mensual", min_value=0.0, step=100.0)
             with _ci3:
                 dia = st.number_input("📆 Día de cobro", 1, 31, 25)
-                _ir_ctas_nombres = list(cuentas_debito_map.keys())
+                _ir_ctas_nombres = list(_cuentas_debito_map_ir.keys())
                 _ir_cta = st.selectbox("🏦 Cuenta destino", _ir_ctas_nombres, key="ir_cta_destino")
             if st.form_submit_button("➕ Agregar ingreso recurrente", use_container_width=True, type="primary"):
                 st.session_state["ingresos_recurrentes"].append({
                     "nombre": nombre, "monto": float(monto),
                     "moneda": _ir_moneda,
-                    "cuenta_destino": cuentas_debito_map.get(_ir_cta, "principal"),
+                    "cuenta_destino": _cuentas_debito_map_ir.get(_ir_cta, "principal"),
                     "cuenta_destino_nombre": _ir_cta,
                     "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia)
                 })
