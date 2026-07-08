@@ -1931,7 +1931,20 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
                 guardar("categorias")
                 st.success(f"✅ {len(_nuevas_cats)} categorías guardadas.")
                 st.rerun()
+# ==================================================
+# MAPA GLOBAL DE CUENTAS DÉBITO
+# ==================================================
+nombre_cuenta_principal = st.session_state["configuracion"].get(
+    "nombre_cuenta_principal",
+    "Cuenta principal"
+)
 
+cuentas_debito_map = {
+    nombre_cuenta_principal: "principal"
+}
+
+for c in st.session_state["cuentas_ahorro"]:
+    cuentas_debito_map[c["nombre"]] = c["id"]
     # ==================================================
     # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
     # ==================================================
