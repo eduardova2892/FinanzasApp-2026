@@ -453,7 +453,13 @@ def parse_bank_email(
     if banco.upper() == "BCP":
         if "bcp" not in ascii_lower:
             return None
-        if "realizaste un consumo" not in ascii_lower and "consumo tarjeta" not in ascii_lower:
+        _tiene_consumo = (
+            "realizaste un consumo" in ascii_lower
+            or "consumo tarjeta" in ascii_lower
+            or "realizaste un pago" in ascii_lower
+            or "realizaste una transferencia" in ascii_lower
+        )
+        if not _tiene_consumo:
             return None
 
     monto = None
@@ -463,7 +469,7 @@ def parse_bank_email(
 
     # Principal: Realizaste un consumo de S/ 33.78 con tu Tarjeta de Cr?dito BCP en RAPPI SAC.
     m = re.search(
-        r"Realizaste\s+un\s+consumo\s+de\s+(S/|US\$|USD|\$)\s*([\d\.,]+)\s+con\s+tu\s+Tarjeta\s+de\s+(Credito|Debito)\s+BCP\s+en\s+(.+?)(?:\.|(?:\s+Fecha\s+y\s+hora)|\s+Por\s+tu\s+seguridad|$)",
+        r"Realizaste\s+un\s+(?:consumo|pago)\s+de\s+(S/|US\$|USD|\$)\s*([\d\.,]+)\s+con\s+tu\s+Tarjeta\s+de\s+(Credito|Debito)\s+BCP\s+en\s+(.+?)(?:\.(?:\s|$)|(?:\s+Fecha\s+y\s+hora)|\s+Por\s+tu\s+seguridad|$)",
         ascii_text,
         flags=re.IGNORECASE,
     )
