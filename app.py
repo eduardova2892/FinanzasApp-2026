@@ -1166,32 +1166,86 @@ with st.sidebar:
             st.session_state.pop(_k, None)
         st.rerun()
 
-st.markdown("<h1 style='margin-bottom:0; font-size:1.6rem'>🐷💰 Mi Chanchito</h1>", unsafe_allow_html=True)
+# ── Header principal ─────────────────────────────────────────
+_h_col1, _h_col2 = st.columns([6, 1])
+with _h_col1:
+    st.markdown(
+        """<div style='display:flex;align-items:center;gap:0.6rem;margin-bottom:0.1rem'>
+        <span style='font-size:2rem'>🐷</span>
+        <div>
+            <span style='font-size:1.4rem;font-weight:700;letter-spacing:-0.5px'>Mi Chanchito</span>
+            <span style='font-size:0.72rem;color:#8b9ab0;margin-left:0.5rem'>Control personal de finanzas</span>
+        </div>
+        </div>""",
+        unsafe_allow_html=True
+    )
+with _h_col2:
+    if st.button("🚪 Salir", key="logout_header", help="Cerrar sesión"):
+        for _k in ["user", "access_token", "refresh_token"]:
+            st.session_state.pop(_k, None)
+        st.rerun()
+st.divider()
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── Base ── */
 html,body,[class*="css"]{font-family:'Inter',sans-serif!important}
-.block-container{padding:0.5rem 1.4rem 1rem!important;max-width:1400px!important}
-h1{font-size:1.35rem!important;font-weight:700!important;letter-spacing:-0.3px!important;margin-bottom:0.05rem!important}
-h2{font-size:1.05rem!important;font-weight:600!important;margin:0.3rem 0 0.15rem!important}
-h3{font-size:0.95rem!important;font-weight:600!important;margin:0.3rem 0 0.1rem!important}
-h4{font-size:0.87rem!important;font-weight:500!important;margin:0.2rem 0 0.08rem!important}
-.streamlit-expanderHeader{font-size:0.87rem!important;font-weight:500!important;padding:0.38rem 0.65rem!important}
-div[data-testid="stExpander"]{margin-bottom:0.18rem!important;border-radius:6px!important}
-div[data-testid="stExpanderDetails"]{padding:0.45rem 0.7rem 0.55rem!important}
-div[data-testid="stTextInput"]>label,div[data-testid="stNumberInput"]>label,div[data-testid="stSelectbox"]>label,div[data-testid="stDateInput"]>label{font-size:0.73rem!important;font-weight:500!important;margin-bottom:0.02rem!important;color:#8b9ab0!important}
-div[data-testid="stTextInput"] input,div[data-testid="stNumberInput"] input{font-size:0.81rem!important;padding:0.22rem 0.45rem!important}
-div[data-testid="stSelectbox"]>div>div{font-size:0.81rem!important;min-height:1.9rem!important}
-div[data-testid="stMetric"]{padding:0.35rem 0.5rem!important}
-div[data-testid="stMetricLabel"] p{font-size:0.7rem!important;color:#8b9ab0!important}
-div[data-testid="stMetricValue"]{font-size:1.05rem!important;font-weight:600!important}
-div[data-testid="stMetricDelta"]{font-size:0.7rem!important}
-button[kind="primary"]{font-size:0.79rem!important;padding:0.28rem 0.75rem!important;border-radius:5px!important}
-button[kind="secondary"]{font-size:0.76rem!important;padding:0.22rem 0.55rem!important;border-radius:5px!important}
-.stCaption p{font-size:0.71rem!important;color:#7a8899!important;margin:0.03rem 0!important}
-button[data-baseweb="tab"]{font-size:0.79rem!important;padding:0.28rem 0.75rem!important}
-hr{margin:0.35rem 0!important;opacity:0.15!important}
-div[data-testid="stForm"]{padding:0.45rem!important;border-radius:6px!important}
-div[data-testid="stDataFrame"]{font-size:0.77rem!important}
+.block-container{padding:0.4rem 0.8rem 1rem!important;max-width:1400px!important}
+
+/* ── Typography ── */
+h1{font-size:1.3rem!important;font-weight:700!important;letter-spacing:-0.3px!important;margin-bottom:0!important}
+h2{font-size:1rem!important;font-weight:600!important;margin:0.25rem 0 0.1rem!important}
+h3{font-size:0.92rem!important;font-weight:600!important;margin:0.25rem 0 0.08rem!important}
+h4{font-size:0.84rem!important;font-weight:500!important;margin:0.15rem 0 0.05rem!important}
+
+/* ── Expanders ── */
+.streamlit-expanderHeader{font-size:0.84rem!important;font-weight:500!important;padding:0.35rem 0.6rem!important}
+div[data-testid="stExpander"]{margin-bottom:0.15rem!important;border-radius:6px!important}
+div[data-testid="stExpanderDetails"]{padding:0.4rem 0.6rem 0.5rem!important}
+
+/* ── Form inputs — compact for mobile ── */
+div[data-testid="stTextInput"]>label,
+div[data-testid="stNumberInput"]>label,
+div[data-testid="stSelectbox"]>label,
+div[data-testid="stDateInput"]>label,
+div[data-testid="stTextArea"]>label{font-size:0.71rem!important;font-weight:500!important;margin-bottom:0.01rem!important;color:#8b9ab0!important}
+div[data-testid="stTextInput"] input,
+div[data-testid="stNumberInput"] input{font-size:0.8rem!important;padding:0.2rem 0.4rem!important}
+div[data-testid="stSelectbox"]>div>div{font-size:0.8rem!important;min-height:1.8rem!important}
+div[data-testid="stDateInput"] input{font-size:0.8rem!important;padding:0.2rem!important}
+textarea{font-size:0.8rem!important}
+
+/* ── Number input ± buttons ── */
+div[data-testid="stNumberInput"] button{width:1.4rem!important;height:1.4rem!important;font-size:0.75rem!important}
+
+/* ── Metrics ── */
+div[data-testid="stMetric"]{padding:0.3rem 0.45rem!important}
+div[data-testid="stMetricLabel"] p{font-size:0.67rem!important;color:#8b9ab0!important}
+div[data-testid="stMetricValue"]{font-size:1rem!important;font-weight:600!important}
+div[data-testid="stMetricDelta"]{font-size:0.67rem!important}
+
+/* ── Buttons ── */
+button[kind="primary"]{font-size:0.76rem!important;padding:0.25rem 0.7rem!important;border-radius:5px!important}
+button[kind="secondary"]{font-size:0.73rem!important;padding:0.2rem 0.5rem!important;border-radius:5px!important}
+
+/* ── Tabs ── */
+button[data-baseweb="tab"]{font-size:0.76rem!important;padding:0.25rem 0.65rem!important}
+
+/* ── Misc ── */
+.stCaption p{font-size:0.69rem!important;color:#7a8899!important;margin:0.02rem 0!important}
+hr{margin:0.3rem 0!important;opacity:0.12!important}
+div[data-testid="stForm"]{padding:0.4rem!important;border-radius:6px!important}
+div[data-testid="stDataFrame"]{font-size:0.76rem!important}
+
+/* ── Mobile ── */
+@media (max-width: 640px) {
+  .block-container{padding:0.3rem 0.4rem 0.8rem!important}
+  div[data-testid="stMetricValue"]{font-size:0.9rem!important}
+  .streamlit-expanderHeader{font-size:0.8rem!important;padding:0.3rem 0.5rem!important}
+  button[kind="primary"]{font-size:0.72rem!important;padding:0.22rem 0.5rem!important}
+  div[data-testid="stTextInput"] input,
+  div[data-testid="stNumberInput"] input{font-size:0.78rem!important}
+}
 </style>""", unsafe_allow_html=True)
 
 
@@ -1368,6 +1422,7 @@ claves = [
     "inversiones_ibkr",
     "ibkr_cash_movimientos",
     "ibkr_transferencias",
+    "proyectos_gastos",
 ]
 for clave in claves:
     cargar(clave)
@@ -1880,22 +1935,29 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
     # ==================================================
     # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
     # ==================================================
-with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False):
+with st.expander("📌 2. Ingresos y gastos fijos / recurrentes", expanded=False):
 
     with st.expander("💰 Ingresos recurrentes", expanded=False):
 
         with st.form("form_ingreso_rec"):
-            _ci1, _ci2 = st.columns(2)
+            _ci1, _ci2, _ci3 = st.columns(3)
             with _ci1:
-                nombre   = st.text_input("📝 Nombre", "Sueldo")
+                nombre    = st.text_input("📝 Nombre", "Sueldo")
                 fecha_ini = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
             with _ci2:
-                monto = st.number_input("💰 Monto mensual (S/)", min_value=0.0, step=100.0)
-                dia   = st.number_input("📆 Día de cobro", 1, 31, 25)
+                _ir_moneda = st.selectbox("💱 Moneda", ["PEN", "USD"], key="ir_moneda")
+                monto = st.number_input("💰 Monto mensual", min_value=0.0, step=100.0)
+            with _ci3:
+                dia = st.number_input("📆 Día de cobro", 1, 31, 25)
+                _ir_ctas_nombres = list(cuentas_debito_map.keys())
+                _ir_cta = st.selectbox("🏦 Cuenta destino", _ir_ctas_nombres, key="ir_cta_destino")
             if st.form_submit_button("➕ Agregar ingreso recurrente", use_container_width=True, type="primary"):
                 st.session_state["ingresos_recurrentes"].append({
-                    "nombre": nombre, "monto": monto,
-                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": dia
+                    "nombre": nombre, "monto": float(monto),
+                    "moneda": _ir_moneda,
+                    "cuenta_destino": cuentas_debito_map.get(_ir_cta, "principal"),
+                    "cuenta_destino_nombre": _ir_cta,
+                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia)
                 })
                 guardar("ingresos_recurrentes")
                 st.rerun()
@@ -1909,10 +1971,13 @@ with st.expander("📌 2. Gastos e ingresos recurrentes / fijos", expanded=False
                 df_ing_rec, use_container_width=True, hide_index=True,
                 num_rows="dynamic", height=min(38 * len(df_ing_rec) + 46, 300),
                 column_config={
-                    "nombre":       st.column_config.TextColumn("📝 Nombre", width="medium"),
-                    "monto":        st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=100.0, format="S/ %,.0f", width="small"),
-                    "fecha_inicio": st.column_config.DateColumn("📅 Desde", width="small"),
-                    "dia_cobro":    st.column_config.NumberColumn("📆 Día cobro", min_value=1, max_value=31, width="small"),
+                    "nombre":               st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=100.0, format="%,.0f", width="small"),
+                    "moneda":               st.column_config.SelectboxColumn("💱 Moneda", options=["PEN","USD"], width="small"),
+                    "cuenta_destino_nombre":st.column_config.TextColumn("🏦 Cuenta", width="medium"),
+                    "fecha_inicio":         st.column_config.DateColumn("📅 Desde", width="small"),
+                    "dia_cobro":            st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
+                    "cuenta_destino":       None,
                 }, key="editor_ingresos_recurrentes"
             )
             if st.button("💾 Guardar cambios — Ingresos recurrentes", type="primary"):
@@ -2480,13 +2545,15 @@ normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta
                     concepto  = st.text_input("📝 Concepto")
                     fecha     = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_ingreso_puntual")
                 with _ip2:
-                    monto     = st.number_input("💰 Monto (S/)", min_value=0.0)
+                    _ip_moneda = st.selectbox("💱 Moneda", ["PEN","USD","EUR"], key="ip_moneda")
+                    monto     = st.number_input("💰 Monto", min_value=0.0)
                     _ip_cta   = st.selectbox("🏦 Cuenta que recibe", _ip_ctas_nombres, key="cta_ingreso_puntual")
                 if st.form_submit_button("➕ Agregar ingreso puntual", use_container_width=True, type="primary"):
                     st.session_state["ingresos_puntuales"].append({
                         "concepto":          concepto,
                         "fecha":             fecha.isoformat(),
-                        "monto":             monto,
+                        "monto":             float(monto),
+                        "moneda":            _ip_moneda,
                         "cuenta_destino_id": _ip_ctas[_ip_cta],
                         "cuenta_destino_nombre": _ip_cta,
                     })
