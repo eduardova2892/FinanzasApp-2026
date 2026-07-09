@@ -1170,13 +1170,11 @@ with st.sidebar:
 _h_col1, _h_col2 = st.columns([6, 1])
 with _h_col1:
     st.markdown(
-        """<div style='display:flex;align-items:center;gap:0.6rem;margin-bottom:0.1rem'>
-        <span style='font-size:2rem'>🐷</span>
-        <div>
-            <span style='font-size:1.4rem;font-weight:700;letter-spacing:-0.5px'>Mi Chanchito</span>
-            <span style='font-size:0.72rem;color:#8b9ab0;margin-left:0.5rem'>Control personal de finanzas</span>
-        </div>
-        </div>""",
+        "<div style='display:flex;align-items:center;gap:0.6rem;margin-bottom:0.1rem'>"
+        "<span style='font-size:2rem'>🐷</span>"
+        "<div><span style='font-size:1.4rem;font-weight:700;letter-spacing:-0.5px'>Mi Chanchito</span>"
+        "<span style='font-size:0.72rem;color:#8b9ab0;margin-left:0.5rem'>Control personal de finanzas</span>"
+        "</div></div>",
         unsafe_allow_html=True
     )
 with _h_col2:
@@ -2263,7 +2261,7 @@ with ctrl_col1:
     if _h_max_date > fechas.max():
         st.caption(f"⚠️ Simulación hasta {fechas.max().strftime('%d/%m/%Y')}.")
 with ctrl_col2:
-    mostrar_ahorro_total = st.toggle("💰 Ahorro total + IBKR", value=True, key="tog_total")
+    mostrar_ahorro_total = st.toggle("💰 Ahorro total", value=True, key="tog_total")
 with ctrl_col3:
     mostrar_secundarias = st.toggle("🏦 Cuentas secundarias", value=True, key="tog_sec")
 
@@ -2330,9 +2328,9 @@ if mostrar_secundarias:
 if mostrar_ahorro_total:
     fig_evol.add_trace(go.Scatter(
         x=fechas_vis, y=serie_ahorro_total[mask],
-        name="Ahorro total + IBKR",
+        name="Ahorro total",
         line=dict(color=PALETTE["total"], width=2, dash="dot"),
-        hovertemplate="<b>Ahorro total + IBKR</b><br>%{x|%d %b %Y}<br>S/ %{y:,.0f}<extra></extra>"
+        hovertemplate="<b>Ahorro total</b><br>%{x|%d %b %Y}<br>S/ %{y:,.0f}<extra></extra>"
     ))
 
 # Área de relleno bajo la cuenta principal
@@ -2372,7 +2370,7 @@ fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
 st.plotly_chart(fig_evol, use_container_width=True)
 
-with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
+with st.expander("📊 Gráficos detallados y resultados", expanded=False):
     
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 2 — META MENSUAL DE AHORRO
@@ -3112,7 +3110,7 @@ limpiar_gastos_invalidos()
 # ══════════════════════════════════════════════════════
 # 1. CONFIGURACIÓN INICIAL
 # ══════════════════════════════════════════════════════
-with st.expander("⚙️ 1. Configuración", expanded=False):
+with st.expander("⚙️ Configuración", expanded=False):
 
     # ── Simulación ──────────────────────────────────────
     with st.expander("📅 Período de simulación", expanded=True):
@@ -3524,7 +3522,7 @@ with st.expander("⚙️ 1. Configuración", expanded=False):
     # ==================================================
     # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
     # ==================================================
-with st.expander("📌 2. Ingresos y gastos fijos / recurrentes", expanded=False):
+with st.expander("📌 Ingresos y gastos fijos / recurrentes", expanded=False):
 
     with st.expander("💰 Ingresos recurrentes", expanded=False):
 
@@ -3738,7 +3736,7 @@ with st.expander("📌 2. Ingresos y gastos fijos / recurrentes", expanded=False
 # ==================================================
 
 
-with st.expander("🧾 3. Movimientos y gastos variables", expanded=False):
+with st.expander("🧾 Movimientos y gastos variables", expanded=False):
 
 
     # ==================================================
@@ -4442,7 +4440,7 @@ normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta
 # ==================================================
 # 4. FUNCIONES AVANZADAS
 # ==================================================
-with st.expander("🧩 4. Funciones avanzadas", expanded=False):
+with st.expander("🧩 Funciones avanzadas", expanded=False):
 
 # 4.1 SIMULACIÓN DE PRÉSTAMOS
     # ==================================================
