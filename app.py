@@ -1510,6 +1510,20 @@ limpiar_gastos_invalidos()
 
 
 
+# ── Helper: ciclo de facturación de tarjeta ─────────────────
+def obtener_ciclo_tarjeta(fecha, dia_cierre):
+    fecha = pd.to_datetime(fecha)
+
+    if fecha.day <= dia_cierre:
+        cierre = fecha.replace(day=dia_cierre)
+    else:
+        cierre = (fecha + pd.DateOffset(months=1)).replace(day=dia_cierre)
+
+    inicio = cierre - pd.DateOffset(months=1) + timedelta(days=1)
+
+    return inicio.date(), cierre.date()
+
+
 # ── Pre-carga de variables para el gráfico principal ─────────
 _conf_top = st.session_state.get("configuracion", {})
 _fi_str = _conf_top.get("fecha_inicio_sim")
@@ -6110,17 +6124,6 @@ with st.expander("🧩 4. Funciones avanzadas", expanded=False):
         # ==================================================
 # 4. CÁLCULOS BASE
 # ==================================================
-def obtener_ciclo_tarjeta(fecha, dia_cierre):
-    fecha = pd.to_datetime(fecha)
-
-    if fecha.day <= dia_cierre:
-        cierre = fecha.replace(day=dia_cierre)
-    else:
-        cierre = (fecha + pd.DateOffset(months=1)).replace(day=dia_cierre)
-
-    inicio = cierre - pd.DateOffset(months=1) + timedelta(days=1)
-
-    return inicio.date(), cierre.date()
 
 
 # ==================================================
