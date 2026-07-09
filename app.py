@@ -1185,22 +1185,6 @@ with _h_col2:
             st.session_state.pop(_k, None)
         st.rerun()
 st.divider()
-# ── Resumen rápido de saldos (KPIs siempre visibles) ────────
-try:
-    _cfg_q = st.session_state.get("configuracion", {})
-    _saldo_ini_q = float(_cfg_q.get("ahorro_inicial", 0))
-    _ncp_q = _cfg_q.get("nombre_cuenta_principal", "Cuenta principal")
-    _kc1, _kc2, _kc3, _kc4 = st.columns(4)
-    _kc1.metric("💰 " + _ncp_q[:20], f"S/ {_saldo_ini_q:,.0f}")
-    _ctas_q = st.session_state.get("cuentas_ahorro", [])
-    for _idx_q, _cq in enumerate(_ctas_q[:3]):
-        [_kc2, _kc3, _kc4][_idx_q].metric(
-            "🏦 " + str(_cq.get("nombre",""))[:18],
-            f"S/ {float(_cq.get('saldo_inicial', 0)):,.0f}"
-        )
-    st.divider()
-except Exception:
-    pass
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
@@ -2262,7 +2246,7 @@ with st.expander("⚖️ Ajustar saldo real de hoy", expanded=False):
             st.rerun()
 
 # ── Controles del gráfico ──────────────────────────────────
-ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([2, 1, 1, 1])
+ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([2, 1, 1])
 with ctrl_col1:
     _opciones_h = [1, 2, 3, 6, 9, 12, 18, 24, 36, 48, 60]
     _labels_h   = {1:"1 mes", 2:"2 meses", 3:"3 meses", 6:"6 meses",
@@ -2279,14 +2263,15 @@ with ctrl_col1:
     if _h_max_date > fechas.max():
         st.caption(f"⚠️ Simulación hasta {fechas.max().strftime('%d/%m/%Y')}.")
 with ctrl_col2:
-    mostrar_ahorro_total = st.toggle("💰 Ahorro total", value=True, key="tog_total")
-    mostrar_secundarias = st.toggle("🏦 Secundarias", value=True, key="tog_sec")
+    mostrar_ahorro_total = st.toggle("💰 Ahorro total + IBKR", value=True, key="tog_total")
 with ctrl_col3:
-    mostrar_gastos_fijos = st.toggle("📌 Gastos fijos", value=True, key="tog_fijos")
-    mostrar_ingresos = st.toggle("💵 Ingresos", value=True, key="tog_ingresos")
-with ctrl_col4:
-    mostrar_credito = st.toggle("💳 Crédito", value=True, key="tog_credito")
-    mostrar_debito_var = st.toggle("🧾 Débito var.", value=True, key="tog_debito_var")
+    mostrar_secundarias = st.toggle("🏦 Cuentas secundarias", value=True, key="tog_sec")
+
+# Toggles de series de gasto/ingreso NO aplican al gráfico de saldos (siempre ocultos aquí)
+mostrar_gastos_fijos = False
+mostrar_ingresos = False
+mostrar_credito = False
+mostrar_debito_var = False
 
 # ── Rango Y: auto-calculado + inputs numéricos ───────────────
 # Máximo por defecto = múltiplo de 10k por encima del máximo en el horizonte visible
