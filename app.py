@@ -1509,28 +1509,8 @@ def limpiar_gastos_invalidos():
 limpiar_gastos_invalidos()
 
 
-# ==================================================
-# LIMPIEZA DE GASTOS INVÁLIDOS
-# ==================================================
-def limpiar_gastos_invalidos():
 
-    original = len(st.session_state["gastos_tarjeta"])
-
-    st.session_state["gastos_tarjeta"] = [
-        g for g in st.session_state["gastos_tarjeta"]
-        if float(g.get("monto", 0)) > 0
-    ]
-
-    nuevos = len(st.session_state["gastos_tarjeta"])
-
-    if nuevos != original:
-        guardar("gastos_tarjeta")
-
-
-limpiar_gastos_invalidos()
-
-
-# ── Pre-carga de variables para el gráfico principal ─────
+# ── Pre-carga de variables para el gráfico principal ─────────
 _conf_top = st.session_state.get("configuracion", {})
 _fi_str = _conf_top.get("fecha_inicio_sim")
 _ff_str = _conf_top.get("fecha_fin_sim")
@@ -1539,18 +1519,28 @@ fecha_fin_sim       = date.fromisoformat(_ff_str) if _ff_str else date(2028, 12,
 nombre_cuenta_principal = _conf_top.get("nombre_cuenta_principal", "Cuenta principal")
 ahorro_inicial      = float(_conf_top.get("ahorro_inicial", 0.0))
 _tc_default         = float(_conf_top.get("tipo_cambio_default", 3.80))
-
-# DataFrames base para los cálculos del gráfico (desde session_state)
 df_ing_rec  = pd.DataFrame(st.session_state.get("ingresos_recurrentes", []))
 df_fijos    = pd.DataFrame(st.session_state.get("gastos_fijos", []))
 df_g        = pd.DataFrame(st.session_state.get("gastos_diarios", []))
 df_ing_punt = pd.DataFrame(st.session_state.get("ingresos_puntuales", []))
-# Normalizar fechas si existen
 for _dfx in [df_ing_rec, df_fijos, df_g, df_ing_punt]:
     if not _dfx.empty and "fecha" in _dfx.columns:
         _dfx["fecha"] = pd.to_datetime(_dfx["fecha"], errors="coerce")
     if not _dfx.empty and "monto" in _dfx.columns:
         _dfx["monto"] = pd.to_numeric(_dfx["monto"], errors="coerce").fillna(0)
+
+# PREPARAR GASTOS DE TARJETA PARA CÁLCULOS Y GRÁFICOS
+# ==================================================
+df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
+
+if not df_gt.empty:
+    df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
+    df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
+    df_gt["tipo_gasto"] = "Crédito diario"
+    if "moneda" not in df_gt.columns:
+        df_gt["moneda"] = "PEN"
+    else:
+        df_gt["moneda"] = df_gt["moneda"].fillna("PEN")
 
 gastos_tarjeta_recurrentes_expandido = []
 
@@ -1614,10 +1604,6 @@ fechas = pd.date_range(fecha_inicio_sim, fecha_fin_sim, freq="D")
 # Ingresos y gastos diarios
 if not df_g.empty:
     df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
-    df_gt = df_gt.sort_values(
-    by="fecha",
-    ascending=False
-)
     g_diarios_principal = (
         df_g[df_g.get("cuenta_origen", "principal") == "principal"]
         .groupby("fecha")["monto"]
@@ -3096,6 +3082,26 @@ with st.expander("📊 5. Gráficos detallados y resultados", expanded=False):
         else:
             st.info("Crea un proyecto arriba y empieza a agregar gastos.")
 
+
+# ==================================================
+# LIMPIEZA DE GASTOS INVÁLIDOS
+# ==================================================
+def limpiar_gastos_invalidos():
+
+    original = len(st.session_state["gastos_tarjeta"])
+
+    st.session_state["gastos_tarjeta"] = [
+        g for g in st.session_state["gastos_tarjeta"]
+        if float(g.get("monto", 0)) > 0
+    ]
+
+    nuevos = len(st.session_state["gastos_tarjeta"])
+
+    if nuevos != original:
+        guardar("gastos_tarjeta")
+
+
+limpiar_gastos_invalidos()
 
 # ==================================================
 # CONFIGURACIÓN DE SIMULACIÓN Y CUENTAS DE AHORRO
@@ -6118,15 +6124,3 @@ def obtener_ciclo_tarjeta(fecha, dia_cierre):
 
 
 # ==================================================
-# PREPARAR GASTOS DE TARJETA PARA CÁLCULOS Y GRÁFICOS
-# ==================================================
-df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
-
-if not df_gt.empty:
-    df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
-    df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
-    df_gt["tipo_gasto"] = "Crédito diario"
-    if "moneda" not in df_gt.columns:
-        df_gt["moneda"] = "PEN"
-    else:
-        df_gt["moneda"] = df_gt["moneda"].fillna("PEN")
