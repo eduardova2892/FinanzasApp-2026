@@ -1540,6 +1540,18 @@ nombre_cuenta_principal = _conf_top.get("nombre_cuenta_principal", "Cuenta princ
 ahorro_inicial      = float(_conf_top.get("ahorro_inicial", 0.0))
 _tc_default         = float(_conf_top.get("tipo_cambio_default", 3.80))
 
+# DataFrames base para los cálculos del gráfico (desde session_state)
+df_ing_rec  = pd.DataFrame(st.session_state.get("ingresos_recurrentes", []))
+df_fijos    = pd.DataFrame(st.session_state.get("gastos_fijos", []))
+df_g        = pd.DataFrame(st.session_state.get("gastos_diarios", []))
+df_ing_punt = pd.DataFrame(st.session_state.get("ingresos_puntuales", []))
+# Normalizar fechas si existen
+for _dfx in [df_ing_rec, df_fijos, df_g, df_ing_punt]:
+    if not _dfx.empty and "fecha" in _dfx.columns:
+        _dfx["fecha"] = pd.to_datetime(_dfx["fecha"], errors="coerce")
+    if not _dfx.empty and "monto" in _dfx.columns:
+        _dfx["monto"] = pd.to_numeric(_dfx["monto"], errors="coerce").fillna(0)
+
 gastos_tarjeta_recurrentes_expandido = []
 
 for g in st.session_state["gastos_recurrentes_tarjeta"]:
