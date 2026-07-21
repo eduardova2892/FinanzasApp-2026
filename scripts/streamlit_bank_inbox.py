@@ -483,28 +483,36 @@ def render_bank_gmail_inbox(
 
     st.caption("Marca, ajusta categoría y presiona un botón al final para aplicar — no se recarga en cada clic.")
 
+    editor_df = editor_df.reset_index(drop=True)
+    _ratios = [0.5, 1.0, 0.7, 0.6, 0.8, 2.0, 1.0, 1.3, 0.8]
+
     with st.form(key="form_bank_gmail_pending_review", clear_on_submit=False):
-        edited_df = st.data_editor(
-            editor_df,
-            key=f"bank_gmail_pending_editor_{st.session_state.get('bank_gmail_refresh_token', 0)}",
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            column_config={
-                "importar": st.column_config.CheckboxColumn("Importar"),
-                "fecha": st.column_config.TextColumn("Fecha", disabled=True),
-                "hora": st.column_config.TextColumn("Hora", disabled=True),
-                "banco": st.column_config.TextColumn("Banco", disabled=True),
-                "medio_pago": st.column_config.TextColumn("Medio", disabled=True),
-                "empresa": st.column_config.TextColumn("Empresa / comercio", disabled=True),
-                "monto": st.column_config.NumberColumn("Monto", format="S/ %.2f", disabled=True),
-                "moneda": st.column_config.TextColumn("Moneda", disabled=True),
-                "categoria_final": st.column_config.SelectboxColumn("Categoría", options=categorias),
-                "tarjeta_ultimos4": st.column_config.TextColumn("Tarjeta", disabled=True),
-                "numero_operacion": st.column_config.TextColumn("Operación", disabled=True),
-                "hash_importacion": None,
-            },
-        )
+        _h = st.columns(_ratios)
+        for _c, _lbl in zip(_h, ["Imp.", "Fecha", "Hora", "Banco", "Medio", "Empresa / comercio", "Monto", "Categoría", "Tarjeta"]):
+            _c.caption(f"**{_lbl}**")
+
+        _importar_widgets = {}
+        _categoria_widgets = {}
+
+        for _i, _row in editor_df.iterrows():
+            _hkey = _texto_seguro(_row.get("hash_importacion")) or f"idx{_i}"
+            _c = st.columns(_ratios)
+            _importar_widgets[_i] = _c[0].checkbox(
+                "importar", key=f"gmail_imp_{_hkey}", label_visibility="collapsed"
+            )
+            _c[1].caption(str(_row["fecha"]))
+            _c[2].caption(str(_row["hora"]))
+            _c[3].caption(str(_row["banco"]))
+            _c[4].caption(str(_row["medio_pago"]))
+            _c[5].caption(str(_row["empresa"]))
+            _moneda_r = _texto_seguro(_row.get("moneda")) or "PEN"
+            _c[6].caption(f"{_moneda_r} {float(_row['monto']):.2f}")
+            _cat_actual = _row["categoria_final"] if _row["categoria_final"] in categorias else categorias[0]
+            _categoria_widgets[_i] = _c[7].selectbox(
+                "categoria", categorias, index=categorias.index(_cat_actual),
+                key=f"gmail_cat_{_hkey}", label_visibility="collapsed"
+            )
+            _c[8].caption(str(_row["tarjeta_ultimos4"]))
 
         btn_importar, btn_descartar = st.columns(2)
         with btn_importar:
@@ -518,6 +526,12 @@ def render_bank_gmail_inbox(
                 "🚫 Descartar seleccionados",
                 use_container_width=True,
             )
+
+    edited_df = editor_df.copy()
+    edited_df["importar"] = [_importar_widgets.get(_i, False) for _i in range(len(edited_df))]
+    edited_df["categoria_final"] = [
+        _categoria_widgets.get(_i, edited_df.loc[_i, "categoria_final"]) for _i in range(len(edited_df))
+    ]
 
     if importar_sel:
         seleccionados = edited_df[edited_df["importar"].astype(bool)].copy()
