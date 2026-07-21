@@ -1166,19 +1166,14 @@ with st.sidebar:
             st.session_state.pop(_k, None)
         st.rerun()
 
-# ── Header principal ─────────────────────────────────────────
+# ── Header principal (elementos nativos — se ve en cualquier tema) ──
 _h_col1, _h_col2 = st.columns([6, 1])
 with _h_col1:
-    st.markdown(
-        "<div style='display:flex;align-items:center;gap:0.6rem;margin-bottom:0.1rem'>"
-        "<span style='font-size:2rem'>🐷</span>"
-        "<div><span style='font-size:1.4rem;font-weight:700;letter-spacing:-0.5px'>Mi Chanchito</span>"
-        "<span style='font-size:0.72rem;color:#8b9ab0;margin-left:0.5rem'>Control personal de finanzas</span>"
-        "</div></div>",
-        unsafe_allow_html=True
-    )
+    st.markdown("# 🐷💰 Mi Chanchito")
+    st.caption("Control personal de finanzas")
 with _h_col2:
-    if st.button("🚪 Salir", key="logout_header", help="Cerrar sesión"):
+    st.write("")
+    if st.button("🚪 Salir", key="logout_header", help="Cerrar sesión", use_container_width=True):
         for _k in ["user", "access_token", "refresh_token"]:
             st.session_state.pop(_k, None)
         st.rerun()
@@ -2023,13 +2018,20 @@ MESES_ES = {
 
 # ── Detección de tema light / dark ────────────────────────
 try:
-    _tema = st.get_option("theme.base") or "dark"
+    # st.context.theme.type refleja el tema ACTIVO en tiempo real
+    # (incluye el cambio manual del usuario en el menú ⋮ → Settings)
+    _tema = st.context.theme.type
 except Exception:
-    _tema = "dark"
+    try:
+        _tema = st.get_option("theme.base") or "dark"
+    except Exception:
+        _tema = "dark"
 _is_dark   = (_tema != "light")
-_font_col  = "white"                  if _is_dark else "#1a1a2e"
-_grid_col  = "#1e2530"               if _is_dark else "#d0d0d0"
-_plot_bg   = "rgba(14,17,23,1)"      if _is_dark else "rgba(248,249,250,1)"
+_font_col  = "#e8e8e8"               if _is_dark else "#2b2b3a"
+_grid_col  = "rgba(255,255,255,0.10)" if _is_dark else "rgba(0,0,0,0.12)"
+# Fondo SIEMPRE transparente: adopta automáticamente el color de fondo
+# real de Streamlit sin importar si la detección de tema fue correcta.
+_plot_bg   = "rgba(0,0,0,0)"
 
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
@@ -2310,7 +2312,7 @@ fig_evol = go.Figure()
 fig_evol.add_trace(go.Scatter(
     x=fechas_vis, y=serie_cuenta_principal[mask],
     name=nombre_cuenta_principal,
-    line=dict(color=PALETTE["principal"], width=2.5),
+    line=dict(color=PALETTE["principal"], width=4, shape="spline", smoothing=0.3),
     hovertemplate=f"<b>{nombre_cuenta_principal}</b><br>%{{x|%d %b %Y}}<br>S/ %{{y:,.0f}}<extra></extra>"
 ))
 
@@ -2320,7 +2322,7 @@ if mostrar_secundarias:
         fig_evol.add_trace(go.Scatter(
             x=fechas_vis, y=ss[mask],
             name=f"↳ {nc}",
-            line=dict(color=COLORES_SEC[i % len(COLORES_SEC)], width=1.8, dash="dash"),
+            line=dict(color=COLORES_SEC[i % len(COLORES_SEC)], width=3, dash="dash", shape="spline", smoothing=0.3),
             hovertemplate=f"<b>{nc}</b><br>%{{x|%d %b %Y}}<br>S/ %{{y:,.0f}}<extra></extra>"
         ))
 
@@ -2329,7 +2331,7 @@ if mostrar_ahorro_total:
     fig_evol.add_trace(go.Scatter(
         x=fechas_vis, y=serie_ahorro_total[mask],
         name="Ahorro total",
-        line=dict(color=PALETTE["total"], width=2, dash="dot"),
+        line=dict(color=PALETTE["total"], width=3, dash="dot", shape="spline", smoothing=0.3),
         hovertemplate="<b>Ahorro total</b><br>%{x|%d %b %Y}<br>S/ %{y:,.0f}<extra></extra>"
     ))
 
