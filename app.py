@@ -2360,10 +2360,10 @@ fig_evol.update_layout(
     **PLOTLY_LAYOUT,
     height=540,
     hovermode="x unified",
-    font=dict(color=_font_col, family="Inter, sans-serif", size=15),
     legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02,
             "xanchor": "right", "x": 1, "font": dict(size=14)},
 )
+fig_evol.update_layout(font=dict(color=_font_col, family="Inter, sans-serif", size=15))
 fig_evol.update_yaxes(
     title_text="Saldo (S/)",
     title_font=dict(size=15),
