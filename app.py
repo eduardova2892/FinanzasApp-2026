@@ -2370,7 +2370,712 @@ fig_evol.update_xaxes(showgrid=False, color=_font_col)
 
 st.plotly_chart(fig_evol, use_container_width=True)
 
-with st.expander("📊 Gráficos detallados y resultados", expanded=False):
+# ══════════════════════════════════════════════════════
+# AGREGAR MOVIMIENTO DE HOY (lo más usado)
+# ══════════════════════════════════════════════════════
+with st.expander("➕ Agregar gasto o ingreso de hoy", expanded=True):
+
+
+    # ==================================================
+    # 3.0 IMPORTACIÓN SEMIAUTOMÁTICA DE CORREOS BCP
+    # ==================================================
+    with st.expander("📩 Importar automáticamente desde Gmail", expanded=False):
+        st.caption(
+            "Presiona el botón para leer automáticamente los últimos correos bancarios desde Gmail. "
+            "Luego revisa la bandeja, corrige categorías e importa cada gasto como débito o crédito."
+        )
+        render_bank_gmail_inbox(guardar)
+
+    # ==================================================
+    # 3.1 GASTOS DIARIOS DÉBITO Y CRÉDITO
+    # ==================================================
+    with st.expander("💳 Gasto con débito", expanded=False):
+
+        # ==================================================
+        # GASTOS DIARIOS DÉBITO
+        # ==================================================
+
+        nombre_cuenta_principal = st.session_state["configuracion"].get(
+            "nombre_cuenta_principal",
+            "Cuenta principal"
+        )
+
+        cuentas_debito_map = {nombre_cuenta_principal: "principal"}
+
+        for c in st.session_state["cuentas_ahorro"]:
+            cuentas_debito_map[c["nombre"]] = c["id"]
+
+
+        # ── Gestionar categorías ─────────────────────────────────
+        with st.popover("🏷️ Agregar / eliminar categoría", use_container_width=False):
+            st.markdown("**Categorías guardadas**")
+            _cats = sorted(st.session_state["categorias"])
+            for _c in _cats:
+                _col_c, _col_del = st.columns([4, 1])
+                _col_c.write(_c)
+                if _col_del.button("🗑️", key=f"del_cat_{_c}", help=f"Eliminar {_c}"):
+                    st.session_state["categorias"] = [x for x in st.session_state["categorias"] if x != _c]
+                    guardar("categorias")
+                    st.rerun()
+            st.divider()
+            _nueva_cat_input = st.text_input("➕ Nueva categoría", placeholder="ej: Educación", key="popover_nueva_cat")
+            if st.button("Guardar categoría", key="popover_save_cat", type="primary"):
+                _nc = _nueva_cat_input.strip()
+                if not _nc:
+                    st.warning("Escribe un nombre.")
+                elif _nc in st.session_state["categorias"]:
+                    st.info(f'"{_nc}" ya existe.')
+                else:
+                    st.session_state["categorias"].append(_nc)
+                    st.session_state["categorias"] = sorted(list(set(st.session_state["categorias"])))
+                    guardar("categorias")
+                    st.success(f'✅ "{_nc}" guardada.')
+                    st.rerun()
+
+        with st.form("form_gasto_diario", clear_on_submit=True):
+
+            _col_izq, _col_der = st.columns(2)
+
+            with _col_izq:
+                fecha = st.date_input(
+                    "📅 Fecha",
+                    value=hoy_peru,
+                    key="fecha_gasto_diario_debito"
+                )
+                cuenta_origen_nombre = st.selectbox(
+                    "🏦 Cuenta",
+                    list(cuentas_debito_map.keys()),
+                    key="cuenta_origen_gasto_diario"
+                )
+
+            with _col_der:
+                categoria = st.selectbox(
+                    "🏷️ Categoría",
+                    sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
+                    key="categoria_gasto_diario_debito"
+                )
+                descripcion = st.text_input("📝 Descripción")
+                monto = st.number_input(
+                    "💰 Monto (S/)",
+                    min_value=0.0,
+                    step=1.0,
+                    key="monto_gasto_diario_debito"
+                )
+
+            submitted = st.form_submit_button("➕ Agregar gasto débito", use_container_width=True, type="primary")
+
+            if submitted:
+
+                if not categoria:
+                    st.error("Debes ingresar una categoría válida.")
+                    st.stop()
+
+                if categoria not in st.session_state["categorias"]:
+                    st.session_state["categorias"].append(categoria)
+                    st.session_state["categorias"] = sorted(
+                        list(set(st.session_state["categorias"]))
+                    )
+                    guardar("categorias")
+
+                nuevo_gasto = {
+                    "id": str(uuid.uuid4()),
+                    "fecha": fecha.isoformat(),
+                    "cuenta_origen": cuentas_debito_map.get(cuenta_origen_nombre, "principal"),
+                    "cuenta_origen_nombre": cuenta_origen_nombre,
+                    "categoria": categoria,
+                    "descripcion": descripcion,
+                    "monto": float(monto)
+                }
+
+                st.session_state["gastos_diarios"].append(nuevo_gasto)
+                guardar("gastos_diarios")
+                st.success("Gasto débito agregado correctamente")
+                st.rerun()
+
+        # ==================================================
+        # RESUMEN GASTOS DIARIOS DÉBITO
+        # ==================================================
+        df_g = pd.DataFrame(st.session_state["gastos_diarios"])
+
+        if not df_g.empty:
+
+            if "id" not in df_g.columns:
+                df_g["id"] = None
+            df_g["id"] = df_g["id"].apply(
+                lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
+            )
+            if "cuenta_origen" not in df_g.columns:
+                df_g["cuenta_origen"] = "principal"
+            if "cuenta_origen_nombre" not in df_g.columns:
+                df_g["cuenta_origen_nombre"] = nombre_cuenta_principal
+            df_g["cuenta_origen"] = df_g["cuenta_origen"].fillna("principal")
+            df_g["cuenta_origen_nombre"] = df_g["cuenta_origen_nombre"].fillna(nombre_cuenta_principal)
+            df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
+            df_g["monto"] = pd.to_numeric(df_g["monto"], errors="coerce").fillna(0)
+            df_g = df_g.sort_values(by="fecha", ascending=False).reset_index(drop=True)
+            df_g["fecha"] = df_g["fecha"].dt.date
+
+            _cats_debito = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+
+            _cols_debito_editor = ["id", "fecha", "cuenta_origen", "cuenta_origen_nombre", "categoria", "descripcion", "monto", "hash_importacion"]
+            for _c in _cols_debito_editor:
+                if _c not in df_g.columns:
+                    df_g[_c] = ""
+            df_g_editor = df_g[_cols_debito_editor].copy()
+
+            ed_g = st.data_editor(
+                df_g_editor,
+                use_container_width=True,
+                hide_index=True,
+                num_rows="dynamic",
+                height=min(38 * len(df_g) + 46, 320),
+                column_config={
+                    "id":                   None,
+                    "cuenta_origen":        None,
+                    "fecha":                st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
+                    "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
+                    "categoria":            st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_debito, required=True, width="medium"),
+                    "descripcion":          st.column_config.TextColumn("📝 Descripción", width="large"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=0.1, required=True, format="S/ %,.1f", width="small"),
+                },
+                key="editor_gastos_debito"
+            )
+
+            if st.button("💾 Guardar cambios — Gastos débito", type="primary"):
+                df_editado = ed_g.copy()
+                # Restaurar columnas ocultas que el editor pudo haber perdido
+                for _col in ["id", "cuenta_origen", "hash_importacion"]:
+                    if _col not in df_editado.columns:
+                        df_editado[_col] = df_g[_col].values[:len(df_editado)] if _col in df_g.columns else ""
+                # Asegurar IDs únicos para filas nuevas
+                df_editado["id"] = df_editado["id"].apply(
+                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                )
+                df_editado["cuenta_origen"] = df_editado["cuenta_origen"].fillna("principal")
+                df_editado["descripcion"]   = df_editado["descripcion"].fillna("").astype(str)
+                df_editado["categoria"]     = df_editado["categoria"].fillna("Sin categoría").astype(str)
+                df_editado["monto"]         = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
+                df_editado["fecha"]         = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
+                _cols_final_debito = ["id", "fecha", "cuenta_origen", "cuenta_origen_nombre", "categoria", "descripcion", "monto", "hash_importacion"]
+                for _c in _cols_final_debito:
+                    if _c not in df_editado.columns:
+                        df_editado[_c] = ""
+                st.session_state["gastos_diarios"] = df_editado[_cols_final_debito].to_dict("records")
+                guardar("gastos_diarios")
+                st.success("✅ Guardado.")
+                st.rerun()
+
+        else:
+            st.info("No hay gastos débito registrados.")
+
+    with st.expander("💳 Gasto con tarjeta de crédito", expanded=False):
+
+        # ==================================================
+        # GASTOS DIARIOS CON TARJETA DE CRÉDITO
+        # ==================================================
+
+        if st.session_state["tarjetas"]:
+
+            mapa_tarjetas = {
+                t["nombre"]: t["id"]
+                for t in st.session_state["tarjetas"]
+            }
+
+            with st.form("form_gasto_tarjeta", clear_on_submit=True):
+
+                _col_izq_t, _col_der_t = st.columns(2)
+
+                with _col_izq_t:
+                    fecha = st.date_input(
+                        "📅 Fecha",
+                        value=hoy_peru,
+                        key="fecha_gasto_tarjeta"
+                    )
+                    tarjeta_nombre = st.selectbox(
+                        "💳 Tarjeta",
+                        list(mapa_tarjetas.keys()),
+                        key="tarjeta_gasto_diario"
+                    )
+
+                with _col_der_t:
+                    categoria = st.selectbox(
+                        "🏷️ Categoría",
+                        sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
+                        key="categoria_gasto_tarjeta"
+                    )
+                    descripcion = st.text_input(
+                        "📝 Descripción",
+                        key="descripcion_gasto_tarjeta"
+                    )
+                    _mc, _mm = st.columns([1, 2])
+                    with _mc:
+                        moneda_gt = st.selectbox(
+                            "Moneda",
+                            ["PEN", "USD"],
+                            key="moneda_gasto_tarjeta",
+                            help="USD se convierte al tipo de cambio del día de pago"
+                        )
+                    with _mm:
+                        monto = st.number_input(
+                            "💰 Monto",
+                            min_value=0.0,
+                            step=1.0,
+                            key="monto_gasto_tarjeta"
+                        )
+
+                if st.form_submit_button("➕ Agregar gasto tarjeta", use_container_width=True, type="primary"):
+
+                    if not categoria:
+                        st.error("Debes ingresar una categoría válida.")
+                        st.stop()
+
+                    if categoria not in st.session_state["categorias"]:
+                        st.session_state["categorias"].append(categoria)
+                        st.session_state["categorias"] = sorted(
+                            list(set(st.session_state["categorias"]))
+                        )
+                        guardar("categorias")
+
+                    nuevo_gasto_tarjeta = {
+                        "id": str(uuid.uuid4()),
+                        "fecha": fecha.isoformat(),
+                        "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
+                        "tarjeta_nombre": tarjeta_nombre,
+                        "categoria": categoria,
+                        "descripcion": descripcion,
+                        "moneda": moneda_gt,
+                        "monto": float(monto)
+                    }
+
+                    st.session_state["gastos_tarjeta"].append(nuevo_gasto_tarjeta)
+                    guardar("gastos_tarjeta")
+
+                    st.success("Gasto con tarjeta agregado correctamente")
+                    st.rerun()
+
+            # ==================================================
+            # RESUMEN GASTOS DIARIOS CON TARJETA DE CRÉDITO
+            # ==================================================
+            st.session_state["gastos_tarjeta"] = [
+
+
+
+normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta", [])]
+            df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
+
+            if not df_gt.empty:
+
+                if "id" not in df_gt.columns:
+                    df_gt["id"] = None
+                df_gt["id"] = df_gt["id"].apply(
+                    lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
+                )
+                df_gt = df_gt.drop_duplicates(
+                    subset=["fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "monto"],
+                    keep="first"
+                )
+                df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
+                df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
+                df_gt = df_gt.sort_values("fecha", ascending=False).reset_index(drop=True)
+                df_gt["fecha"] = df_gt["fecha"].dt.date
+
+                _cats_tarjeta = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+                _tarjetas_nombres = [t["nombre"] for t in st.session_state["tarjetas"]]
+
+                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+
+                _cols_tarjeta_editor = ["id", "fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "moneda", "monto", "hash_importacion"]
+                for _c in _cols_tarjeta_editor:
+                    if _c not in df_gt.columns:
+                        df_gt[_c] = ""
+                df_gt_editor = df_gt[_cols_tarjeta_editor].copy()
+
+                ed_gt = st.data_editor(
+                    df_gt_editor,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    height=min(38 * len(df_gt) + 46, 320),
+                    column_config={
+                        "id":             None,
+                        "tarjeta_id":     None,
+                        "fecha":          st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
+                        "tarjeta_nombre": st.column_config.SelectboxColumn("💳 Tarjeta", options=_tarjetas_nombres, required=True, width="small"),
+                        "categoria":      st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_tarjeta, required=True, width="medium"),
+                        "descripcion":    st.column_config.TextColumn("📝 Descripción", width="large"),
+                        "moneda":         st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
+                        "monto":          st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=0.1, required=True, format="%,.1f", width="small"),
+                        "fuente":         None,
+                        "banco":          None,
+                        "medio_pago":     None,
+                        "empresa":        None,
+                        "hora":           None,
+                        "tarjeta_ultimos4": None,
+                        "numero_operacion": None,
+                        "hash_importacion": None,
+                    },
+                    key="editor_gastos_tarjeta"
+                )
+
+                if st.button("💾 Guardar cambios — Gastos tarjeta", type="primary"):
+                    df_editado = ed_gt.copy()
+                    # Restaurar tarjeta_id desde el nombre (puede haber cambiado)
+                    _mapa_id = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+                    df_editado["tarjeta_id"] = df_editado["tarjeta_nombre"].map(_mapa_id).fillna("")
+                    # Asegurar IDs únicos
+                    df_editado["id"] = df_editado.get("id", pd.Series(dtype=str)).apply(
+                        lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
+                    ) if "id" in df_editado.columns else [str(uuid.uuid4()) for _ in range(len(df_editado))]
+                    # Sanear
+                    for _c, _d in {"moneda": "PEN", "descripcion": "", "categoria": "", "tarjeta_nombre": "", "tarjeta_id": ""}.items():
+                        if _c in df_editado.columns:
+                            df_editado[_c] = df_editado[_c].apply(
+                                lambda x: _d if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"]) else str(x)
+                            )
+                    df_editado["monto"] = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
+                    df_editado["fecha"] = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
+                    _cols_final_tarjeta = ["id", "fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "moneda", "monto", "hash_importacion"]
+                    for _c in _cols_final_tarjeta:
+                        if _c not in df_editado.columns:
+                            df_editado[_c] = ""
+                    st.session_state["gastos_tarjeta"] = df_editado[_cols_final_tarjeta].to_dict("records")
+                    guardar("gastos_tarjeta")
+                    st.success("✅ Guardado.")
+                    st.rerun()
+
+            else:
+                st.info("No hay gastos diarios con tarjeta registrados.")
+
+        else:
+            st.warning("Primero debes registrar una tarjeta de crédito.")
+
+    # ==================================================
+    # 3.2 INGRESOS PUNTUALES Y TRANSFERENCIAS
+    # ==================================================
+    with st.expander("💵 Ingreso extra y transferencias", expanded=False):
+
+        # ==================================================
+        # INGRESOS PUNTUALES
+        # ==================================================
+        with st.expander("💵 Ingresos puntuales", expanded=False):
+            # Mapa de cuentas
+            _ip_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+            _ip_ctas = {_ip_ncp: "principal"}
+            for _ipc in st.session_state["cuentas_ahorro"]:
+                _ip_ctas[_ipc["nombre"]] = _ipc["id"]
+            _ip_ctas_nombres = list(_ip_ctas.keys())
+
+            with st.form("form_ingreso_puntual"):
+                _ip1, _ip2 = st.columns(2)
+                with _ip1:
+                    concepto  = st.text_input("📝 Concepto")
+                    fecha     = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_ingreso_puntual")
+                with _ip2:
+                    _ip_moneda = st.selectbox("💱 Moneda", ["PEN","USD","EUR"], key="ip_moneda")
+                    monto     = st.number_input("💰 Monto", min_value=0.0)
+                    _ip_cta   = st.selectbox("🏦 Cuenta que recibe", _ip_ctas_nombres, key="cta_ingreso_puntual")
+                if st.form_submit_button("➕ Agregar ingreso puntual", use_container_width=True, type="primary"):
+                    st.session_state["ingresos_puntuales"].append({
+                        "concepto":          concepto,
+                        "fecha":             fecha.isoformat(),
+                        "monto":             float(monto),
+                        "moneda":            _ip_moneda,
+                        "cuenta_destino_id": _ip_ctas[_ip_cta],
+                        "cuenta_destino_nombre": _ip_cta,
+                    })
+                    guardar("ingresos_puntuales")
+                    st.rerun()
+
+            df_ing_punt = pd.DataFrame(st.session_state["ingresos_puntuales"])
+            if not df_ing_punt.empty:
+                # Asegurar columnas nuevas en registros viejos
+                if "cuenta_destino_id" not in df_ing_punt.columns:
+                    df_ing_punt["cuenta_destino_id"] = "principal"
+                if "cuenta_destino_nombre" not in df_ing_punt.columns:
+                    df_ing_punt["cuenta_destino_nombre"] = _ip_ncp
+                df_ing_punt["cuenta_destino_id"]     = df_ing_punt["cuenta_destino_id"].fillna("principal")
+                df_ing_punt["cuenta_destino_nombre"] = df_ing_punt["cuenta_destino_nombre"].fillna(_ip_ncp)
+                df_ing_punt["fecha"] = pd.to_datetime(df_ing_punt["fecha"], errors="coerce").dt.date
+                df_ing_punt["monto"] = pd.to_numeric(df_ing_punt["monto"], errors="coerce").fillna(0)
+                df_ing_punt = df_ing_punt.sort_values("fecha", ascending=False).reset_index(drop=True)
+                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+                ed_ing_punt = st.data_editor(
+                    df_ing_punt, use_container_width=True, hide_index=True,
+                    num_rows="dynamic", height=min(38 * len(df_ing_punt) + 46, 320),
+                    column_config={
+                        "concepto":              st.column_config.TextColumn("📝 Concepto", width="large"),
+                        "fecha":                 st.column_config.DateColumn("📅 Fecha", width="small"),
+                        "monto":                 st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
+                        "cuenta_destino_nombre": st.column_config.SelectboxColumn("🏦 Cuenta", options=_ip_ctas_nombres, width="medium"),
+                        "cuenta_destino_id":     None,
+                    }, key="editor_ingresos_puntuales"
+                )
+                if st.button("💾 Guardar cambios — Ingresos puntuales", type="primary"):
+                    df_ed = ed_ing_punt.copy()
+                    df_ed["fecha"]   = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_ed["monto"]   = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                    df_ed["concepto"]= df_ed["concepto"].fillna("").astype(str)
+                    # Sync cuenta_destino_id from nombre
+                    df_ed["cuenta_destino_id"] = df_ed["cuenta_destino_nombre"].map(
+                        lambda n: _ip_ctas.get(str(n), "principal")
+                    )
+                    st.session_state["ingresos_puntuales"] = (
+                        df_ed.dropna(subset=["fecha"])
+                             .sort_values("fecha", ascending=False)
+                             .to_dict("records")
+                    )
+                    guardar("ingresos_puntuales")
+                    st.success("✅ Guardado.")
+                    st.rerun()
+            else:
+                st.info("No hay ingresos puntuales registrados.")
+
+        with st.expander("🔁 Transferencias entre cuentas", expanded=False):
+            nombre_cuenta_principal = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+            cuentas_map = {nombre_cuenta_principal: "principal"}
+            for c in st.session_state["cuentas_ahorro"]:
+                cuentas_map[c["nombre"]] = c["id"]
+
+            with st.form("form_transferencia"):
+                _tr1, _tr2 = st.columns(2)
+                with _tr1:
+                    fecha   = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_transferencia")
+                    origen  = st.selectbox("🏦 Cuenta origen",  list(cuentas_map.keys()), key="transferencia_origen")
+                with _tr2:
+                    monto   = st.number_input("💰 Monto (S/)", min_value=0.0, key="monto_transferencia")
+                    destino = st.selectbox("➡️ Cuenta destino", list(cuentas_map.keys()), key="transferencia_destino")
+                if st.form_submit_button("➕ Registrar transferencia", use_container_width=True, type="primary"):
+                    if origen == destino:
+                        st.warning("Origen y destino deben ser distintos.")
+                    else:
+                        st.session_state["transferencias"].append({
+                            "fecha": fecha.isoformat(), "origen": cuentas_map[origen],
+                            "destino": cuentas_map[destino], "monto": monto
+                        })
+                        guardar("transferencias")
+                        st.rerun()
+
+            df_transf = pd.DataFrame(st.session_state["transferencias"])
+            if not df_transf.empty:
+                df_transf["fecha"] = pd.to_datetime(df_transf["fecha"], errors="coerce").dt.date
+                df_transf["monto"] = pd.to_numeric(df_transf["monto"], errors="coerce").fillna(0)
+                df_transf = df_transf.sort_values("fecha", ascending=False).reset_index(drop=True)
+                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+                ed = st.data_editor(
+                    df_transf, use_container_width=True, hide_index=True,
+                    num_rows="dynamic", height=min(38 * len(df_transf) + 46, 300),
+                    column_config={
+                        "fecha":   st.column_config.DateColumn("📅 Fecha", width="small"),
+                        "origen":  st.column_config.TextColumn("🏦 Origen", width="small"),
+                        "destino": st.column_config.TextColumn("➡️ Destino", width="small"),
+                        "monto":   st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
+                    }, key="editor_transferencias"
+                )
+                if st.button("💾 Guardar cambios — Transferencias", type="primary"):
+                    df_ed = ed.copy()
+                    df_ed["fecha"] = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
+                    df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                    st.session_state["transferencias"] = df_ed.dropna(subset=["fecha"]).sort_values("fecha", ascending=False).to_dict("records")
+                    guardar("transferencias")
+                    st.success("✅ Guardado.")
+                    st.rerun()
+            else:
+                st.info("No hay transferencias registradas.")
+
+    with st.expander("🔄 Gastos reembolsables", expanded=False):
+        st.caption("Registra gastos que otra persona o empresa te devolverá. No se suman a tus gastos personales. Al marcarlos como reembolsados, el monto se registra automáticamente como ingreso puntual.")
+
+        _remb_list  = st.session_state.get("gastos_reembolsables", [])
+        _remb_pend  = [r for r in _remb_list if r.get("estado") == "pendiente"]
+        _remb_total = sum(
+            float(r["monto"]) * (_tc_default if r.get("moneda") == "USD" else 1.0)
+            for r in _remb_pend
+        ) if _remb_pend else 0.0
+
+        if _remb_pend:
+            st.info(
+                "Tienes " + str(len(_remb_pend)) + " gasto(s) pendiente(s) de reembolso"
+                " por un total de S/ " + f"{_remb_total:,.0f}"
+            )
+
+        # Mapas de cuentas y tarjetas
+                # Mapas de cuentas y tarjetas
+        _r_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        _r_ctas = {_r_ncp: "principal"}
+        for _rc in st.session_state["cuentas_ahorro"]:
+            _r_ctas[_rc["nombre"]] = _rc["id"]
+        _r_tarjs = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+
+        # ── Selector de medio FUERA del form → renderizado condicional real ──
+        _medio_sel = st.radio(
+            "Medio de pago del gasto",
+            ["💳 Débito", "💳 Tarjeta de crédito"],
+            horizontal=True, key="remb_medio_radio"
+        )
+        _es_cred_f = (_medio_sel == "💳 Tarjeta de crédito")
+
+        with st.form("form_reembolsable", clear_on_submit=True):
+            _rr1, _rr2 = st.columns(2)
+            with _rr1:
+                _r_fecha    = st.date_input("Fecha del gasto", value=hoy_peru, key="fecha_reembolsable")
+                _r_desc     = st.text_input("Descripcion", placeholder="ej: Taxi para reunion con cliente")
+                _r_empresa  = st.text_input("Quien reembolsa", placeholder="ej: Mi empresa")
+                _r_fecha_esp = st.date_input("Fecha esperada de reembolso",
+                                              value=hoy_peru + timedelta(days=14),
+                                              key="fecha_esp_reembolsable")
+            with _rr2:
+                if _es_cred_f:
+                    _r_tarj_n = st.selectbox("Tarjeta de crédito usada",
+                                              list(_r_tarjs.keys()) if _r_tarjs else ["(agrega una tarjeta primero)"],
+                                              key="tarj_remb_origen")
+                    _r_cta_origen_n = ""
+                else:
+                    _r_cta_origen_n = st.selectbox("Cuenta débito de origen",
+                                                    list(_r_ctas.keys()), key="cta_remb_origen")
+                    _r_tarj_n = ""
+                _r_cta_remb = st.selectbox("Cuenta que recibe el reembolso",
+                                            list(_r_ctas.keys()), key="cta_remb_destino")
+                _rm_c, _rm_m = st.columns([1, 2])
+                with _rm_c:
+                    _r_moneda = st.selectbox("Moneda", ["PEN", "USD"], key="moneda_reembolsable")
+                with _rm_m:
+                    _r_monto = st.number_input("Monto", min_value=0.0, step=1.0, key="monto_reembolsable")
+
+            if st.form_submit_button("Agregar gasto reembolsable", use_container_width=True, type="primary"):
+                if _r_monto > 0 and _r_desc.strip():
+                    _tarj_id_r   = _r_tarjs.get(_r_tarj_n, "") if _es_cred_f else ""
+                    _cta_orig_id = _r_ctas.get(_r_cta_origen_n, "principal") if not _es_cred_f else ""
+                    st.session_state["gastos_reembolsables"].append({
+                        "id":                      str(uuid.uuid4()),
+                        "fecha":                   _r_fecha.isoformat(),
+                        "descripcion":             _r_desc.strip(),
+                        "empresa":                 _r_empresa.strip(),
+                        "medio_pago":              "Tarjeta de credito" if _es_cred_f else "Debito",
+                        "tarjeta_nombre":          _r_tarj_n if _es_cred_f else "",
+                        "tarjeta_id":              _tarj_id_r,
+                        "cuenta_origen_nombre":    _r_cta_origen_n if not _es_cred_f else "",
+                        "cuenta_origen_id":        _cta_orig_id,
+                        "cuenta_reembolso_nombre": _r_cta_remb,
+                        "cuenta_reembolso_id":     _r_ctas.get(_r_cta_remb, "principal"),
+                        "moneda":                  _r_moneda,
+                        "monto":                   float(_r_monto),
+                        "fecha_esperada":          _r_fecha_esp.isoformat(),
+                        "estado":                  "pendiente",
+                        "fecha_reembolso":         None,
+                    })
+                    guardar("gastos_reembolsables")
+                    st.success("Gasto reembolsable registrado.")
+                    st.rerun()
+                else:
+                    st.warning("Completa descripcion y monto.")
+
+        df_remb = pd.DataFrame(st.session_state.get("gastos_reembolsables", []))
+        if not df_remb.empty:
+            df_remb["fecha"]          = pd.to_datetime(df_remb["fecha"],          errors="coerce").dt.date
+            df_remb["fecha_esperada"] = pd.to_datetime(df_remb["fecha_esperada"], errors="coerce").dt.date
+            df_remb["monto"]          = pd.to_numeric(df_remb["monto"],           errors="coerce").fillna(0)
+
+            _tab_pend, _tab_done = st.tabs(["Pendientes de reembolso", "Reembolsados"])
+
+            with _tab_pend:
+                _df_pend = df_remb[df_remb["estado"] == "pendiente"].copy().reset_index(drop=True)
+                if not _df_pend.empty:
+                    for _idx, _row in _df_pend.iterrows():
+                        _mon     = _row.get("moneda", "PEN")
+                        _monto_s = ("USD " + f"{_row['monto']:,.2f}") if _mon == "USD" else ("S/ " + f"{_row['monto']:,.1f}")
+                        _desc_s  = str(_row["descripcion"])
+                        _es_cred = _row.get("medio_pago","") == "Tarjeta de credito"
+                        _origen_s = (str(_row.get("tarjeta_nombre","")) if _es_cred
+                                     else str(_row.get("cuenta_origen_nombre",""))) or "—"
+                        _remb_s  = str(_row.get("cuenta_reembolso_nombre","—"))
+                        _fkey = "fecha_remb_" + str(_row["id"])
+                        _bkey = "btn_remb_"   + str(_row["id"])
+                        _dkey = "btn_del_"    + str(_row["id"])
+
+                        _ca, _cb, _cc, _cd = st.columns([3, 2, 2, 1])
+                        _tip = "Tarjeta: " if _es_cred else "Debito: "
+                        _ca.caption("**" + _desc_s + "**")
+                        _ca.caption(_tip + _origen_s + " | Reembolso a: " + _remb_s)
+                        _cb.caption(_monto_s + " | " + str(_row["fecha"]))
+                        with _cc:
+                            _val_esp = _row["fecha_esperada"] if pd.notna(_row["fecha_esperada"]) else hoy_peru
+                            _fecha_esp_edit = st.date_input("Fecha esperada", value=_val_esp,
+                                                             key="esp_" + str(_row["id"]))
+                            if _fecha_esp_edit != _row["fecha_esperada"]:
+                                for _r in st.session_state["gastos_reembolsables"]:
+                                    if _r["id"] == _row["id"]:
+                                        _r["fecha_esperada"] = _fecha_esp_edit.isoformat()
+                                        break
+                                guardar("gastos_reembolsables")
+                                st.rerun()
+                            _fecha_remb_input = st.date_input("Fecha real reembolso",
+                                                               value=_fecha_esp_edit, key=_fkey)
+                            if st.button("Reembolsado", key=_bkey, use_container_width=True):
+                                for _r in st.session_state["gastos_reembolsables"]:
+                                    if _r["id"] == _row["id"]:
+                                        _r["estado"] = "reembolsado"
+                                        _r["fecha_reembolso"] = _fecha_remb_input.isoformat()
+                                        break
+                                _tc_remb    = _tc_default if _mon == "USD" else 1.0
+                                _monto_remb = float(_row["monto"]) * _tc_remb
+                                _cta_remb_id = _row.get("cuenta_reembolso_id", "principal") or "principal"
+                                st.session_state["ingresos_puntuales"].append({
+                                    "concepto":          "Reembolso: " + _desc_s + " (a " + _remb_s + ")",
+                                    "fecha":             _fecha_remb_input.isoformat(),
+                                    "monto":             _monto_remb,
+                                    "cuenta_destino_id": _cta_remb_id,
+                                })
+                                guardar("gastos_reembolsables")
+                                guardar("ingresos_puntuales")
+                                st.rerun()
+                        with _cd:
+                            st.write("")
+                            if st.button("Del", key=_dkey, help="Eliminar", use_container_width=True):
+                                st.session_state["gastos_reembolsables"] = [
+                                    _r for _r in st.session_state["gastos_reembolsables"]
+                                    if _r["id"] != str(_row["id"])
+                                ]
+                                guardar("gastos_reembolsables")
+                                st.rerun()
+                        st.divider()
+                else:
+                    st.success("No tienes gastos reembolsables pendientes.")
+
+            with _tab_done:
+                _df_done = df_remb[df_remb["estado"] == "reembolsado"].copy().reset_index(drop=True)
+                if not _df_done.empty:
+                    _df_done["fecha_reembolso"] = pd.to_datetime(_df_done["fecha_reembolso"], errors="coerce").dt.date
+                    for _idx2, _row2 in _df_done.iterrows():
+                        _mon2   = _row2.get("moneda", "PEN")
+                        _monto2 = ("USD " + f"{_row2['monto']:,.2f}") if _mon2 == "USD" else ("S/ " + f"{_row2['monto']:,.1f}")
+                        _dkey2  = "btn_del_done_" + str(_row2["id"])
+                        _da, _db, _dc = st.columns([4, 2, 1])
+                        _da.caption("**" + str(_row2["descripcion"]) + "** | " + str(_row2.get("empresa","—")))
+                        _da.caption("Reembolso a: " + str(_row2.get("cuenta_reembolso_nombre","—")))
+                        _db.caption(_monto2 + " | " + str(_row2.get("fecha_reembolso","—")))
+                        with _dc:
+                            st.write("")
+                            if st.button("Del", key=_dkey2, help="Eliminar", use_container_width=True):
+                                st.session_state["gastos_reembolsables"] = [
+                                    _r for _r in st.session_state["gastos_reembolsables"]
+                                    if _r["id"] != str(_row2["id"])
+                                ]
+                                guardar("gastos_reembolsables")
+                                st.rerun()
+                        st.divider()
+                else:
+                    st.info("Aun no tienes reembolsos completados.")
+        else:
+                st.info("No hay gastos reembolsables registrados.")
+
+# ══════════════════════════════════════════════════════
+# ANÁLISIS DETALLADO (para revisar cuando quieras)
+# ══════════════════════════════════════════════════════
+with st.expander("📊 Análisis y gráficos detallados", expanded=False):
     
     # ─────────────────────────────────────────────────────────
     # SECCIÓN 2 — META MENSUAL DE AHORRO
@@ -3080,37 +3785,220 @@ with st.expander("📊 Gráficos detallados y resultados", expanded=False):
             st.info("Crea un proyecto arriba y empieza a agregar gastos.")
 
 
-# ==================================================
-# LIMPIEZA DE GASTOS INVÁLIDOS
-# ==================================================
-def limpiar_gastos_invalidos():
 
-    original = len(st.session_state["gastos_tarjeta"])
-
-    st.session_state["gastos_tarjeta"] = [
-        g for g in st.session_state["gastos_tarjeta"]
-        if float(g.get("monto", 0)) > 0
-    ]
-
-    nuevos = len(st.session_state["gastos_tarjeta"])
-
-    if nuevos != original:
-        guardar("gastos_tarjeta")
-
-
-limpiar_gastos_invalidos()
-
-# ==================================================
-# CONFIGURACIÓN DE SIMULACIÓN Y CUENTAS DE AHORRO
-# ==================================================
-
-# ==================================================
-# 1. CONFIGURACIÓN INICIAL
-# ==================================================
 # ══════════════════════════════════════════════════════
-# 1. CONFIGURACIÓN INICIAL
+# CONFIGURACIÓN — normalmente se hace una sola vez
 # ══════════════════════════════════════════════════════
-with st.expander("⚙️ Configuración", expanded=False):
+with st.expander("🔁 Sueldo y gastos recurrentes (se configura una sola vez)", expanded=False):
+
+    with st.expander("💰 Ingresos recurrentes", expanded=False):
+
+        # Construir mapa de cuentas disponibles
+        _ncp_ir = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        _cuentas_debito_map_ir = {_ncp_ir: "principal"}
+        for _c_ir in st.session_state.get("cuentas_ahorro", []):
+            _cuentas_debito_map_ir[_c_ir["nombre"]] = _c_ir["id"]
+
+        with st.form("form_ingreso_rec"):
+            _ci1, _ci2, _ci3 = st.columns(3)
+            with _ci1:
+                nombre    = st.text_input("📝 Nombre", "Sueldo")
+                fecha_ini = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
+            with _ci2:
+                _ir_moneda = st.selectbox("💱 Moneda", ["PEN", "USD"], key="ir_moneda")
+                monto = st.number_input("💰 Monto mensual", min_value=0.0, step=100.0)
+            with _ci3:
+                dia = st.number_input("📆 Día de cobro", 1, 31, 25)
+                _ir_ctas_nombres = list(_cuentas_debito_map_ir.keys())
+                _ir_cta = st.selectbox("🏦 Cuenta destino", _ir_ctas_nombres, key="ir_cta_destino")
+            if st.form_submit_button("➕ Agregar ingreso recurrente", use_container_width=True, type="primary"):
+                st.session_state["ingresos_recurrentes"].append({
+                    "nombre": nombre, "monto": float(monto),
+                    "moneda": _ir_moneda,
+                    "cuenta_destino": _cuentas_debito_map_ir.get(_ir_cta, "principal"),
+                    "cuenta_destino_nombre": _ir_cta,
+                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia)
+                })
+                guardar("ingresos_recurrentes")
+                st.rerun()
+
+        df_ing_rec = pd.DataFrame(st.session_state["ingresos_recurrentes"])
+        if not df_ing_rec.empty:
+            df_ing_rec["fecha_inicio"] = pd.to_datetime(df_ing_rec["fecha_inicio"], errors="coerce").dt.date
+            df_ing_rec["monto"] = pd.to_numeric(df_ing_rec["monto"], errors="coerce").fillna(0)
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+            ed_ing_rec = st.data_editor(
+                df_ing_rec, use_container_width=True, hide_index=True,
+                num_rows="dynamic", height=min(38 * len(df_ing_rec) + 46, 300),
+                column_config={
+                    "nombre":               st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=100.0, format="%,.0f", width="small"),
+                    "moneda":               st.column_config.SelectboxColumn("💱 Moneda", options=["PEN","USD"], width="small"),
+                    "cuenta_destino_nombre":st.column_config.TextColumn("🏦 Cuenta", width="medium"),
+                    "fecha_inicio":         st.column_config.DateColumn("📅 Desde", width="small"),
+                    "dia_cobro":            st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
+                    "cuenta_destino":       None,
+                }, key="editor_ingresos_recurrentes"
+            )
+            if st.button("💾 Guardar cambios — Ingresos recurrentes", type="primary"):
+                df_ed = ed_ing_rec.copy()
+                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
+                df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
+                df_ed["dia_cobro"] = pd.to_numeric(df_ed["dia_cobro"], errors="coerce").fillna(1).astype(int)
+                df_ed["nombre"] = df_ed["nombre"].fillna("").astype(str)
+                st.session_state["ingresos_recurrentes"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
+                guardar("ingresos_recurrentes")
+                st.success("✅ Guardado.")
+                st.rerun()
+        else:
+            st.info("No hay ingresos recurrentes registrados.")
+
+    with st.expander("💰 Gastos recurrentes con débito", expanded=False):
+
+        nombre_cuenta_principal = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+        cuentas_debito_map = {nombre_cuenta_principal: "principal"}
+        for c in st.session_state["cuentas_ahorro"]:
+            cuentas_debito_map[c["nombre"]] = c["id"]
+
+        with st.form("form_gasto_fijo"):
+            _cf1, _cf2 = st.columns(2)
+            with _cf1:
+                nombre             = st.text_input("📝 Nombre")
+                fecha_ini          = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
+                cuenta_origen_nombre = st.selectbox("🏦 Cuenta de origen", list(cuentas_debito_map.keys()), key="cuenta_origen_gasto_fijo")
+            with _cf2:
+                monto = st.number_input("💰 Monto mensual (S/)", min_value=0.0, step=10.0)
+                dia   = st.number_input("📆 Día de cobro", 1, 31, 5)
+            if st.form_submit_button("➕ Agregar gasto fijo débito", use_container_width=True, type="primary"):
+                st.session_state["gastos_fijos"].append({
+                    "id": str(uuid.uuid4()), "nombre": nombre, "monto": float(monto),
+                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia),
+                    "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
+                    "cuenta_origen_nombre": cuenta_origen_nombre
+                })
+                guardar("gastos_fijos")
+                st.rerun()
+
+        df_fijos = pd.DataFrame(st.session_state["gastos_fijos"])
+        if not df_fijos.empty:
+            df_fijos["fecha_inicio"] = pd.to_datetime(df_fijos["fecha_inicio"], errors="coerce").dt.date
+            df_fijos["monto"] = pd.to_numeric(df_fijos["monto"], errors="coerce").fillna(0)
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+            ed_fijos = st.data_editor(
+                df_fijos, use_container_width=True, hide_index=True,
+                num_rows="dynamic", height=min(38 * len(df_fijos) + 46, 300),
+                column_config={
+                    "id":                   None,
+                    "cuenta_origen":        None,
+                    "nombre":               st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=10.0, format="S/ %,.0f", width="small"),
+                    "dia_cobro":            st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
+                    "fecha_inicio":         st.column_config.DateColumn("📅 Desde", width="small"),
+                    "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
+                }, key="editor_gastos_fijos"
+            )
+            if st.button("💾 Guardar cambios — Gastos fijos débito", type="primary"):
+                df_ed = ed_fijos.copy()
+                _ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
+                def _san(x, d): return d if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"]) else str(x)
+                df_ed["id"]                   = df_ed["id"].apply(lambda x: _san(x, str(uuid.uuid4())) if "id" in df_ed.columns else str(uuid.uuid4()))
+                df_ed["cuenta_origen"]        = df_ed.get("cuenta_origen", pd.Series(dtype=str)).apply(lambda x: _san(x, "principal"))
+                df_ed["cuenta_origen_nombre"] = df_ed.get("cuenta_origen_nombre", pd.Series(dtype=str)).apply(lambda x: _san(x, _ncp))
+                df_ed["monto"]    = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0.0)
+                df_ed["dia_cobro"]= pd.to_numeric(df_ed["dia_cobro"], errors="coerce").fillna(1).astype(int)
+                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
+                st.session_state["gastos_fijos"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
+                guardar("gastos_fijos")
+                st.success("✅ Guardado.")
+                st.rerun()
+        else:
+            st.info("No hay gastos fijos registrados.")
+
+    with st.expander("💳 Gastos recurrentes con tarjeta de crédito", expanded=False):
+
+        if not st.session_state["tarjetas"]:
+            st.info("Primero agrega una tarjeta en la sección de Configuración.")
+        else:
+         mapa_tarjetas = {
+            t["nombre"]: t["id"]
+            for t in st.session_state["tarjetas"]
+         }
+
+        # ==================================================
+        # GASTOS RECURRENTES CON TARJETA
+        # ==================================================
+        
+        with st.form("form_gasto_recurrente_tarjeta"):
+            _gr1, _gr2 = st.columns(2)
+            with _gr1:
+                nombre        = st.text_input("📝 Nombre", "Gimnasio")
+                tarjeta_nombre = st.selectbox("💳 Tarjeta", list(mapa_tarjetas.keys()), key="tarjeta_gasto_recurrente")
+                fecha_inicio  = st.date_input("📅 Fecha inicio", fecha_inicio_sim, key="fecha_inicio_gasto_recurrente_tarjeta")
+                fecha_fin     = st.date_input("📅 Fecha fin", fecha_fin_sim, key="fecha_fin_gasto_recurrente_tarjeta")
+            with _gr2:
+                _cats_grt = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+                categoria  = st.selectbox("🏷️ Categoría", _cats_grt, key="categoria_gasto_rec_tarjeta")
+                _mc2, _mm2 = st.columns([1, 2])
+                with _mc2:
+                    moneda_rec = st.selectbox("💱", ["PEN", "USD"], key="moneda_gasto_recurrente_tarjeta")
+                with _mm2:
+                    monto = st.number_input("💰 Monto mensual", min_value=0.0, step=10.0, key="monto_gasto_recurrente_tarjeta")
+                dia_cargo = st.number_input("📆 Día de cargo", 1, 31, 15, key="dia_cargo_gasto_recurrente_tarjeta")
+            if st.form_submit_button("➕ Agregar gasto recurrente tarjeta", use_container_width=True, type="primary"):
+                st.session_state["gastos_recurrentes_tarjeta"].append({
+                    "id": str(uuid.uuid4()), "nombre": nombre,
+                    "tarjeta_id": mapa_tarjetas[tarjeta_nombre], "tarjeta_nombre": tarjeta_nombre,
+                    "categoria": categoria, "moneda": moneda_rec, "monto": float(monto),
+                    "dia_cargo": int(dia_cargo), "fecha_inicio": fecha_inicio.isoformat(), "fecha_fin": fecha_fin.isoformat()
+                })
+                guardar("gastos_recurrentes_tarjeta")
+                st.rerun()
+
+        df_grt = pd.DataFrame(st.session_state["gastos_recurrentes_tarjeta"])
+        if not df_grt.empty:
+            df_grt["fecha_inicio"] = pd.to_datetime(df_grt["fecha_inicio"], errors="coerce").dt.date
+            df_grt["fecha_fin"]    = pd.to_datetime(df_grt["fecha_fin"],    errors="coerce").dt.date
+            df_grt["monto"]        = pd.to_numeric(df_grt["monto"], errors="coerce").fillna(0)
+            _cats_grt_ed = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
+            _tars_ed     = [t["nombre"] for t in st.session_state["tarjetas"]]
+            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
+            ed_grt = st.data_editor(
+                df_grt, use_container_width=True, hide_index=True,
+                num_rows="dynamic", height=min(38 * len(df_grt) + 46, 300),
+                column_config={
+                    "id":            None,
+                    "tarjeta_id":    None,
+                    "nombre":        st.column_config.TextColumn("📝 Nombre", width="medium"),
+                    "tarjeta_nombre":st.column_config.SelectboxColumn("💳 Tarjeta", options=_tars_ed, width="small"),
+                    "categoria":     st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_grt_ed, width="medium"),
+                    "moneda":        st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
+                    "monto":         st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=10.0, format="S/ %,.0f", width="small"),
+                    "dia_cargo":     st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
+                    "fecha_inicio":  st.column_config.DateColumn("📅 Desde", width="small"),
+                    "fecha_fin":     st.column_config.DateColumn("📅 Hasta", width="small"),
+                }, key="editor_gastos_recurrentes_tarjeta"
+            )
+            if st.button("💾 Guardar cambios — Gastos recurrentes tarjeta", type="primary"):
+                df_ed = ed_grt.copy()
+                _mapa_id = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
+                df_ed["tarjeta_id"]   = df_ed["tarjeta_nombre"].map(_mapa_id).fillna("")
+                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
+                df_ed["fecha_fin"]    = pd.to_datetime(df_ed["fecha_fin"],    errors="coerce").dt.strftime("%Y-%m-%d")
+                df_ed["monto"]        = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0.0)
+                df_ed["dia_cargo"]    = pd.to_numeric(df_ed["dia_cargo"], errors="coerce").fillna(1).astype(int)
+                for _c in ["id"]:
+                    if _c in df_ed.columns:
+                        df_ed[_c] = df_ed[_c].apply(lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x))
+                    else:
+                        df_ed[_c] = [str(uuid.uuid4()) for _ in range(len(df_ed))]
+                st.session_state["gastos_recurrentes_tarjeta"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
+                guardar("gastos_recurrentes_tarjeta")
+                st.success("✅ Guardado.")
+                st.rerun()
+        else:
+                st.info("No hay gastos recurrentes con tarjeta registrados.")
+
+with st.expander("⚙️ Cuentas, tarjetas y configuración", expanded=False):
 
     # ── Simulación ──────────────────────────────────────
     with st.expander("📅 Período de simulación", expanded=True):
@@ -3519,932 +4407,16 @@ with st.expander("⚙️ Configuración", expanded=False):
                 st.success(f"✅ {len(_nuevas_cats)} categorías guardadas.")
                 st.rerun()
 
-    # ==================================================
-    # 2. INGRESOS Y GASTOS RECURRENTES / FIJOS
-    # ==================================================
-with st.expander("📌 Ingresos y gastos fijos / recurrentes", expanded=False):
-
-    with st.expander("💰 Ingresos recurrentes", expanded=False):
-
-        # Construir mapa de cuentas disponibles
-        _ncp_ir = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-        _cuentas_debito_map_ir = {_ncp_ir: "principal"}
-        for _c_ir in st.session_state.get("cuentas_ahorro", []):
-            _cuentas_debito_map_ir[_c_ir["nombre"]] = _c_ir["id"]
-
-        with st.form("form_ingreso_rec"):
-            _ci1, _ci2, _ci3 = st.columns(3)
-            with _ci1:
-                nombre    = st.text_input("📝 Nombre", "Sueldo")
-                fecha_ini = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
-            with _ci2:
-                _ir_moneda = st.selectbox("💱 Moneda", ["PEN", "USD"], key="ir_moneda")
-                monto = st.number_input("💰 Monto mensual", min_value=0.0, step=100.0)
-            with _ci3:
-                dia = st.number_input("📆 Día de cobro", 1, 31, 25)
-                _ir_ctas_nombres = list(_cuentas_debito_map_ir.keys())
-                _ir_cta = st.selectbox("🏦 Cuenta destino", _ir_ctas_nombres, key="ir_cta_destino")
-            if st.form_submit_button("➕ Agregar ingreso recurrente", use_container_width=True, type="primary"):
-                st.session_state["ingresos_recurrentes"].append({
-                    "nombre": nombre, "monto": float(monto),
-                    "moneda": _ir_moneda,
-                    "cuenta_destino": _cuentas_debito_map_ir.get(_ir_cta, "principal"),
-                    "cuenta_destino_nombre": _ir_cta,
-                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia)
-                })
-                guardar("ingresos_recurrentes")
-                st.rerun()
-
-        df_ing_rec = pd.DataFrame(st.session_state["ingresos_recurrentes"])
-        if not df_ing_rec.empty:
-            df_ing_rec["fecha_inicio"] = pd.to_datetime(df_ing_rec["fecha_inicio"], errors="coerce").dt.date
-            df_ing_rec["monto"] = pd.to_numeric(df_ing_rec["monto"], errors="coerce").fillna(0)
-            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-            ed_ing_rec = st.data_editor(
-                df_ing_rec, use_container_width=True, hide_index=True,
-                num_rows="dynamic", height=min(38 * len(df_ing_rec) + 46, 300),
-                column_config={
-                    "nombre":               st.column_config.TextColumn("📝 Nombre", width="medium"),
-                    "monto":                st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=100.0, format="%,.0f", width="small"),
-                    "moneda":               st.column_config.SelectboxColumn("💱 Moneda", options=["PEN","USD"], width="small"),
-                    "cuenta_destino_nombre":st.column_config.TextColumn("🏦 Cuenta", width="medium"),
-                    "fecha_inicio":         st.column_config.DateColumn("📅 Desde", width="small"),
-                    "dia_cobro":            st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
-                    "cuenta_destino":       None,
-                }, key="editor_ingresos_recurrentes"
-            )
-            if st.button("💾 Guardar cambios — Ingresos recurrentes", type="primary"):
-                df_ed = ed_ing_rec.copy()
-                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
-                df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
-                df_ed["dia_cobro"] = pd.to_numeric(df_ed["dia_cobro"], errors="coerce").fillna(1).astype(int)
-                df_ed["nombre"] = df_ed["nombre"].fillna("").astype(str)
-                st.session_state["ingresos_recurrentes"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
-                guardar("ingresos_recurrentes")
-                st.success("✅ Guardado.")
-                st.rerun()
-        else:
-            st.info("No hay ingresos recurrentes registrados.")
-
-    with st.expander("💰 Gastos recurrentes con débito", expanded=False):
-
-        nombre_cuenta_principal = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-        cuentas_debito_map = {nombre_cuenta_principal: "principal"}
-        for c in st.session_state["cuentas_ahorro"]:
-            cuentas_debito_map[c["nombre"]] = c["id"]
-
-        with st.form("form_gasto_fijo"):
-            _cf1, _cf2 = st.columns(2)
-            with _cf1:
-                nombre             = st.text_input("📝 Nombre")
-                fecha_ini          = st.date_input("📅 Fecha inicio", fecha_inicio_sim)
-                cuenta_origen_nombre = st.selectbox("🏦 Cuenta de origen", list(cuentas_debito_map.keys()), key="cuenta_origen_gasto_fijo")
-            with _cf2:
-                monto = st.number_input("💰 Monto mensual (S/)", min_value=0.0, step=10.0)
-                dia   = st.number_input("📆 Día de cobro", 1, 31, 5)
-            if st.form_submit_button("➕ Agregar gasto fijo débito", use_container_width=True, type="primary"):
-                st.session_state["gastos_fijos"].append({
-                    "id": str(uuid.uuid4()), "nombre": nombre, "monto": float(monto),
-                    "fecha_inicio": fecha_ini.isoformat(), "dia_cobro": int(dia),
-                    "cuenta_origen": cuentas_debito_map[cuenta_origen_nombre],
-                    "cuenta_origen_nombre": cuenta_origen_nombre
-                })
-                guardar("gastos_fijos")
-                st.rerun()
-
-        df_fijos = pd.DataFrame(st.session_state["gastos_fijos"])
-        if not df_fijos.empty:
-            df_fijos["fecha_inicio"] = pd.to_datetime(df_fijos["fecha_inicio"], errors="coerce").dt.date
-            df_fijos["monto"] = pd.to_numeric(df_fijos["monto"], errors="coerce").fillna(0)
-            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-            ed_fijos = st.data_editor(
-                df_fijos, use_container_width=True, hide_index=True,
-                num_rows="dynamic", height=min(38 * len(df_fijos) + 46, 300),
-                column_config={
-                    "id":                   None,
-                    "cuenta_origen":        None,
-                    "nombre":               st.column_config.TextColumn("📝 Nombre", width="medium"),
-                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=10.0, format="S/ %,.0f", width="small"),
-                    "dia_cobro":            st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
-                    "fecha_inicio":         st.column_config.DateColumn("📅 Desde", width="small"),
-                    "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
-                }, key="editor_gastos_fijos"
-            )
-            if st.button("💾 Guardar cambios — Gastos fijos débito", type="primary"):
-                df_ed = ed_fijos.copy()
-                _ncp = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-                def _san(x, d): return d if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"]) else str(x)
-                df_ed["id"]                   = df_ed["id"].apply(lambda x: _san(x, str(uuid.uuid4())) if "id" in df_ed.columns else str(uuid.uuid4()))
-                df_ed["cuenta_origen"]        = df_ed.get("cuenta_origen", pd.Series(dtype=str)).apply(lambda x: _san(x, "principal"))
-                df_ed["cuenta_origen_nombre"] = df_ed.get("cuenta_origen_nombre", pd.Series(dtype=str)).apply(lambda x: _san(x, _ncp))
-                df_ed["monto"]    = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0.0)
-                df_ed["dia_cobro"]= pd.to_numeric(df_ed["dia_cobro"], errors="coerce").fillna(1).astype(int)
-                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
-                st.session_state["gastos_fijos"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
-                guardar("gastos_fijos")
-                st.success("✅ Guardado.")
-                st.rerun()
-        else:
-            st.info("No hay gastos fijos registrados.")
-
-    with st.expander("💳 Gastos recurrentes con tarjeta de crédito", expanded=False):
-
-        if not st.session_state["tarjetas"]:
-            st.info("Primero agrega una tarjeta en la sección de Configuración.")
-        else:
-         mapa_tarjetas = {
-            t["nombre"]: t["id"]
-            for t in st.session_state["tarjetas"]
-         }
-
-        # ==================================================
-        # GASTOS RECURRENTES CON TARJETA
-        # ==================================================
-        
-        with st.form("form_gasto_recurrente_tarjeta"):
-            _gr1, _gr2 = st.columns(2)
-            with _gr1:
-                nombre        = st.text_input("📝 Nombre", "Gimnasio")
-                tarjeta_nombre = st.selectbox("💳 Tarjeta", list(mapa_tarjetas.keys()), key="tarjeta_gasto_recurrente")
-                fecha_inicio  = st.date_input("📅 Fecha inicio", fecha_inicio_sim, key="fecha_inicio_gasto_recurrente_tarjeta")
-                fecha_fin     = st.date_input("📅 Fecha fin", fecha_fin_sim, key="fecha_fin_gasto_recurrente_tarjeta")
-            with _gr2:
-                _cats_grt = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
-                categoria  = st.selectbox("🏷️ Categoría", _cats_grt, key="categoria_gasto_rec_tarjeta")
-                _mc2, _mm2 = st.columns([1, 2])
-                with _mc2:
-                    moneda_rec = st.selectbox("💱", ["PEN", "USD"], key="moneda_gasto_recurrente_tarjeta")
-                with _mm2:
-                    monto = st.number_input("💰 Monto mensual", min_value=0.0, step=10.0, key="monto_gasto_recurrente_tarjeta")
-                dia_cargo = st.number_input("📆 Día de cargo", 1, 31, 15, key="dia_cargo_gasto_recurrente_tarjeta")
-            if st.form_submit_button("➕ Agregar gasto recurrente tarjeta", use_container_width=True, type="primary"):
-                st.session_state["gastos_recurrentes_tarjeta"].append({
-                    "id": str(uuid.uuid4()), "nombre": nombre,
-                    "tarjeta_id": mapa_tarjetas[tarjeta_nombre], "tarjeta_nombre": tarjeta_nombre,
-                    "categoria": categoria, "moneda": moneda_rec, "monto": float(monto),
-                    "dia_cargo": int(dia_cargo), "fecha_inicio": fecha_inicio.isoformat(), "fecha_fin": fecha_fin.isoformat()
-                })
-                guardar("gastos_recurrentes_tarjeta")
-                st.rerun()
-
-        df_grt = pd.DataFrame(st.session_state["gastos_recurrentes_tarjeta"])
-        if not df_grt.empty:
-            df_grt["fecha_inicio"] = pd.to_datetime(df_grt["fecha_inicio"], errors="coerce").dt.date
-            df_grt["fecha_fin"]    = pd.to_datetime(df_grt["fecha_fin"],    errors="coerce").dt.date
-            df_grt["monto"]        = pd.to_numeric(df_grt["monto"], errors="coerce").fillna(0)
-            _cats_grt_ed = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
-            _tars_ed     = [t["nombre"] for t in st.session_state["tarjetas"]]
-            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-            ed_grt = st.data_editor(
-                df_grt, use_container_width=True, hide_index=True,
-                num_rows="dynamic", height=min(38 * len(df_grt) + 46, 300),
-                column_config={
-                    "id":            None,
-                    "tarjeta_id":    None,
-                    "nombre":        st.column_config.TextColumn("📝 Nombre", width="medium"),
-                    "tarjeta_nombre":st.column_config.SelectboxColumn("💳 Tarjeta", options=_tars_ed, width="small"),
-                    "categoria":     st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_grt_ed, width="medium"),
-                    "moneda":        st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
-                    "monto":         st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=10.0, format="S/ %,.0f", width="small"),
-                    "dia_cargo":     st.column_config.NumberColumn("📆 Día", min_value=1, max_value=31, width="small"),
-                    "fecha_inicio":  st.column_config.DateColumn("📅 Desde", width="small"),
-                    "fecha_fin":     st.column_config.DateColumn("📅 Hasta", width="small"),
-                }, key="editor_gastos_recurrentes_tarjeta"
-            )
-            if st.button("💾 Guardar cambios — Gastos recurrentes tarjeta", type="primary"):
-                df_ed = ed_grt.copy()
-                _mapa_id = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
-                df_ed["tarjeta_id"]   = df_ed["tarjeta_nombre"].map(_mapa_id).fillna("")
-                df_ed["fecha_inicio"] = pd.to_datetime(df_ed["fecha_inicio"], errors="coerce").dt.strftime("%Y-%m-%d")
-                df_ed["fecha_fin"]    = pd.to_datetime(df_ed["fecha_fin"],    errors="coerce").dt.strftime("%Y-%m-%d")
-                df_ed["monto"]        = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0.0)
-                df_ed["dia_cargo"]    = pd.to_numeric(df_ed["dia_cargo"], errors="coerce").fillna(1).astype(int)
-                for _c in ["id"]:
-                    if _c in df_ed.columns:
-                        df_ed[_c] = df_ed[_c].apply(lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x))
-                    else:
-                        df_ed[_c] = [str(uuid.uuid4()) for _ in range(len(df_ed))]
-                st.session_state["gastos_recurrentes_tarjeta"] = df_ed.dropna(subset=["fecha_inicio"]).to_dict("records")
-                guardar("gastos_recurrentes_tarjeta")
-                st.success("✅ Guardado.")
-                st.rerun()
-        else:
-                st.info("No hay gastos recurrentes con tarjeta registrados.")
-
-# ==================================================
-# 3. MOVIMIENTOS Y GASTOS VARIABLES / PUNTUALES
-# ==================================================
-
-
-with st.expander("🧾 Movimientos y gastos variables", expanded=False):
-
-
-    # ==================================================
-    # 3.0 IMPORTACIÓN SEMIAUTOMÁTICA DE CORREOS BCP
-    # ==================================================
-    with st.expander("📩 3.0 Importar gastos desde Gmail bancario", expanded=False):
-        st.caption(
-            "Presiona el botón para leer automáticamente los últimos correos bancarios desde Gmail. "
-            "Luego revisa la bandeja, corrige categorías e importa cada gasto como débito o crédito."
-        )
-        render_bank_gmail_inbox(guardar)
-
-    # ==================================================
-    # 3.1 GASTOS DIARIOS DÉBITO Y CRÉDITO
-    # ==================================================
-    with st.expander("💳 3.1a Gastos diarios débito", expanded=False):
-
-        # ==================================================
-        # GASTOS DIARIOS DÉBITO
-        # ==================================================
-
-        nombre_cuenta_principal = st.session_state["configuracion"].get(
-            "nombre_cuenta_principal",
-            "Cuenta principal"
-        )
-
-        cuentas_debito_map = {nombre_cuenta_principal: "principal"}
-
-        for c in st.session_state["cuentas_ahorro"]:
-            cuentas_debito_map[c["nombre"]] = c["id"]
-
-
-        # ── Gestionar categorías ─────────────────────────────────
-        with st.popover("🏷️ Agregar / eliminar categoría", use_container_width=False):
-            st.markdown("**Categorías guardadas**")
-            _cats = sorted(st.session_state["categorias"])
-            for _c in _cats:
-                _col_c, _col_del = st.columns([4, 1])
-                _col_c.write(_c)
-                if _col_del.button("🗑️", key=f"del_cat_{_c}", help=f"Eliminar {_c}"):
-                    st.session_state["categorias"] = [x for x in st.session_state["categorias"] if x != _c]
-                    guardar("categorias")
-                    st.rerun()
-            st.divider()
-            _nueva_cat_input = st.text_input("➕ Nueva categoría", placeholder="ej: Educación", key="popover_nueva_cat")
-            if st.button("Guardar categoría", key="popover_save_cat", type="primary"):
-                _nc = _nueva_cat_input.strip()
-                if not _nc:
-                    st.warning("Escribe un nombre.")
-                elif _nc in st.session_state["categorias"]:
-                    st.info(f'"{_nc}" ya existe.')
-                else:
-                    st.session_state["categorias"].append(_nc)
-                    st.session_state["categorias"] = sorted(list(set(st.session_state["categorias"])))
-                    guardar("categorias")
-                    st.success(f'✅ "{_nc}" guardada.')
-                    st.rerun()
-
-        with st.form("form_gasto_diario", clear_on_submit=True):
-
-            _col_izq, _col_der = st.columns(2)
-
-            with _col_izq:
-                fecha = st.date_input(
-                    "📅 Fecha",
-                    value=hoy_peru,
-                    key="fecha_gasto_diario_debito"
-                )
-                cuenta_origen_nombre = st.selectbox(
-                    "🏦 Cuenta",
-                    list(cuentas_debito_map.keys()),
-                    key="cuenta_origen_gasto_diario"
-                )
-
-            with _col_der:
-                categoria = st.selectbox(
-                    "🏷️ Categoría",
-                    sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
-                    key="categoria_gasto_diario_debito"
-                )
-                descripcion = st.text_input("📝 Descripción")
-                monto = st.number_input(
-                    "💰 Monto (S/)",
-                    min_value=0.0,
-                    step=1.0,
-                    key="monto_gasto_diario_debito"
-                )
-
-            submitted = st.form_submit_button("➕ Agregar gasto débito", use_container_width=True, type="primary")
-
-            if submitted:
-
-                if not categoria:
-                    st.error("Debes ingresar una categoría válida.")
-                    st.stop()
-
-                if categoria not in st.session_state["categorias"]:
-                    st.session_state["categorias"].append(categoria)
-                    st.session_state["categorias"] = sorted(
-                        list(set(st.session_state["categorias"]))
-                    )
-                    guardar("categorias")
-
-                nuevo_gasto = {
-                    "id": str(uuid.uuid4()),
-                    "fecha": fecha.isoformat(),
-                    "cuenta_origen": cuentas_debito_map.get(cuenta_origen_nombre, "principal"),
-                    "cuenta_origen_nombre": cuenta_origen_nombre,
-                    "categoria": categoria,
-                    "descripcion": descripcion,
-                    "monto": float(monto)
-                }
-
-                st.session_state["gastos_diarios"].append(nuevo_gasto)
-                guardar("gastos_diarios")
-                st.success("Gasto débito agregado correctamente")
-                st.rerun()
-
-        # ==================================================
-        # RESUMEN GASTOS DIARIOS DÉBITO
-        # ==================================================
-        df_g = pd.DataFrame(st.session_state["gastos_diarios"])
-
-        if not df_g.empty:
-
-            if "id" not in df_g.columns:
-                df_g["id"] = None
-            df_g["id"] = df_g["id"].apply(
-                lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
-            )
-            if "cuenta_origen" not in df_g.columns:
-                df_g["cuenta_origen"] = "principal"
-            if "cuenta_origen_nombre" not in df_g.columns:
-                df_g["cuenta_origen_nombre"] = nombre_cuenta_principal
-            df_g["cuenta_origen"] = df_g["cuenta_origen"].fillna("principal")
-            df_g["cuenta_origen_nombre"] = df_g["cuenta_origen_nombre"].fillna(nombre_cuenta_principal)
-            df_g["fecha"] = pd.to_datetime(df_g["fecha"], errors="coerce")
-            df_g["monto"] = pd.to_numeric(df_g["monto"], errors="coerce").fillna(0)
-            df_g = df_g.sort_values(by="fecha", ascending=False).reset_index(drop=True)
-            df_g["fecha"] = df_g["fecha"].dt.date
-
-            _cats_debito = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
-
-            st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-
-            _cols_debito_editor = ["id", "fecha", "cuenta_origen", "cuenta_origen_nombre", "categoria", "descripcion", "monto", "hash_importacion"]
-            for _c in _cols_debito_editor:
-                if _c not in df_g.columns:
-                    df_g[_c] = ""
-            df_g_editor = df_g[_cols_debito_editor].copy()
-
-            ed_g = st.data_editor(
-                df_g_editor,
-                use_container_width=True,
-                hide_index=True,
-                num_rows="dynamic",
-                height=min(38 * len(df_g) + 46, 320),
-                column_config={
-                    "id":                   None,
-                    "cuenta_origen":        None,
-                    "fecha":                st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
-                    "cuenta_origen_nombre": st.column_config.TextColumn("🏦 Cuenta", disabled=True, width="small"),
-                    "categoria":            st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_debito, required=True, width="medium"),
-                    "descripcion":          st.column_config.TextColumn("📝 Descripción", width="large"),
-                    "monto":                st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, step=0.1, required=True, format="S/ %,.1f", width="small"),
-                },
-                key="editor_gastos_debito"
-            )
-
-            if st.button("💾 Guardar cambios — Gastos débito", type="primary"):
-                df_editado = ed_g.copy()
-                # Restaurar columnas ocultas que el editor pudo haber perdido
-                for _col in ["id", "cuenta_origen", "hash_importacion"]:
-                    if _col not in df_editado.columns:
-                        df_editado[_col] = df_g[_col].values[:len(df_editado)] if _col in df_g.columns else ""
-                # Asegurar IDs únicos para filas nuevas
-                df_editado["id"] = df_editado["id"].apply(
-                    lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-                )
-                df_editado["cuenta_origen"] = df_editado["cuenta_origen"].fillna("principal")
-                df_editado["descripcion"]   = df_editado["descripcion"].fillna("").astype(str)
-                df_editado["categoria"]     = df_editado["categoria"].fillna("Sin categoría").astype(str)
-                df_editado["monto"]         = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
-                df_editado["fecha"]         = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                _cols_final_debito = ["id", "fecha", "cuenta_origen", "cuenta_origen_nombre", "categoria", "descripcion", "monto", "hash_importacion"]
-                for _c in _cols_final_debito:
-                    if _c not in df_editado.columns:
-                        df_editado[_c] = ""
-                st.session_state["gastos_diarios"] = df_editado[_cols_final_debito].to_dict("records")
-                guardar("gastos_diarios")
-                st.success("✅ Guardado.")
-                st.rerun()
-
-        else:
-            st.info("No hay gastos débito registrados.")
-
-    with st.expander("💳 3.1b Gastos diarios con tarjeta de crédito", expanded=False):
-
-        # ==================================================
-        # GASTOS DIARIOS CON TARJETA DE CRÉDITO
-        # ==================================================
-
-        if st.session_state["tarjetas"]:
-
-            mapa_tarjetas = {
-                t["nombre"]: t["id"]
-                for t in st.session_state["tarjetas"]
-            }
-
-            with st.form("form_gasto_tarjeta", clear_on_submit=True):
-
-                _col_izq_t, _col_der_t = st.columns(2)
-
-                with _col_izq_t:
-                    fecha = st.date_input(
-                        "📅 Fecha",
-                        value=hoy_peru,
-                        key="fecha_gasto_tarjeta"
-                    )
-                    tarjeta_nombre = st.selectbox(
-                        "💳 Tarjeta",
-                        list(mapa_tarjetas.keys()),
-                        key="tarjeta_gasto_diario"
-                    )
-
-                with _col_der_t:
-                    categoria = st.selectbox(
-                        "🏷️ Categoría",
-                        sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"],
-                        key="categoria_gasto_tarjeta"
-                    )
-                    descripcion = st.text_input(
-                        "📝 Descripción",
-                        key="descripcion_gasto_tarjeta"
-                    )
-                    _mc, _mm = st.columns([1, 2])
-                    with _mc:
-                        moneda_gt = st.selectbox(
-                            "Moneda",
-                            ["PEN", "USD"],
-                            key="moneda_gasto_tarjeta",
-                            help="USD se convierte al tipo de cambio del día de pago"
-                        )
-                    with _mm:
-                        monto = st.number_input(
-                            "💰 Monto",
-                            min_value=0.0,
-                            step=1.0,
-                            key="monto_gasto_tarjeta"
-                        )
-
-                if st.form_submit_button("➕ Agregar gasto tarjeta", use_container_width=True, type="primary"):
-
-                    if not categoria:
-                        st.error("Debes ingresar una categoría válida.")
-                        st.stop()
-
-                    if categoria not in st.session_state["categorias"]:
-                        st.session_state["categorias"].append(categoria)
-                        st.session_state["categorias"] = sorted(
-                            list(set(st.session_state["categorias"]))
-                        )
-                        guardar("categorias")
-
-                    nuevo_gasto_tarjeta = {
-                        "id": str(uuid.uuid4()),
-                        "fecha": fecha.isoformat(),
-                        "tarjeta_id": mapa_tarjetas[tarjeta_nombre],
-                        "tarjeta_nombre": tarjeta_nombre,
-                        "categoria": categoria,
-                        "descripcion": descripcion,
-                        "moneda": moneda_gt,
-                        "monto": float(monto)
-                    }
-
-                    st.session_state["gastos_tarjeta"].append(nuevo_gasto_tarjeta)
-                    guardar("gastos_tarjeta")
-
-                    st.success("Gasto con tarjeta agregado correctamente")
-                    st.rerun()
-
-            # ==================================================
-            # RESUMEN GASTOS DIARIOS CON TARJETA DE CRÉDITO
-            # ==================================================
-            st.session_state["gastos_tarjeta"] = [
-
-
-
-normalizar_gasto_tarjeta_record(x) for x in st.session_state.get("gastos_tarjeta", [])]
-            df_gt = pd.DataFrame(st.session_state["gastos_tarjeta"])
-
-            if not df_gt.empty:
-
-                if "id" not in df_gt.columns:
-                    df_gt["id"] = None
-                df_gt["id"] = df_gt["id"].apply(
-                    lambda x: str(uuid.uuid4()) if pd.isna(x) or x in ["", "None", None] else x
-                )
-                df_gt = df_gt.drop_duplicates(
-                    subset=["fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "monto"],
-                    keep="first"
-                )
-                df_gt["fecha"] = pd.to_datetime(df_gt["fecha"], errors="coerce")
-                df_gt["monto"] = pd.to_numeric(df_gt["monto"], errors="coerce").fillna(0)
-                df_gt = df_gt.sort_values("fecha", ascending=False).reset_index(drop=True)
-                df_gt["fecha"] = df_gt["fecha"].dt.date
-
-                _cats_tarjeta = sorted(st.session_state["categorias"]) if st.session_state["categorias"] else ["Sin categoría"]
-                _tarjetas_nombres = [t["nombre"] for t in st.session_state["tarjetas"]]
-
-                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-
-                _cols_tarjeta_editor = ["id", "fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "moneda", "monto", "hash_importacion"]
-                for _c in _cols_tarjeta_editor:
-                    if _c not in df_gt.columns:
-                        df_gt[_c] = ""
-                df_gt_editor = df_gt[_cols_tarjeta_editor].copy()
-
-                ed_gt = st.data_editor(
-                    df_gt_editor,
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    height=min(38 * len(df_gt) + 46, 320),
-                    column_config={
-                        "id":             None,
-                        "tarjeta_id":     None,
-                        "fecha":          st.column_config.DateColumn("📅 Fecha", required=True, width="small"),
-                        "tarjeta_nombre": st.column_config.SelectboxColumn("💳 Tarjeta", options=_tarjetas_nombres, required=True, width="small"),
-                        "categoria":      st.column_config.SelectboxColumn("🏷️ Categoría", options=_cats_tarjeta, required=True, width="medium"),
-                        "descripcion":    st.column_config.TextColumn("📝 Descripción", width="large"),
-                        "moneda":         st.column_config.SelectboxColumn("💱", options=["PEN", "USD"], width="small"),
-                        "monto":          st.column_config.NumberColumn("💰 Monto", min_value=0.0, step=0.1, required=True, format="%,.1f", width="small"),
-                        "fuente":         None,
-                        "banco":          None,
-                        "medio_pago":     None,
-                        "empresa":        None,
-                        "hora":           None,
-                        "tarjeta_ultimos4": None,
-                        "numero_operacion": None,
-                        "hash_importacion": None,
-                    },
-                    key="editor_gastos_tarjeta"
-                )
-
-                if st.button("💾 Guardar cambios — Gastos tarjeta", type="primary"):
-                    df_editado = ed_gt.copy()
-                    # Restaurar tarjeta_id desde el nombre (puede haber cambiado)
-                    _mapa_id = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
-                    df_editado["tarjeta_id"] = df_editado["tarjeta_nombre"].map(_mapa_id).fillna("")
-                    # Asegurar IDs únicos
-                    df_editado["id"] = df_editado.get("id", pd.Series(dtype=str)).apply(
-                        lambda x: str(uuid.uuid4()) if (x is None or str(x) in ["", "None", "nan"]) else str(x)
-                    ) if "id" in df_editado.columns else [str(uuid.uuid4()) for _ in range(len(df_editado))]
-                    # Sanear
-                    for _c, _d in {"moneda": "PEN", "descripcion": "", "categoria": "", "tarjeta_nombre": "", "tarjeta_id": ""}.items():
-                        if _c in df_editado.columns:
-                            df_editado[_c] = df_editado[_c].apply(
-                                lambda x: _d if (x is None or (isinstance(x, float) and pd.isna(x)) or str(x) in ["", "None", "nan"]) else str(x)
-                            )
-                    df_editado["monto"] = pd.to_numeric(df_editado["monto"], errors="coerce").fillna(0.0)
-                    df_editado["fecha"] = pd.to_datetime(df_editado["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    df_editado = df_editado.dropna(subset=["fecha"]).sort_values("fecha", ascending=False)
-                    _cols_final_tarjeta = ["id", "fecha", "tarjeta_id", "tarjeta_nombre", "categoria", "descripcion", "moneda", "monto", "hash_importacion"]
-                    for _c in _cols_final_tarjeta:
-                        if _c not in df_editado.columns:
-                            df_editado[_c] = ""
-                    st.session_state["gastos_tarjeta"] = df_editado[_cols_final_tarjeta].to_dict("records")
-                    guardar("gastos_tarjeta")
-                    st.success("✅ Guardado.")
-                    st.rerun()
-
-            else:
-                st.info("No hay gastos diarios con tarjeta registrados.")
-
-        else:
-            st.warning("Primero debes registrar una tarjeta de crédito.")
-
-    # ==================================================
-    # 3.2 INGRESOS PUNTUALES Y TRANSFERENCIAS
-    # ==================================================
-    with st.expander("💵 3.2 Ingresos puntuales y transferencias", expanded=False):
-
-        # ==================================================
-        # INGRESOS PUNTUALES
-        # ==================================================
-        with st.expander("💵 Ingresos puntuales", expanded=False):
-            # Mapa de cuentas
-            _ip_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-            _ip_ctas = {_ip_ncp: "principal"}
-            for _ipc in st.session_state["cuentas_ahorro"]:
-                _ip_ctas[_ipc["nombre"]] = _ipc["id"]
-            _ip_ctas_nombres = list(_ip_ctas.keys())
-
-            with st.form("form_ingreso_puntual"):
-                _ip1, _ip2 = st.columns(2)
-                with _ip1:
-                    concepto  = st.text_input("📝 Concepto")
-                    fecha     = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_ingreso_puntual")
-                with _ip2:
-                    _ip_moneda = st.selectbox("💱 Moneda", ["PEN","USD","EUR"], key="ip_moneda")
-                    monto     = st.number_input("💰 Monto", min_value=0.0)
-                    _ip_cta   = st.selectbox("🏦 Cuenta que recibe", _ip_ctas_nombres, key="cta_ingreso_puntual")
-                if st.form_submit_button("➕ Agregar ingreso puntual", use_container_width=True, type="primary"):
-                    st.session_state["ingresos_puntuales"].append({
-                        "concepto":          concepto,
-                        "fecha":             fecha.isoformat(),
-                        "monto":             float(monto),
-                        "moneda":            _ip_moneda,
-                        "cuenta_destino_id": _ip_ctas[_ip_cta],
-                        "cuenta_destino_nombre": _ip_cta,
-                    })
-                    guardar("ingresos_puntuales")
-                    st.rerun()
-
-            df_ing_punt = pd.DataFrame(st.session_state["ingresos_puntuales"])
-            if not df_ing_punt.empty:
-                # Asegurar columnas nuevas en registros viejos
-                if "cuenta_destino_id" not in df_ing_punt.columns:
-                    df_ing_punt["cuenta_destino_id"] = "principal"
-                if "cuenta_destino_nombre" not in df_ing_punt.columns:
-                    df_ing_punt["cuenta_destino_nombre"] = _ip_ncp
-                df_ing_punt["cuenta_destino_id"]     = df_ing_punt["cuenta_destino_id"].fillna("principal")
-                df_ing_punt["cuenta_destino_nombre"] = df_ing_punt["cuenta_destino_nombre"].fillna(_ip_ncp)
-                df_ing_punt["fecha"] = pd.to_datetime(df_ing_punt["fecha"], errors="coerce").dt.date
-                df_ing_punt["monto"] = pd.to_numeric(df_ing_punt["monto"], errors="coerce").fillna(0)
-                df_ing_punt = df_ing_punt.sort_values("fecha", ascending=False).reset_index(drop=True)
-                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-                ed_ing_punt = st.data_editor(
-                    df_ing_punt, use_container_width=True, hide_index=True,
-                    num_rows="dynamic", height=min(38 * len(df_ing_punt) + 46, 320),
-                    column_config={
-                        "concepto":              st.column_config.TextColumn("📝 Concepto", width="large"),
-                        "fecha":                 st.column_config.DateColumn("📅 Fecha", width="small"),
-                        "monto":                 st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
-                        "cuenta_destino_nombre": st.column_config.SelectboxColumn("🏦 Cuenta", options=_ip_ctas_nombres, width="medium"),
-                        "cuenta_destino_id":     None,
-                    }, key="editor_ingresos_puntuales"
-                )
-                if st.button("💾 Guardar cambios — Ingresos puntuales", type="primary"):
-                    df_ed = ed_ing_punt.copy()
-                    df_ed["fecha"]   = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    df_ed["monto"]   = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
-                    df_ed["concepto"]= df_ed["concepto"].fillna("").astype(str)
-                    # Sync cuenta_destino_id from nombre
-                    df_ed["cuenta_destino_id"] = df_ed["cuenta_destino_nombre"].map(
-                        lambda n: _ip_ctas.get(str(n), "principal")
-                    )
-                    st.session_state["ingresos_puntuales"] = (
-                        df_ed.dropna(subset=["fecha"])
-                             .sort_values("fecha", ascending=False)
-                             .to_dict("records")
-                    )
-                    guardar("ingresos_puntuales")
-                    st.success("✅ Guardado.")
-                    st.rerun()
-            else:
-                st.info("No hay ingresos puntuales registrados.")
-
-        with st.expander("🔁 Transferencias entre cuentas", expanded=False):
-            nombre_cuenta_principal = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-            cuentas_map = {nombre_cuenta_principal: "principal"}
-            for c in st.session_state["cuentas_ahorro"]:
-                cuentas_map[c["nombre"]] = c["id"]
-
-            with st.form("form_transferencia"):
-                _tr1, _tr2 = st.columns(2)
-                with _tr1:
-                    fecha   = st.date_input("📅 Fecha", value=hoy_peru, key="fecha_transferencia")
-                    origen  = st.selectbox("🏦 Cuenta origen",  list(cuentas_map.keys()), key="transferencia_origen")
-                with _tr2:
-                    monto   = st.number_input("💰 Monto (S/)", min_value=0.0, key="monto_transferencia")
-                    destino = st.selectbox("➡️ Cuenta destino", list(cuentas_map.keys()), key="transferencia_destino")
-                if st.form_submit_button("➕ Registrar transferencia", use_container_width=True, type="primary"):
-                    if origen == destino:
-                        st.warning("Origen y destino deben ser distintos.")
-                    else:
-                        st.session_state["transferencias"].append({
-                            "fecha": fecha.isoformat(), "origen": cuentas_map[origen],
-                            "destino": cuentas_map[destino], "monto": monto
-                        })
-                        guardar("transferencias")
-                        st.rerun()
-
-            df_transf = pd.DataFrame(st.session_state["transferencias"])
-            if not df_transf.empty:
-                df_transf["fecha"] = pd.to_datetime(df_transf["fecha"], errors="coerce").dt.date
-                df_transf["monto"] = pd.to_numeric(df_transf["monto"], errors="coerce").fillna(0)
-                df_transf = df_transf.sort_values("fecha", ascending=False).reset_index(drop=True)
-                st.caption("✏️ Edita celdas · selecciona fila + **Delete** para borrar · luego **Guardar**")
-                ed = st.data_editor(
-                    df_transf, use_container_width=True, hide_index=True,
-                    num_rows="dynamic", height=min(38 * len(df_transf) + 46, 300),
-                    column_config={
-                        "fecha":   st.column_config.DateColumn("📅 Fecha", width="small"),
-                        "origen":  st.column_config.TextColumn("🏦 Origen", width="small"),
-                        "destino": st.column_config.TextColumn("➡️ Destino", width="small"),
-                        "monto":   st.column_config.NumberColumn("💰 Monto (S/)", min_value=0.0, format="S/ %,.0f", width="small"),
-                    }, key="editor_transferencias"
-                )
-                if st.button("💾 Guardar cambios — Transferencias", type="primary"):
-                    df_ed = ed.copy()
-                    df_ed["fecha"] = pd.to_datetime(df_ed["fecha"], errors="coerce").dt.strftime("%Y-%m-%d")
-                    df_ed["monto"] = pd.to_numeric(df_ed["monto"], errors="coerce").fillna(0)
-                    st.session_state["transferencias"] = df_ed.dropna(subset=["fecha"]).sort_values("fecha", ascending=False).to_dict("records")
-                    guardar("transferencias")
-                    st.success("✅ Guardado.")
-                    st.rerun()
-            else:
-                st.info("No hay transferencias registradas.")
-
-    with st.expander("🔄 3.3 Gastos reembolsables", expanded=False):
-        st.caption("Registra gastos que otra persona o empresa te devolverá. No se suman a tus gastos personales. Al marcarlos como reembolsados, el monto se registra automáticamente como ingreso puntual.")
-
-        _remb_list  = st.session_state.get("gastos_reembolsables", [])
-        _remb_pend  = [r for r in _remb_list if r.get("estado") == "pendiente"]
-        _remb_total = sum(
-            float(r["monto"]) * (_tc_default if r.get("moneda") == "USD" else 1.0)
-            for r in _remb_pend
-        ) if _remb_pend else 0.0
-
-        if _remb_pend:
-            st.info(
-                "Tienes " + str(len(_remb_pend)) + " gasto(s) pendiente(s) de reembolso"
-                " por un total de S/ " + f"{_remb_total:,.0f}"
-            )
-
-        # Mapas de cuentas y tarjetas
-                # Mapas de cuentas y tarjetas
-        _r_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
-        _r_ctas = {_r_ncp: "principal"}
-        for _rc in st.session_state["cuentas_ahorro"]:
-            _r_ctas[_rc["nombre"]] = _rc["id"]
-        _r_tarjs = {t["nombre"]: t["id"] for t in st.session_state["tarjetas"]}
-
-        # ── Selector de medio FUERA del form → renderizado condicional real ──
-        _medio_sel = st.radio(
-            "Medio de pago del gasto",
-            ["💳 Débito", "💳 Tarjeta de crédito"],
-            horizontal=True, key="remb_medio_radio"
-        )
-        _es_cred_f = (_medio_sel == "💳 Tarjeta de crédito")
-
-        with st.form("form_reembolsable", clear_on_submit=True):
-            _rr1, _rr2 = st.columns(2)
-            with _rr1:
-                _r_fecha    = st.date_input("Fecha del gasto", value=hoy_peru, key="fecha_reembolsable")
-                _r_desc     = st.text_input("Descripcion", placeholder="ej: Taxi para reunion con cliente")
-                _r_empresa  = st.text_input("Quien reembolsa", placeholder="ej: Mi empresa")
-                _r_fecha_esp = st.date_input("Fecha esperada de reembolso",
-                                              value=hoy_peru + timedelta(days=14),
-                                              key="fecha_esp_reembolsable")
-            with _rr2:
-                if _es_cred_f:
-                    _r_tarj_n = st.selectbox("Tarjeta de crédito usada",
-                                              list(_r_tarjs.keys()) if _r_tarjs else ["(agrega una tarjeta primero)"],
-                                              key="tarj_remb_origen")
-                    _r_cta_origen_n = ""
-                else:
-                    _r_cta_origen_n = st.selectbox("Cuenta débito de origen",
-                                                    list(_r_ctas.keys()), key="cta_remb_origen")
-                    _r_tarj_n = ""
-                _r_cta_remb = st.selectbox("Cuenta que recibe el reembolso",
-                                            list(_r_ctas.keys()), key="cta_remb_destino")
-                _rm_c, _rm_m = st.columns([1, 2])
-                with _rm_c:
-                    _r_moneda = st.selectbox("Moneda", ["PEN", "USD"], key="moneda_reembolsable")
-                with _rm_m:
-                    _r_monto = st.number_input("Monto", min_value=0.0, step=1.0, key="monto_reembolsable")
-
-            if st.form_submit_button("Agregar gasto reembolsable", use_container_width=True, type="primary"):
-                if _r_monto > 0 and _r_desc.strip():
-                    _tarj_id_r   = _r_tarjs.get(_r_tarj_n, "") if _es_cred_f else ""
-                    _cta_orig_id = _r_ctas.get(_r_cta_origen_n, "principal") if not _es_cred_f else ""
-                    st.session_state["gastos_reembolsables"].append({
-                        "id":                      str(uuid.uuid4()),
-                        "fecha":                   _r_fecha.isoformat(),
-                        "descripcion":             _r_desc.strip(),
-                        "empresa":                 _r_empresa.strip(),
-                        "medio_pago":              "Tarjeta de credito" if _es_cred_f else "Debito",
-                        "tarjeta_nombre":          _r_tarj_n if _es_cred_f else "",
-                        "tarjeta_id":              _tarj_id_r,
-                        "cuenta_origen_nombre":    _r_cta_origen_n if not _es_cred_f else "",
-                        "cuenta_origen_id":        _cta_orig_id,
-                        "cuenta_reembolso_nombre": _r_cta_remb,
-                        "cuenta_reembolso_id":     _r_ctas.get(_r_cta_remb, "principal"),
-                        "moneda":                  _r_moneda,
-                        "monto":                   float(_r_monto),
-                        "fecha_esperada":          _r_fecha_esp.isoformat(),
-                        "estado":                  "pendiente",
-                        "fecha_reembolso":         None,
-                    })
-                    guardar("gastos_reembolsables")
-                    st.success("Gasto reembolsable registrado.")
-                    st.rerun()
-                else:
-                    st.warning("Completa descripcion y monto.")
-
-        df_remb = pd.DataFrame(st.session_state.get("gastos_reembolsables", []))
-        if not df_remb.empty:
-            df_remb["fecha"]          = pd.to_datetime(df_remb["fecha"],          errors="coerce").dt.date
-            df_remb["fecha_esperada"] = pd.to_datetime(df_remb["fecha_esperada"], errors="coerce").dt.date
-            df_remb["monto"]          = pd.to_numeric(df_remb["monto"],           errors="coerce").fillna(0)
-
-            _tab_pend, _tab_done = st.tabs(["Pendientes de reembolso", "Reembolsados"])
-
-            with _tab_pend:
-                _df_pend = df_remb[df_remb["estado"] == "pendiente"].copy().reset_index(drop=True)
-                if not _df_pend.empty:
-                    for _idx, _row in _df_pend.iterrows():
-                        _mon     = _row.get("moneda", "PEN")
-                        _monto_s = ("USD " + f"{_row['monto']:,.2f}") if _mon == "USD" else ("S/ " + f"{_row['monto']:,.1f}")
-                        _desc_s  = str(_row["descripcion"])
-                        _es_cred = _row.get("medio_pago","") == "Tarjeta de credito"
-                        _origen_s = (str(_row.get("tarjeta_nombre","")) if _es_cred
-                                     else str(_row.get("cuenta_origen_nombre",""))) or "—"
-                        _remb_s  = str(_row.get("cuenta_reembolso_nombre","—"))
-                        _fkey = "fecha_remb_" + str(_row["id"])
-                        _bkey = "btn_remb_"   + str(_row["id"])
-                        _dkey = "btn_del_"    + str(_row["id"])
-
-                        _ca, _cb, _cc, _cd = st.columns([3, 2, 2, 1])
-                        _tip = "Tarjeta: " if _es_cred else "Debito: "
-                        _ca.caption("**" + _desc_s + "**")
-                        _ca.caption(_tip + _origen_s + " | Reembolso a: " + _remb_s)
-                        _cb.caption(_monto_s + " | " + str(_row["fecha"]))
-                        with _cc:
-                            _val_esp = _row["fecha_esperada"] if pd.notna(_row["fecha_esperada"]) else hoy_peru
-                            _fecha_esp_edit = st.date_input("Fecha esperada", value=_val_esp,
-                                                             key="esp_" + str(_row["id"]))
-                            if _fecha_esp_edit != _row["fecha_esperada"]:
-                                for _r in st.session_state["gastos_reembolsables"]:
-                                    if _r["id"] == _row["id"]:
-                                        _r["fecha_esperada"] = _fecha_esp_edit.isoformat()
-                                        break
-                                guardar("gastos_reembolsables")
-                                st.rerun()
-                            _fecha_remb_input = st.date_input("Fecha real reembolso",
-                                                               value=_fecha_esp_edit, key=_fkey)
-                            if st.button("Reembolsado", key=_bkey, use_container_width=True):
-                                for _r in st.session_state["gastos_reembolsables"]:
-                                    if _r["id"] == _row["id"]:
-                                        _r["estado"] = "reembolsado"
-                                        _r["fecha_reembolso"] = _fecha_remb_input.isoformat()
-                                        break
-                                _tc_remb    = _tc_default if _mon == "USD" else 1.0
-                                _monto_remb = float(_row["monto"]) * _tc_remb
-                                _cta_remb_id = _row.get("cuenta_reembolso_id", "principal") or "principal"
-                                st.session_state["ingresos_puntuales"].append({
-                                    "concepto":          "Reembolso: " + _desc_s + " (a " + _remb_s + ")",
-                                    "fecha":             _fecha_remb_input.isoformat(),
-                                    "monto":             _monto_remb,
-                                    "cuenta_destino_id": _cta_remb_id,
-                                })
-                                guardar("gastos_reembolsables")
-                                guardar("ingresos_puntuales")
-                                st.rerun()
-                        with _cd:
-                            st.write("")
-                            if st.button("Del", key=_dkey, help="Eliminar", use_container_width=True):
-                                st.session_state["gastos_reembolsables"] = [
-                                    _r for _r in st.session_state["gastos_reembolsables"]
-                                    if _r["id"] != str(_row["id"])
-                                ]
-                                guardar("gastos_reembolsables")
-                                st.rerun()
-                        st.divider()
-                else:
-                    st.success("No tienes gastos reembolsables pendientes.")
-
-            with _tab_done:
-                _df_done = df_remb[df_remb["estado"] == "reembolsado"].copy().reset_index(drop=True)
-                if not _df_done.empty:
-                    _df_done["fecha_reembolso"] = pd.to_datetime(_df_done["fecha_reembolso"], errors="coerce").dt.date
-                    for _idx2, _row2 in _df_done.iterrows():
-                        _mon2   = _row2.get("moneda", "PEN")
-                        _monto2 = ("USD " + f"{_row2['monto']:,.2f}") if _mon2 == "USD" else ("S/ " + f"{_row2['monto']:,.1f}")
-                        _dkey2  = "btn_del_done_" + str(_row2["id"])
-                        _da, _db, _dc = st.columns([4, 2, 1])
-                        _da.caption("**" + str(_row2["descripcion"]) + "** | " + str(_row2.get("empresa","—")))
-                        _da.caption("Reembolso a: " + str(_row2.get("cuenta_reembolso_nombre","—")))
-                        _db.caption(_monto2 + " | " + str(_row2.get("fecha_reembolso","—")))
-                        with _dc:
-                            st.write("")
-                            if st.button("Del", key=_dkey2, help="Eliminar", use_container_width=True):
-                                st.session_state["gastos_reembolsables"] = [
-                                    _r for _r in st.session_state["gastos_reembolsables"]
-                                    if _r["id"] != str(_row2["id"])
-                                ]
-                                guardar("gastos_reembolsables")
-                                st.rerun()
-                        st.divider()
-                else:
-                    st.info("Aun no tienes reembolsos completados.")
-        else:
-                st.info("No hay gastos reembolsables registrados.")
-
-
-# ==================================================
-# ==================================================
-# 4. FUNCIONES AVANZADAS
-# ==================================================
-with st.expander("🧩 Funciones avanzadas", expanded=False):
+# ══════════════════════════════════════════════════════
+# AVANZADO — opcional, solo si lo necesitas
+# ══════════════════════════════════════════════════════
+with st.expander("🧩 Avanzado: préstamos e inversiones (opcional)", expanded=False):
+
+    st.caption("💡 Esta sección es opcional — solo si tienes préstamos que simular o inviertes en bolsa a través de IBKR. Si no es tu caso, puedes ignorarla.")
 
 # 4.1 SIMULACIÓN DE PRÉSTAMOS
     # ==================================================
-    with st.expander("🏦 4.1 Simulación de préstamos", expanded=False):
+    with st.expander("🏦 Simulación de préstamos", expanded=False):
 
         # ── Mapas de cuentas y tarjetas ──────────────────────────────
         _p_ncp  = st.session_state["configuracion"].get("nombre_cuenta_principal", "Cuenta principal")
@@ -4627,7 +4599,7 @@ with st.expander("🧩 Funciones avanzadas", expanded=False):
         # ==================================================
         # 4.2 PORTAFOLIO IBKR
         # ==================================================
-    with st.expander("📈 4.2 IBKR: cash e inversiones", expanded=False):
+    with st.expander("📈 Portafolio de inversiones (IBKR)", expanded=False):
         # Definir _duenos_cfg una sola vez al inicio de la sección 4.2
         # Leer directamente de session_state para asegurar valor más reciente
         _cfg_raw = st.session_state.get("configuracion", {})
@@ -6102,11 +6074,3 @@ with st.expander("🧩 Funciones avanzadas", expanded=False):
                     st.rerun()
                 except Exception as _e:
                     st.error(f"No se pudo guardar el catálogo: {_e}")
-
-        # ──────────────────────────────────────────────
-        # ==================================================
-# 4. CÁLCULOS BASE
-# ==================================================
-
-
-# ==================================================
