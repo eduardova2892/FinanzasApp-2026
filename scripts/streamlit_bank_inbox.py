@@ -348,12 +348,6 @@ def render_bank_gmail_inbox(
     - pending_path: CSV generado por Airflow/Gmail.
     - expanded_history: si True, muestra el histórico expandido.
     """
-    st.markdown("#### 📥 Bandeja Gmail — gastos bancarios detectados")
-    st.caption(
-        "Lee automáticamente tus últimos correos bancarios de Gmail, genera una bandeja pendiente "
-        "y luego te permite importar cada consumo como gasto de débito o crédito."
-    )
-
     with st.container(border=True):
         st.markdown("##### 🔄 Lectura automática desde Gmail")
         c1, c2, c3 = st.columns([1, 1, 2])
@@ -487,42 +481,43 @@ def render_bank_gmail_inbox(
 
     categorias = sorted(st.session_state.get("categorias", [])) or ["Otros"]
 
-    edited_df = st.data_editor(
-        editor_df,
-        key=f"bank_gmail_pending_editor_{st.session_state.get('bank_gmail_refresh_token', 0)}",
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed",
-        column_config={
-            "importar": st.column_config.CheckboxColumn("Importar"),
-            "fecha": st.column_config.TextColumn("Fecha", disabled=True),
-            "hora": st.column_config.TextColumn("Hora", disabled=True),
-            "banco": st.column_config.TextColumn("Banco", disabled=True),
-            "medio_pago": st.column_config.TextColumn("Medio", disabled=True),
-            "empresa": st.column_config.TextColumn("Empresa / comercio", disabled=True),
-            "monto": st.column_config.NumberColumn("Monto", format="S/ %.2f", disabled=True),
-            "moneda": st.column_config.TextColumn("Moneda", disabled=True),
-            "categoria_final": st.column_config.SelectboxColumn("Categoría", options=categorias),
-            "tarjeta_ultimos4": st.column_config.TextColumn("Tarjeta", disabled=True),
-            "numero_operacion": st.column_config.TextColumn("Operación", disabled=True),
-            "hash_importacion": None,
-        },
-    )
+    st.caption("Marca, ajusta categoría y presiona un botón al final para aplicar — no se recarga en cada clic.")
 
-    btn_importar, btn_descartar = st.columns(2)
-    with btn_importar:
-        importar_sel = st.button(
-            "📥 Importar gastos seleccionados",
-            type="primary",
+    with st.form(key="form_bank_gmail_pending_review", clear_on_submit=False):
+        edited_df = st.data_editor(
+            editor_df,
+            key=f"bank_gmail_pending_editor_{st.session_state.get('bank_gmail_refresh_token', 0)}",
+            hide_index=True,
             use_container_width=True,
-            key="btn_importar_gmail_bancos_pendientes",
+            num_rows="fixed",
+            column_config={
+                "importar": st.column_config.CheckboxColumn("Importar"),
+                "fecha": st.column_config.TextColumn("Fecha", disabled=True),
+                "hora": st.column_config.TextColumn("Hora", disabled=True),
+                "banco": st.column_config.TextColumn("Banco", disabled=True),
+                "medio_pago": st.column_config.TextColumn("Medio", disabled=True),
+                "empresa": st.column_config.TextColumn("Empresa / comercio", disabled=True),
+                "monto": st.column_config.NumberColumn("Monto", format="S/ %.2f", disabled=True),
+                "moneda": st.column_config.TextColumn("Moneda", disabled=True),
+                "categoria_final": st.column_config.SelectboxColumn("Categoría", options=categorias),
+                "tarjeta_ultimos4": st.column_config.TextColumn("Tarjeta", disabled=True),
+                "numero_operacion": st.column_config.TextColumn("Operación", disabled=True),
+                "hash_importacion": None,
+            },
         )
-    with btn_descartar:
-        descartar_sel = st.button(
-            "🚫 Descartar seleccionados",
-            use_container_width=True,
-            key="btn_descartar_gmail_bancos_pendientes",
-        )
+
+        btn_importar, btn_descartar = st.columns(2)
+        with btn_importar:
+            importar_sel = st.form_submit_button(
+                "📥 Importar gastos seleccionados",
+                type="primary",
+                use_container_width=True,
+            )
+        with btn_descartar:
+            descartar_sel = st.form_submit_button(
+                "🚫 Descartar seleccionados",
+                use_container_width=True,
+            )
 
     if importar_sel:
         seleccionados = edited_df[edited_df["importar"].astype(bool)].copy()

@@ -2386,10 +2386,6 @@ with st.expander("➕ Agregar gasto o ingreso de hoy", expanded=True):
     # 3.0 IMPORTACIÓN SEMIAUTOMÁTICA DE CORREOS BCP
     # ==================================================
     with st.expander("📩 Importar automáticamente desde Gmail", expanded=False):
-        st.caption(
-            "Presiona el botón para leer automáticamente los últimos correos bancarios desde Gmail. "
-            "Luego revisa la bandeja, corrige categorías e importa cada gasto como débito o crédito."
-        )
         render_bank_gmail_inbox(guardar)
 
     # ==================================================
