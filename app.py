@@ -1183,10 +1183,10 @@ st.markdown("""<style>
 
 /* ── Base ── */
 html,body,[class*="css"]{font-family:'Inter',sans-serif!important}
-.block-container{padding:0.4rem 0.8rem 1rem!important;max-width:1400px!important}
+.block-container{padding:3.2rem 0.8rem 1rem!important;max-width:1400px!important}
 
 /* ── Typography ── */
-h1{font-size:1.3rem!important;font-weight:700!important;letter-spacing:-0.3px!important;margin-bottom:0!important}
+h1{font-size:1.9rem!important;font-weight:800!important;letter-spacing:-0.3px!important;margin-bottom:0!important}
 h2{font-size:1rem!important;font-weight:600!important;margin:0.25rem 0 0.1rem!important}
 h3{font-size:0.92rem!important;font-weight:600!important;margin:0.25rem 0 0.08rem!important}
 h4{font-size:0.84rem!important;font-weight:500!important;margin:0.15rem 0 0.05rem!important}
@@ -1232,7 +1232,7 @@ div[data-testid="stDataFrame"]{font-size:0.76rem!important}
 
 /* ── Mobile ── */
 @media (max-width: 640px) {
-  .block-container{padding:0.3rem 0.4rem 0.8rem!important}
+  .block-container{padding:2.8rem 0.4rem 0.8rem!important}
   div[data-testid="stMetricValue"]{font-size:0.9rem!important}
   .streamlit-expanderHeader{font-size:0.8rem!important;padding:0.3rem 0.5rem!important}
   button[kind="primary"]{font-size:0.72rem!important;padding:0.22rem 0.5rem!important}
@@ -2358,17 +2358,21 @@ if fecha_x_inicio <= hoy <= fecha_x_fin:
 
 fig_evol.update_layout(
     **PLOTLY_LAYOUT,
-    height=520,
+    height=540,
     hovermode="x unified",
-    legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    font=dict(color=_font_col, family="Inter, sans-serif", size=15),
+    legend={**_LEGEND_BASE, "orientation": "h", "yanchor": "bottom", "y": 1.02,
+            "xanchor": "right", "x": 1, "font": dict(size=14)},
 )
 fig_evol.update_yaxes(
     title_text="Saldo (S/)",
+    title_font=dict(size=15),
     gridcolor=_grid_col, tickformat=",d", color=_font_col,
     range=[rango_y1[0], rango_y1[1]],
     nticks=8,
+    tickfont=dict(size=14),
 )
-fig_evol.update_xaxes(showgrid=False, color=_font_col)
+fig_evol.update_xaxes(showgrid=False, color=_font_col, tickfont=dict(size=14))
 
 st.plotly_chart(fig_evol, use_container_width=True)
 
